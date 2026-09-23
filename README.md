@@ -1,9 +1,18 @@
 # Villages
 
-Adds a visible sleeping pose to VoxeLibre villagers while leaving VoxeLibre's
-trading, professions, and existing bed claims in place. Clone this repository
-into Luanti's mods directory. Removing the mod restores the game's default
-villager behavior; it does not change saved bed ownership.
+Adds a visible sleeping pose and slow, bed-limited births to VoxeLibre
+villagers while leaving VoxeLibre's trading, professions, and bed ownership
+format in place. Install the repository as a directory named `villages` in
+Luanti's mods directory (or a world's `worldmods` directory). Removing the mod
+restores the game's default villager behavior; existing child villagers and bed
+claims remain in the world.
+
+A village can produce a child when a valid bed is unclaimed, provided two
+nearby adults own beds and no nearby adult is bedless.
+Automatic births are limited to about one per two game days in a local area.
+Food-triggered breeding also needs a free bed, but does not wait for the slow
+birth timer. Player-owned beds do not count. Spawn eggs and zombie-villager
+curing remain unchanged.
 
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
