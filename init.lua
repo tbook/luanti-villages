@@ -1,5 +1,5 @@
--- Keep VoxeLibre's villager AI, trades, and bed ownership. Only the sleeping
--- pose and its visual assets are adapted from Mineclonia.
+-- Keep VoxeLibre's villager AI, trades, and bed ownership. Add a sleeping pose
+-- adapted from Mineclonia and bed-limited village births.
 local core = minetest
 local MODEL = "villages_villager.b3d"
 local BASE = "villages_villager_base.png^villages_villager_plains.png"
@@ -221,4 +221,6 @@ core.register_on_mods_loaded(function()
 		end
 		return result
 	end
+
+	dofile(core.get_modpath("villages") .. "/births.lua")(def)
 end)
