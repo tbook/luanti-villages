@@ -1,4 +1,4 @@
--- Run with: lua villages/tests/sleep.lua
+-- Run with: lua tests/sleep.lua
 table.copy = table.copy or function(value)
 	local result = {}
 	for key, item in pairs(value) do result[key] = item end
@@ -71,7 +71,7 @@ mcl_mobs = {mob_class = {
 	end,
 }}
 
-dofile("villages/init.lua")
+dofile("init.lua")
 
 local function make_villager(id, is_child)
 	local props = {mesh = "old.b3d", textures = {"old.png"}}

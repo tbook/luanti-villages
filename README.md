@@ -1,9 +1,9 @@
 # Villages
 
 Adds a visible sleeping pose to VoxeLibre villagers while leaving VoxeLibre's
-trading, professions, and existing bed claims in place. Install this directory
-as a Luanti mod alongside VoxeLibre. Removing the mod restores the game's
-default villager behavior; it does not change saved bed ownership.
+trading, professions, and existing bed claims in place. Clone this repository
+into Luanti's mods directory. Removing the mod restores the game's default
+villager behavior; it does not change saved bed ownership.
 
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
