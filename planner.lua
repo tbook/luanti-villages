@@ -67,6 +67,10 @@ function planner.find_path(start, can_stand, goal, options)
 	local range = options.range or 48
 	local max_drop = options.max_drop or 4
 	local max_nodes = options.max_nodes or 4096
+	-- Check level ground first, then a one-node rise, then progressively deeper
+	-- drops. This makes the first valid neighbor the least vertical detour.
+	local vertical_offsets = {0, 1}
+	for drop = 1, max_drop do table.insert(vertical_offsets, -drop) end
 	local open, nodes, closed = {}, {}, {}
 	local start_key = key(start)
 	local start_node = {pos = copy(start), g = 0, f = 0}
@@ -83,7 +87,7 @@ function planner.find_path(start, can_stand, goal, options)
 			if goal(current.pos) then return reconstruct(nodes, current), visited end
 
 			for _, direction in ipairs(directions) do
-				for dy = 1, -max_drop, -1 do
+				for _, dy in ipairs(vertical_offsets) do
 					local next_pos = {
 						x = current.pos.x + direction.x,
 						y = current.pos.y + dy,

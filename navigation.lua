@@ -232,11 +232,14 @@ local function install(def)
 			status = "travelling", mode = "legacy", target = vector.new(candidate), started_at = now,
 			wall_started_at = os.time(),
 		}
-		local function arrived(entity)
-			entity._villages_bed_route = {status = "arrived", target = vector.new(candidate)}
-			entity.order = "sleep"
-			if callback_arrived then return callback_arrived(entity) end
+		local function arrived_at(arrival_target)
+			return function(entity)
+				entity._villages_bed_route = {status = "arrived", target = vector.new(arrival_target)}
+				entity.order = "sleep"
+				if callback_arrived then return callback_arrived(entity) end
+			end
 		end
+		local arrived = arrived_at(candidate)
 		local started = original_gopath(self, candidate, arrived, true)
 		if started or self.state == PATHFINDING then return started end
 		if start_engine_path(self, candidate, engine_path, arrived) then
@@ -244,7 +247,8 @@ local function install(def)
 			return true
 		end
 		local stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
-		if start_engine_path(self, stair_target, stair_path, arrived, true) then
+		if stair_target and start_engine_path(self, stair_target, stair_path, arrived_at(stair_target), true) then
+			self._villages_bed_route.target = vector.new(stair_target)
 			self._villages_bed_route.mode = "planner"
 			return true
 		end
