@@ -68,6 +68,7 @@ local object = {
 			name = "mobs_mc:villager", _id = "villager-1", _profession = "farmer",
 			_bed = {x = 1, y = 0, z = 0}, _jobsite = {x = 4, y = 0, z = 0},
 			order = "sleep", state = "stand", waypoints = {{x = 1}}, _villages_birth_check_day = 3,
+			_villages_bed_route = {status = "travelling", target = {x = 1, y = 0, z = 0}},
 			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
 		}
 	end,
@@ -82,6 +83,7 @@ assert(shown.form:find("Bed claim: valid claim", 1, true))
 assert(shown.form:find("Jobsite owner: villager villager-2 (loaded cleric)", 1, true))
 assert(shown.form:find("Jobsite claim: assigned jobsite is not claimed by this villager", 1, true))
 assert(shown.form:find("travelling to bed", 1, true))
+assert(shown.form:find("Bed route: travelling to (1.0, 0.0, 0.0)", 1, true))
 assert(shown.form:find("Births: checked today; local cooldown until day 4", 1, true))
 assert(original_uses == 0)
 

@@ -223,5 +223,6 @@ core.register_on_mods_loaded(function()
 	end
 
 	dofile(core.get_modpath("villages") .. "/births.lua")(def)
+	dofile(core.get_modpath("villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
 end)

@@ -89,6 +89,9 @@ end
 
 local function sleep_status(villager, bed_ok)
 	if villager._villages_sleeping then return "sleeping" end
+	local route = villager._villages_bed_route
+	if route and route.status == "travelling" then return "travelling to bed" end
+	if route and route.status == "retry" then return "waiting to retry bed route" end
 	if not bed_ok then return "no valid claimed bed" end
 	if not is_sleep_time() then return "waiting for night" end
 	if villager.order ~= "sleep" then return "nighttime, but no sleep order" end
@@ -96,6 +99,20 @@ local function sleep_status(villager, bed_ok)
 	local d = distance(pos, villager._bed)
 	if d and d >= 2 then return string.format("travelling to bed (%.1f nodes away)", d) end
 	return "waiting to enter bed"
+end
+
+local function bed_route_status(villager)
+	local route = villager._villages_bed_route
+	if not route then return "none" end
+	if route.status == "travelling" then
+		return "travelling to " .. pos_string(route.target)
+	end
+	if route.status == "retry" then
+		local remaining = math.max((route.retry_at or core.get_gametime()) - core.get_gametime(), 0)
+		local target = route.target and " to " .. pos_string(route.target) or ""
+		return string.format("retry in %.0fs%s: %s", remaining, target, route.reason or "unknown failure")
+	end
+	return route.status
 end
 
 local function target_string(target)
@@ -192,6 +209,7 @@ local function show(player, villager)
 		"Bed owner: " .. claim_owner(villager._bed, villager, "bed"),
 		"Bed claim: " .. bed_status(villager),
 		"Sleep status: " .. sleep_status(villager, bed_ok),
+		"Bed route: " .. bed_route_status(villager),
 		"",
 		"Jobsite: " .. pos_string(villager._jobsite) .. " [" .. node_name(villager._jobsite) .. "]",
 		"Jobsite owner: " .. claim_owner(villager._jobsite, villager, "jobsite"),
