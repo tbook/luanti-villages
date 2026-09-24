@@ -2,6 +2,10 @@
 -- This intentionally reflects state only; it does not claim, release, or alter
 -- beds, jobs, paths, or villager AI.
 local core = minetest
+local BIRTH_RADIUS = 24
+local BIRTH_HEIGHT = 12
+local BIRTH_INTERVAL_DAYS = 2
+local LAST_BIRTH = "villages_last_birth"
 
 local function pos_string(pos)
 	if not pos then return "none" end
@@ -99,6 +103,36 @@ local function target_string(target)
 	return target and tostring(target) or "none"
 end
 
+local function last_local_birth(pos)
+	if not pos or not core.find_nodes_in_area then return nil end
+	local minp = {x = pos.x - BIRTH_RADIUS, y = pos.y - BIRTH_HEIGHT, z = pos.z - BIRTH_RADIUS}
+	local maxp = {x = pos.x + BIRTH_RADIUS, y = pos.y + BIRTH_HEIGHT, z = pos.z + BIRTH_RADIUS}
+	local latest
+	for _, bed in ipairs(core.find_nodes_in_area(minp, maxp, {"group:bed"})) do
+		local node = core.get_node_or_nil(bed)
+		if node and core.get_item_group(node.name, "bed") == 1 then
+			local top = mcl_beds.get_bed_top(bed)
+			if core.get_node_or_nil(top) and core.get_meta(bed):get_string("player") == ""
+				and core.get_meta(top):get_string("player") == "" then
+				local last = tonumber(core.get_meta(bed):get_string(LAST_BIRTH))
+				if last and (not latest or last > latest) then latest = last end
+			end
+		end
+	end
+	return latest
+end
+
+local function birth_status(villager, pos)
+	if villager.child then return "not eligible (child)" end
+	local day = core.get_day_count()
+	local checked = villager._villages_birth_check_day == day and "checked today" or "not checked today"
+	local last = last_local_birth(pos)
+	if last and day - last < BIRTH_INTERVAL_DAYS then
+		return string.format("%s; local cooldown until day %d", checked, last + BIRTH_INTERVAL_DAYS)
+	end
+	return checked .. "; no local birth cooldown"
+end
+
 local workstations = {
 	["mcl_composters:composter"] = true,
 	["mcl_barrels:barrel_closed"] = true,
@@ -144,10 +178,7 @@ local function show(player, villager)
 	local path_count = type(villager.waypoints) == "table" and #villager.waypoints or 0
 	local profession = villager._profession or "unemployed"
 	local age = villager.child and "child" or "adult"
-	local day = math.floor(core.get_gametime() / 1200)
-	local last_check = villager._villages_birth_check_day
-	local birth_check = villager.child and "not eligible (child)"
-		or string.format("automatic check: day %s; current day %d", last_check or "not yet", day)
+	local birth_check = birth_status(villager, pos)
 	local lines = {
 		"Villager diagnostics (read-only)",
 		"",

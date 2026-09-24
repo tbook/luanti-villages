@@ -43,7 +43,8 @@ minetest = {
 		return {get_string = function(_, name) return values[name] or "" end}
 	end,
 	get_timeofday = function() return 0.8 end,
-	get_gametime = function() return 3600 end,
+	get_day_count = function() return 3 end,
+	find_nodes_in_area = function() return {{x = 1, y = 0, z = 0}} end,
 	formspec_escape = function(value) return value end,
 	show_formspec = function(name, formname, form)
 		shown = {name = name, formname = formname, form = form}
@@ -51,7 +52,7 @@ minetest = {
 }
 mcl_beds = {get_bed_top = function() return {x = 2, y = 0, z = 0} end}
 
-metadata["1,0,0"] = {villager = "villager-1"}
+metadata["1,0,0"] = {villager = "villager-1", villages_last_birth = "2"}
 metadata["2,0,0"] = {}
 metadata["4,0,0"] = {villager = "villager-2"}
 
@@ -66,7 +67,7 @@ local object = {
 		return {
 			name = "mobs_mc:villager", _id = "villager-1", _profession = "farmer",
 			_bed = {x = 1, y = 0, z = 0}, _jobsite = {x = 4, y = 0, z = 0},
-			order = "sleep", state = "stand", waypoints = {{x = 1}},
+			order = "sleep", state = "stand", waypoints = {{x = 1}}, _villages_birth_check_day = 3,
 			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
 		}
 	end,
@@ -81,6 +82,7 @@ assert(shown.form:find("Bed claim: valid claim", 1, true))
 assert(shown.form:find("Jobsite owner: villager villager-2 (loaded cleric)", 1, true))
 assert(shown.form:find("Jobsite claim: assigned jobsite is not claimed by this villager", 1, true))
 assert(shown.form:find("travelling to bed", 1, true))
+assert(shown.form:find("Births: checked today; local cooldown until day 4", 1, true))
 assert(original_uses == 0)
 
 lookup("stack", player, {type = "node", under = {x = 1, y = 0, z = 0}})
