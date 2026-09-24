@@ -6,14 +6,10 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local FARM_RADIUS = 8
 local FARM_INTERVAL = 5
-local mature_crops = {
-	["mcl_farming:wheat"] = "mcl_farming:wheat_1",
-	["mcl_farming:potato"] = "mcl_farming:potato_1",
-	["mcl_farming:carrot"] = "mcl_farming:carrot_1",
-	["mcl_farming:beetroot"] = "mcl_farming:beetroot_0",
-}
 local crop_names = {}
-for name in pairs(mature_crops) do table.insert(crop_names, name) end
+for _, name in ipairs({"mcl_farming:wheat", "mcl_farming:potato", "mcl_farming:carrot", "mcl_farming:beetroot"}) do
+	table.insert(crop_names, name)
+end
 
 local function valid_farmer(self)
 	if self.child or self._profession ~= "farmer" or not self._jobsite or not self._id then return false end
@@ -37,7 +33,7 @@ end
 
 local function harvest_and_replant(self, crop)
 	local node = core.get_node_or_nil(crop)
-	local replacement = node and mature_crops[node.name]
+	local replacement = node and common.farm_replant_node(node.name)
 	if replacement and not core.is_protected(crop, "") then
 		core.dig_node(crop, self.object)
 		core.set_node(crop, {name = replacement})

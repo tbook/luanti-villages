@@ -106,7 +106,8 @@ local function has_claimed_jobsite(self)
 end
 
 local function has_farm_target(self)
-	return self._villages_farm_target and core.get_node_or_nil(self._villages_farm_target)
+	local node = self._villages_farm_target and core.get_node_or_nil(self._villages_farm_target)
+	return node and common.farm_replant_node(node.name)
 end
 
 local function stop(self)
@@ -261,6 +262,7 @@ local function install(def)
 		self._villages_bed_route = nil
 		self._villages_job_route = nil
 		self._villages_farm_route = nil
+		self._villages_farm_target = nil
 		self._villages_pending_door_closes = nil
 		return result
 	end
@@ -371,7 +373,8 @@ local function install(def)
 			}) then return result end
 		end
 
-		if not is_work_time() then
+		local working = is_work_time()
+		if not working then
 			self._villages_job_route = nil
 			self._villages_farm_route = nil
 		elseif recover_route(self, {
@@ -380,7 +383,7 @@ local function install(def)
 		}) then
 			return result
 		end
-		if is_work_time() and recover_route(self, {
+		if working and recover_route(self, {
 			pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
 			claimed = has_farm_target,
 		}) then
