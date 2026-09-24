@@ -42,7 +42,8 @@ minetest = {
 		local values = metadata[key(pos)] or {}
 		return {get_string = function(_, name) return values[name] or "" end}
 	end,
-	get_timeofday = function() return 0.8 end,
+	get_timeofday = function() return 0.4 end,
+	get_gametime = function() return 100 end,
 	get_modpath = function() return "." end,
 	get_day_count = function() return 3 end,
 	find_nodes_in_area = function() return {{x = 1, y = 0, z = 0}} end,
@@ -68,8 +69,9 @@ local object = {
 		return {
 			name = "mobs_mc:villager", _id = "villager-1", _profession = "farmer",
 			_bed = {x = 1, y = 0, z = 0}, _jobsite = {x = 4, y = 0, z = 0},
-			order = "sleep", state = "stand", waypoints = {{x = 1}}, _villages_birth_check_day = 3,
+			order = "work", state = "stand", waypoints = {{x = 1}}, _villages_birth_check_day = 3,
 			_villages_bed_route = {status = "travelling", target = {x = 1, y = 0, z = 0}},
+			_villages_job_route = {status = "retry", target = {x = 3, y = 0, z = 0}, retry_at = 120, reason = "test"},
 			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
 		}
 	end,
@@ -85,6 +87,7 @@ assert(shown.form:find("Jobsite owner: villager villager-2 (loaded cleric)", 1, 
 assert(shown.form:find("Jobsite claim: assigned jobsite is not claimed by this villager", 1, true))
 assert(shown.form:find("travelling to bed", 1, true))
 assert(shown.form:find("Bed route: travelling to (1.0, 0.0, 0.0)", 1, true))
+assert(shown.form:find("Jobsite route: retry in 20s to (3.0, 0.0, 0.0): test", 1, true))
 assert(shown.form:find("Births: checked today; local cooldown until day 4", 1, true))
 assert(original_uses == 0)
 
@@ -99,6 +102,19 @@ assert(shown.form:find("Position: (1.0, 0.0, 0.0)", 1, true))
 lookup("stack", player, {type = "node", under = {x = 4, y = 0, z = 0}})
 assert(shown.formname == "villages:workstation_diagnostic")
 assert(shown.form:find("Recorded owner: villager villager-2 (loaded cleric)", 1, true))
+
+metadata["4,0,0"] = {villager = "villager-1"}
+local far_worker = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-1", _profession = "farmer",
+			_jobsite = {x = 4, y = 0, z = 0}, order = "work", state = "stand",
+			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = far_worker})
+assert(shown.form:find("Work status: travelling to jobsite (6.0 nodes away)", 1, true), shown.form)
 
 local visitor = {
 	is_player = function() return true end,

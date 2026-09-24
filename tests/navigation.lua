@@ -3,19 +3,25 @@ local gopath_target, arrived, preflight_start, preflight_range = nil, nil, nil, 
 local path_available = true
 local support_available = true
 local wooden_door = false
+local timeofday = 0.8
+local jobsite_present = true
 
 minetest = {
 	registered_nodes = {
 		["air"] = {walkable = false, liquidtype = "none"},
 		["stone"] = {walkable = true},
 		["mcl_beds:bed_red_bottom"] = {walkable = false, liquidtype = "none"},
+		["mcl_composters:composter"] = {walkable = true},
 		["mcl_doors:wooden_door_b_1"] = {walkable = false, liquidtype = "none"},
 	},
-	get_timeofday = function() return 0.8 end,
+	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
 	get_modpath = function() return "." end,
 	get_node_or_nil = function(pos)
 		if pos.x == 0 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
+		if jobsite_present and pos.x == 10 and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_composters:composter"}
+		end
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_doors:wooden_door_b_1"}
 		end
@@ -207,5 +213,79 @@ local blocked_entity = {
 proactive_def.do_custom(blocked_entity, 0.1)
 assert(not proactive_target)
 assert(not blocked_entity._villages_bed_route)
+
+-- VoxeLibre chooses and claims the jobsite. During its existing work periods,
+-- adapt only the trip to that claimed solid node into a safe approach route.
+timeofday = 0.4
+local job_target, job_arrived, callback_target = nil, nil, nil
+local job_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self, target, callback)
+		job_target, job_arrived = target, callback
+		self.state = "gowp"
+		return true
+	end,
+}
+dofile("navigation.lua")(job_def)
+local job_entity = {
+	_id = "villager-1", _jobsite = {x = 10, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+timeofday = 0.5
+assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
+assert(job_target.x == 10 and job_target.z == 0)
+assert(not job_entity._villages_job_route)
+
+timeofday = 0.4
+assert(job_def.gopath(job_entity, job_entity._jobsite, function(_, target)
+	callback_target = target
+end, true))
+assert(job_target and not (job_target.x == 10 and job_target.z == 0))
+assert(job_entity._villages_job_route.status == "travelling")
+job_arrived(job_entity)
+assert(job_entity._villages_job_route.status == "arrived")
+assert(callback_target and callback_target.x == job_target.x and callback_target.z == job_target.z)
+
+jobsite_present = false
+job_entity._villages_job_route = nil
+assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
+assert(job_target.x == 10 and job_target.z == 0)
+
+-- If an accepted bed route stalls, planner recovery must retain the original
+-- caller's arrival callback just as it does for jobsites.
+jobsite_present = true
+path_available = false
+top_claimed_by_player = false
+local bed_callback_called = false
+local recovery_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self)
+		self.state = "gowp"
+		return true
+	end,
+}
+dofile("navigation.lua")(recovery_def)
+local recovery_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+timeofday = 0.8
+assert(recovery_def.gopath(recovery_entity, recovery_entity._bed, function()
+	bed_callback_called = true
+end, true))
+recovery_entity.state = "stand"
+recovery_def.do_custom(recovery_entity, 0.1)
+assert(recovery_entity.state == "gowp")
+recovery_entity.callback_arrived(recovery_entity)
+assert(bed_callback_called)
+path_available = true
 
 print("navigation.lua: ok")
