@@ -5,6 +5,7 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
+local is_workstation_node = common.is_workstation_node
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
@@ -56,6 +57,9 @@ local function status_of_claim(pos, id, kind)
 	if not pos then return "none assigned" end
 	local node = core.get_node_or_nil(pos)
 	if not node then return "assigned position is unloaded" end
+	if kind == "jobsite" and not is_workstation_node(node.name) then
+		return "assigned node is not a workstation (" .. node.name .. ")"
+	end
 	local meta = core.get_meta(pos)
 	if meta:get_string("villager") ~= id then
 		return "assigned " .. kind .. " is not claimed by this villager"
@@ -116,10 +120,10 @@ local function work_status(villager, job_ok)
 	if route and route.status == "retry" then return "waiting to retry jobsite route" end
 	if not job_ok then return "no valid claimed jobsite" end
 	if not is_work_time() then return "waiting for work period" end
-	if villager.order == "work" then return "working" end
 	local pos = villager.object and villager.object:get_pos()
 	local d = distance(pos, villager._jobsite)
 	if d and d >= 2 then return string.format("travelling to jobsite (%.1f nodes away)", d) end
+	if villager.order == "work" then return "working" end
 	return "at jobsite"
 end
 
@@ -158,21 +162,6 @@ local function birth_status(villager, pos)
 	return checked .. "; no local birth cooldown"
 end
 
-local workstations = {
-	["mcl_composters:composter"] = true,
-	["mcl_barrels:barrel_closed"] = true,
-	["mcl_fletching_table:fletching_table"] = true,
-	["mcl_loom:loom"] = true,
-	["mcl_lectern:lectern"] = true,
-	["mcl_cartography_table:cartography_table"] = true,
-	["mcl_blast_furnace:blast_furnace"] = true,
-	["mcl_smoker:smoker"] = true,
-	["mcl_grindstone:grindstone"] = true,
-	["mcl_smithing_table:table"] = true,
-	["mcl_brewing:stand_000"] = true,
-	["mcl_stonecutter:stonecutter"] = true,
-}
-
 local function inspectable_node(pos)
 	local node = core.get_node_or_nil(pos)
 	if not node then return nil end
@@ -185,7 +174,7 @@ local function inspectable_node(pos)
 		bed_group = node and core.get_item_group(node.name, "bed") or 0
 	end
 	if bed_group == 1 then return "bed", pos, node end
-	if workstations[node.name] or core.get_item_group(node.name, "cauldron") > 0 then
+	if is_workstation_node(node.name) then
 		return "workstation", pos, node
 	end
 end

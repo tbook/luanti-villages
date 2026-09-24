@@ -5,6 +5,7 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
+local is_workstation_node = common.is_workstation_node
 local planner = dofile(core.get_modpath("villages") .. "/planner.lua")
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
@@ -86,7 +87,8 @@ end
 
 local function has_claimed_jobsite(self)
 	if not self._jobsite or not self._id then return false end
-	if not core.get_node_or_nil(self._jobsite) then return false end
+	local node = core.get_node_or_nil(self._jobsite)
+	if not node or not is_workstation_node(node.name) then return false end
 	return core.get_meta(self._jobsite):get_string("villager") == self._id
 end
 
@@ -204,6 +206,32 @@ local function start_engine_path(self, target, path, arrived, door_actions)
 	return true
 end
 
+local function recover_route(self, destination)
+	local route = self[destination.route_field]
+	if not route or route.status ~= "travelling" or self.state == PATHFINDING then return false end
+	-- A legacy route may start successfully, then wedge on stairs or a door.
+	-- Hand that case to the Villages planner before backing off.
+	if destination.claimed(self) and route.mode ~= "planner" then
+		local target, path = plan_stair_route(self, approaches(destination.pos))
+		if target and path then
+			self[destination.route_field] = {
+				status = "travelling", mode = "planner", target = vector.new(target),
+				started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
+			}
+			if start_engine_path(self, target, path,
+				arrival_callback(destination.route_field, target, route.callback, destination.sleep), true) then
+				return true
+			end
+		end
+	end
+	local failed_at = self._pf_last_failed
+	local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
+		and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
+		or destination.kind .. " route was canceled before arrival"
+	fail(self, destination.route_field, reason, route.target)
+	return false
+end
+
 local function install(def)
 	local original_gopath = def.gopath or mcl_mobs.mob_class.gopath
 	local original_custom = def.do_custom
@@ -220,10 +248,16 @@ local function install(def)
 	def.gopath = function(self, target, callback_arrived, prioritised)
 		local destination
 		if self._bed and same_pos(target, self._bed) and is_sleep_time() then
-			destination = {pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true}
+			destination = {
+				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
+				claimed = has_claimed_bed,
+			}
 		elseif self._jobsite and same_pos(target, self._jobsite) and is_work_time()
 			and has_claimed_jobsite(self) then
-			destination = {pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite"}
+			destination = {
+				pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
+				claimed = has_claimed_jobsite,
+			}
 		end
 		if not destination then
 			return original_gopath(self, target, callback_arrived, prioritised)
@@ -276,64 +310,29 @@ local function install(def)
 	def.do_custom = function(self, dtime)
 		local result = original_custom(self, dtime)
 		if result == false then return false end
-		local route = self._villages_bed_route
 		if not is_sleep_time() then
 			self._villages_bed_route = nil
 		else
-		-- VoxeLibre only schedules activity every five seconds. Start a bed trip
-		-- promptly at night so a wandering villager does not wait for that timer.
-		if not route and not self.following and self.state ~= PATHFINDING
+			-- VoxeLibre only schedules activity every five seconds. Start a bed trip
+			-- promptly at night so a wandering villager does not wait for that timer.
+			if not self._villages_bed_route and not self.following and self.state ~= PATHFINDING
 			and has_claimed_bed(self) and self.object:get_pos()
 			and vector.distance(self.object:get_pos(), self._bed) >= 2 then
-			self:gopath(self._bed, nil, true)
-			route = self._villages_bed_route
-		end
-		if route and route.status == "travelling" and self.state ~= PATHFINDING then
-			-- A legacy route may start successfully, then wedge on stairs or a
-			-- door. Hand that case to the Villages planner before backing off.
-			if route.mode ~= "planner" then
-				local target, path = plan_stair_route(self, approaches(self._bed))
-				if target and path then
-					local function arrived(entity)
-						entity._villages_bed_route = {status = "arrived", mode = "planner", target = vector.new(target)}
-						entity.order = "sleep"
-					end
-					self._villages_bed_route = {status = "travelling", mode = "planner", target = vector.new(target), started_at = core.get_gametime()}
-					if start_engine_path(self, target, path, arrived, true) then return result end
-				end
+				self:gopath(self._bed, nil, true)
 			end
-			local failed_at = self._pf_last_failed
-			local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
-				and "legacy pathfinder gave up on the bed approach"
-				or "bed route was canceled before arrival"
-			fail(self, "_villages_bed_route", reason, route.target)
-		end
+			if recover_route(self, {
+				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
+				claimed = has_claimed_bed,
+			}) then return result end
 		end
 
-		local job_route = self._villages_job_route
 		if not is_work_time() then
 			self._villages_job_route = nil
-		elseif job_route and job_route.status == "travelling" and self.state ~= PATHFINDING then
-			-- Work trips use the same fallback once VoxeLibre's legacy mover has
-			-- abandoned an initially accepted route.
-			if has_claimed_jobsite(self) and job_route.mode ~= "planner" then
-				local target, path = plan_stair_route(self, approaches(self._jobsite))
-				if target and path then
-					self._villages_job_route = {
-						status = "travelling", mode = "planner", target = vector.new(target),
-						started_at = core.get_gametime(), callback = job_route.callback,
-					}
-					if start_engine_path(self, target, path,
-						arrival_callback("_villages_job_route", target, job_route.callback), true) then
-						return result
-					end
-				end
-			end
-			local failed_at = self._pf_last_failed
-			local reason = failed_at and failed_at >= (job_route.wall_started_at or failed_at)
-				and "legacy pathfinder gave up on the jobsite approach"
-				or "jobsite route was canceled before arrival"
-			fail(self, "_villages_job_route", reason, job_route.target)
+		elseif recover_route(self, {
+			pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
+			claimed = has_claimed_jobsite,
+		}) then
+			return result
 		end
 		return result
 	end

@@ -103,6 +103,19 @@ lookup("stack", player, {type = "node", under = {x = 4, y = 0, z = 0}})
 assert(shown.formname == "villages:workstation_diagnostic")
 assert(shown.form:find("Recorded owner: villager villager-2 (loaded cleric)", 1, true))
 
+metadata["4,0,0"] = {villager = "villager-1"}
+local far_worker = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-1", _profession = "farmer",
+			_jobsite = {x = 4, y = 0, z = 0}, order = "work", state = "stand",
+			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = far_worker})
+assert(shown.form:find("Work status: travelling to jobsite (6.0 nodes away)", 1, true), shown.form)
+
 local visitor = {
 	is_player = function() return true end,
 	get_player_name = function() return "visitor" end,
