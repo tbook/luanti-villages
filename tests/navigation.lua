@@ -5,6 +5,7 @@ local support_available = true
 local wooden_door = false
 local timeofday = 0.8
 local jobsite_present = true
+local nearby_objects = {}
 
 minetest = {
 	registered_nodes = {
@@ -37,6 +38,8 @@ minetest = {
 		preflight_start, preflight_range = start, range
 		return path_available and {{x = 1, y = 0, z = 0}} or nil
 	end,
+	get_objects_inside_radius = function() return nearby_objects end,
+	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
 }
 vector = {
 	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
@@ -287,5 +290,36 @@ assert(recovery_entity.state == "gowp")
 recovery_entity.callback_arrived(recovery_entity)
 assert(bed_callback_called)
 path_available = true
+
+-- A close action waits while another villager is actively crossing the same
+-- wooden door, then uses the normal mob close action once the doorway clears.
+wooden_door = true
+local closed_action = nil
+local door_action_def = {
+	on_activate = function() end,
+	do_custom = function() return false end,
+	gopath = function() end,
+	do_pathfind_action = function(_, action) closed_action = action end,
+}
+dofile("navigation.lua")(door_action_def)
+local door_entity = {
+	state = "gowp",
+	object = {
+		set_velocity = function() end,
+		get_pos = function() return {x = 0, y = 0, z = 0} end,
+	},
+}
+nearby_objects = {{
+	get_luaentity = function() return {name = "mobs_mc:villager", state = "gowp"} end,
+}}
+local close = {type = "door", action = "close", target = {x = 1, y = 0, z = 0}}
+door_action_def.do_pathfind_action(door_entity, close)
+assert(not closed_action)
+assert(door_entity._villages_pending_door_closes)
+nearby_objects = {}
+assert(door_action_def.do_custom(door_entity, 0.1) == false)
+assert(closed_action == close)
+assert(not next(door_entity._villages_pending_door_closes))
+wooden_door = false
 
 print("navigation.lua: ok")

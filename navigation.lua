@@ -13,6 +13,7 @@ local LEGACY_FAILURE_WAIT = 30
 -- is viable when gopath will reject that same route.
 local PATH_RANGE = 25
 local PATHFINDING = "gowp"
+local DOOR_USE_RADIUS = 2.5
 
 local function same_pos(a, b)
 	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
@@ -29,6 +30,18 @@ local function wooden_door_at(pos)
 		and core.get_item_group(node.name, "door_iron") == 0 then
 		return pos
 	end
+end
+
+local function door_is_in_use(self, door)
+	for _, object in ipairs(core.get_objects_inside_radius(door, DOOR_USE_RADIUS)) do
+		if object ~= self.object then
+			local entity = object:get_luaentity()
+			if entity and entity.name == "mobs_mc:villager" and entity.state == PATHFINDING then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 local function is_open(pos, allow_wooden_door)
@@ -236,13 +249,25 @@ local function install(def)
 	local original_gopath = def.gopath or mcl_mobs.mob_class.gopath
 	local original_custom = def.do_custom
 	local original_activate = def.on_activate
+	local original_door_action = def.do_pathfind_action or mcl_mobs.mob_class.do_pathfind_action
 
 	def.on_activate = function(self, staticdata, dtime)
 		local result = original_activate(self, staticdata, dtime)
 		-- An in-progress route cannot survive a mapblock unload safely.
 		self._villages_bed_route = nil
 		self._villages_job_route = nil
+		self._villages_pending_door_closes = nil
 		return result
+	end
+
+	def.do_pathfind_action = function(self, action)
+		if action and action.type == "door" and action.action == "close"
+			and action.target and wooden_door_at(action.target) and door_is_in_use(self, action.target) then
+			self._villages_pending_door_closes = self._villages_pending_door_closes or {}
+			self._villages_pending_door_closes[core.hash_node_position(action.target)] = action
+			return
+		end
+		return original_door_action(self, action)
 	end
 
 	def.gopath = function(self, target, callback_arrived, prioritised)
@@ -309,6 +334,15 @@ local function install(def)
 
 	def.do_custom = function(self, dtime)
 		local result = original_custom(self, dtime)
+		local pending = self._villages_pending_door_closes
+		if pending then
+			for key, action in pairs(pending) do
+				if not wooden_door_at(action.target) or not door_is_in_use(self, action.target) then
+					pending[key] = nil
+					if wooden_door_at(action.target) then original_door_action(self, action) end
+				end
+			end
+		end
 		if result == false then return false end
 		if not is_sleep_time() then
 			self._villages_bed_route = nil
