@@ -55,6 +55,12 @@ local function harvest_and_replant(self, crop)
 		end
 		core.dig_node(crop, self.object)
 		collect_harvest_drops(crop, before)
+		-- Some drop callbacks add their item entities after the node dig returns.
+		-- Run once more before the next mob update, while retaining the snapshot so
+		-- items already on the ground are never treated as this harvest's output.
+		core.after(0, function()
+			collect_harvest_drops(crop, before)
+		end)
 		core.set_node(crop, {name = replacement})
 	end
 	self._villages_farm_target = nil
