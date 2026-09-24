@@ -6,6 +6,8 @@ local wooden_door = false
 local timeofday = 0.8
 local jobsite_present = true
 local nearby_objects = {}
+local search_sites = {}
+local jobsite_claimed = true
 
 minetest = {
 	registered_nodes = {
@@ -23,6 +25,9 @@ minetest = {
 		if jobsite_present and pos.x == 10 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_composters:composter"}
 		end
+		if (pos.x == 20 or pos.x == 30) and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_composters:composter"}
+		end
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_doors:wooden_door_b_1"}
 		end
@@ -30,6 +35,7 @@ minetest = {
 		return {name = "air"}
 	end,
 	find_node_near = function() return nil end,
+	find_nodes_in_area = function() return search_sites end,
 	get_item_group = function(name, group)
 		return group == "bed" and name:find("bed", 1, true) and 1
 			or group == "door" and name:find("door", 1, true) and 1 or 0
@@ -194,7 +200,8 @@ local proactive_entity = {
 local top_claimed_by_player = false
 minetest.get_meta = function(pos)
 	return {get_string = function(_, name)
-		if name == "villager" and pos.y == 0 then return "villager-1" end
+		if name == "villager" and pos.y == 0
+			and (pos.x == 0 or (jobsite_claimed and pos.x == 10)) then return "villager-1" end
 		if name == "player" and top_claimed_by_player and pos.y == 1 then return "player" end
 		return ""
 	end}
@@ -257,6 +264,54 @@ jobsite_present = false
 job_entity._villages_job_route = nil
 assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
 assert(job_target.x == 10 and job_target.z == 0)
+
+-- When native look_for_job sends its nearest raw node to gopath, redirect the
+-- trip to the nearest *reachable* free station.  The first candidate lacks a
+-- safe cardinal approach; importantly, no claim is made by this layer.
+jobsite_present = true
+jobsite_claimed = false
+search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
+local original_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	if pos.y == -1 and pos.x >= 19 and pos.x <= 21 then return {name = "air"} end
+	return original_node(pos)
+end
+local searching_entity = {
+	_id = "villager-1", state = "stand",
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(job_def.gopath(searching_entity, {x = 10, y = 0, z = 0}, nil, true))
+assert(job_target and job_target.x >= 29)
+assert(searching_entity._villages_job_search_route.status == "travelling")
+assert(not searching_entity._jobsite)
+minetest.get_node_or_nil = original_node
+search_sites = {}
+jobsite_claimed = true
+
+-- A search with no viable station is reported as a local retry instead of
+-- sending the villager back to the known-bad raw-node route.
+jobsite_claimed = false
+search_sites = {{x = 20, y = 0, z = 0}}
+minetest.get_node_or_nil = function(pos)
+	if pos.y == -1 and pos.x >= 19 and pos.x <= 21 then return {name = "air"} end
+	return original_node(pos)
+end
+local no_site_entity = {
+	_id = "villager-1", state = "stand",
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(not job_def.gopath(no_site_entity, {x = 10, y = 0, z = 0}, nil, true))
+assert(no_site_entity._villages_job_search_route.status == "retry")
+assert(no_site_entity._villages_job_search_route.reason == "no reachable unclaimed workstation")
+minetest.get_node_or_nil = original_node
+search_sites = {}
+jobsite_claimed = true
 
 -- If an accepted bed route stalls, planner recovery must retain the original
 -- caller's arrival callback just as it does for jobsites.

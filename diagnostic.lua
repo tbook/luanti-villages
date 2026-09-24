@@ -214,6 +214,7 @@ local function show(player, villager)
 		"Jobsite claim: " .. status_of_claim(villager._jobsite, villager._id, "jobsite"),
 		"Work status: " .. work_status(villager, job_ok),
 		"Jobsite route: " .. route_status(villager._villages_job_route),
+		"Job search route: " .. route_status(villager._villages_job_search_route),
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}
