@@ -32,10 +32,6 @@ local function wooden_door_at(pos)
 	end
 end
 
-local function pos_key(pos)
-	return pos.x .. ":" .. pos.y .. ":" .. pos.z
-end
-
 local function door_is_in_use(self, door)
 	for _, object in ipairs(core.get_objects_inside_radius(door, DOOR_USE_RADIUS)) do
 		if object ~= self.object then
@@ -268,7 +264,7 @@ local function install(def)
 		if action and action.type == "door" and action.action == "close"
 			and action.target and wooden_door_at(action.target) and door_is_in_use(self, action.target) then
 			self._villages_pending_door_closes = self._villages_pending_door_closes or {}
-			self._villages_pending_door_closes[pos_key(action.target)] = action
+			self._villages_pending_door_closes[core.hash_node_position(action.target)] = action
 			return
 		end
 		return original_door_action(self, action)
@@ -338,7 +334,6 @@ local function install(def)
 
 	def.do_custom = function(self, dtime)
 		local result = original_custom(self, dtime)
-		if result == false then return false end
 		local pending = self._villages_pending_door_closes
 		if pending then
 			for key, action in pairs(pending) do
@@ -348,6 +343,7 @@ local function install(def)
 				end
 			end
 		end
+		if result == false then return false end
 		if not is_sleep_time() then
 			self._villages_bed_route = nil
 		else

@@ -39,6 +39,7 @@ minetest = {
 		return path_available and {{x = 1, y = 0, z = 0}} or nil
 	end,
 	get_objects_inside_radius = function() return nearby_objects end,
+	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
 }
 vector = {
 	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
@@ -296,7 +297,7 @@ wooden_door = true
 local closed_action = nil
 local door_action_def = {
 	on_activate = function() end,
-	do_custom = function() end,
+	do_custom = function() return false end,
 	gopath = function() end,
 	do_pathfind_action = function(_, action) closed_action = action end,
 }
@@ -316,7 +317,7 @@ door_action_def.do_pathfind_action(door_entity, close)
 assert(not closed_action)
 assert(door_entity._villages_pending_door_closes)
 nearby_objects = {}
-door_action_def.do_custom(door_entity, 0.1)
+assert(door_action_def.do_custom(door_entity, 0.1) == false)
 assert(closed_action == close)
 assert(not next(door_entity._villages_pending_door_closes))
 wooden_door = false
