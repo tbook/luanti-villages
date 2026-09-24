@@ -423,4 +423,145 @@ globalstep(0.1)
 assert(closed_action == close)
 wooden_door = false
 
+-- A native gopath implementation may set its active state before returning a
+-- falsey value. That is still a successfully started route to callers.
+local falsey_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self)
+		self.state = "gowp"
+		return false
+	end,
+}
+dofile("navigation.lua")(falsey_def)
+timeofday = 0.8
+local falsey_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(falsey_def.gopath(falsey_entity, falsey_entity._bed, nil, true))
+assert(falsey_entity._villages_bed_route.status == "travelling")
+
+-- A canceled or superseded route must not run its old arrival callback.
+local callbacks = {}
+local ownership_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self, _, callback)
+		self.state = "gowp"
+		table.insert(callbacks, callback)
+		return true
+	end,
+}
+dofile("navigation.lua")(ownership_def)
+local ownership_callback_calls = 0
+local ownership_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(ownership_def.gopath(ownership_entity, ownership_entity._bed, function()
+	ownership_callback_calls = ownership_callback_calls + 1
+end, true))
+local first_route_id = ownership_entity._villages_bed_route.id
+ownership_entity.state = "stand"
+assert(ownership_def.gopath(ownership_entity, ownership_entity._bed, function()
+	ownership_callback_calls = ownership_callback_calls + 1
+end, true))
+assert(ownership_entity._villages_bed_route.id ~= first_route_id)
+callbacks[1](ownership_entity)
+assert(ownership_entity._villages_bed_route.status == "travelling")
+assert(ownership_callback_calls == 0)
+callbacks[2](ownership_entity)
+assert(ownership_entity._villages_bed_route.status == "arrived")
+assert(ownership_callback_calls == 1)
+
+-- Following cancels an owned route instead of allowing recovery to override the
+-- player's instruction on the next villager tick.
+local following_entity = {
+	following = {}, state = "gowp",
+	_villages_bed_route = {status = "travelling", id = 1},
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+ownership_def.do_custom(following_entity, 0.1)
+assert(not following_entity._villages_bed_route)
+assert(following_entity.state == "stand")
+
+-- If the native mover remains in gowp without positional progress, hand the
+-- route to the planner rather than leaving the villager stuck forever.
+local stalled_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self)
+		self.state = "gowp"
+		return true
+	end,
+}
+dofile("navigation.lua")(stalled_def)
+local stalled_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+now = 500
+assert(stalled_def.gopath(stalled_entity, stalled_entity._bed, nil, true))
+local stalled_route_id = stalled_entity._villages_bed_route.id
+now = now + 21
+stalled_def.do_custom(stalled_entity, 0.1)
+assert(stalled_entity.state == "gowp")
+assert(stalled_entity._villages_bed_route.mode == "planner")
+assert(stalled_entity._villages_bed_route.id ~= stalled_route_id)
+
+-- Reloading a villager with an owned route clears the native waypoint state as
+-- well as Villages' bookkeeping, avoiding an unmanaged resumed trip.
+local activated_entity = {
+	state = "gowp", _target = {x = 1}, current_target = {pos = {x = 1}}, waypoints = {},
+	callback_arrived = function() end,
+	_villages_bed_route = {status = "travelling", id = 1},
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+stalled_def.on_activate(activated_entity)
+assert(activated_entity.state == "stand")
+assert(not activated_entity._target and not activated_entity.current_target and not activated_entity.waypoints)
+assert(not activated_entity.callback_arrived and not activated_entity._villages_bed_route)
+
+-- Tavern routes use the same no-progress recovery path as beds, jobsites, and
+-- farm plots; dinner support is normally supplied by the extension API.
+mobs_mc = {
+	register_villager_profession = function() end,
+	register_villager_activity_modifier = function() end,
+}
+timeofday = 0.7
+now = 600
+local stalled_tavern_entity = {
+	state = "gowp", _villages_route_id = 1,
+	_villages_tavern_target = {x = 10, y = 0, z = 0},
+	_villages_tavern_route = {
+		status = "travelling", mode = "legacy", id = 1,
+		last_progress_at = now, last_progress_pos = {x = 15, y = 0, z = 0},
+	},
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+now = now + 21
+stalled_def.do_custom(stalled_tavern_entity, 0.1)
+assert(stalled_tavern_entity.state == "gowp")
+assert(stalled_tavern_entity._villages_tavern_route.mode == "planner")
+assert(stalled_tavern_entity._villages_tavern_route.id == 2)
+
 print("navigation.lua: ok")
