@@ -7,5 +7,9 @@ with `git apply upstream/voxelibre-villager-extension.patch`, then run the game
 with Villages enabled. The patch belongs in VoxeLibre, not in an installed game
 directory; issue #35 tracks the upstream contribution and review.
 
+[`profession-activity-proposal.md`](profession-activity-proposal.md) is the
+ready-to-post Mesehub issue text for API discussion before submitting that
+patch.
+
 Until VoxeLibre exposes these hooks, Villages continues loading its existing
 features and logs that tavern service is disabled.
