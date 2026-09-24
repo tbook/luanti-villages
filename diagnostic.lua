@@ -4,6 +4,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
+local is_work_time = common.is_work_time
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
@@ -96,8 +97,7 @@ local function sleep_status(villager, bed_ok)
 	return "waiting to enter bed"
 end
 
-local function bed_route_status(villager)
-	local route = villager._villages_bed_route
+local function route_status(route)
 	if not route then return "none" end
 	if route.status == "travelling" then
 		return "travelling to " .. pos_string(route.target)
@@ -108,6 +108,19 @@ local function bed_route_status(villager)
 		return string.format("retry in %.0fs%s: %s", remaining, target, route.reason or "unknown failure")
 	end
 	return route.status
+end
+
+local function work_status(villager, job_ok)
+	local route = villager._villages_job_route
+	if route and route.status == "travelling" then return "travelling to jobsite" end
+	if route and route.status == "retry" then return "waiting to retry jobsite route" end
+	if not job_ok then return "no valid claimed jobsite" end
+	if not is_work_time() then return "waiting for work period" end
+	if villager.order == "work" then return "working" end
+	local pos = villager.object and villager.object:get_pos()
+	local d = distance(pos, villager._jobsite)
+	if d and d >= 2 then return string.format("travelling to jobsite (%.1f nodes away)", d) end
+	return "at jobsite"
 end
 
 local function target_string(target)
@@ -186,6 +199,7 @@ end
 
 local function show(player, villager)
 	local bed_ok = bed_status(villager) == "valid claim"
+	local job_ok = status_of_claim(villager._jobsite, villager._id, "jobsite") == "valid claim"
 	local pos = villager.object and villager.object:get_pos()
 	local path_count = type(villager.waypoints) == "table" and #villager.waypoints or 0
 	local profession = villager._profession or "unemployed"
@@ -204,11 +218,13 @@ local function show(player, villager)
 		"Bed owner: " .. claim_owner(villager._bed, villager, "bed"),
 		"Bed claim: " .. bed_status(villager),
 		"Sleep status: " .. sleep_status(villager, bed_ok),
-		"Bed route: " .. bed_route_status(villager),
+		"Bed route: " .. route_status(villager._villages_bed_route),
 		"",
 		"Jobsite: " .. pos_string(villager._jobsite) .. " [" .. node_name(villager._jobsite) .. "]",
 		"Jobsite owner: " .. claim_owner(villager._jobsite, villager, "jobsite"),
 		"Jobsite claim: " .. status_of_claim(villager._jobsite, villager._id, "jobsite"),
+		"Work status: " .. work_status(villager, job_ok),
+		"Jobsite route: " .. route_status(villager._villages_job_route),
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}
