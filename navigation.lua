@@ -37,6 +37,12 @@ local function wooden_door_at(pos)
 	end
 end
 
+local function iron_door_at(pos)
+	local node = core.get_node_or_nil(pos)
+	return node and core.get_item_group(node.name, "door") > 0
+		and core.get_item_group(node.name, "door_iron") > 0 and pos
+end
+
 local function door_is_in_use(door, ignored_object)
 	for _, object in ipairs(core.get_objects_inside_radius(door, DOOR_USE_RADIUS)) do
 		if object ~= ignored_object then
@@ -75,9 +81,34 @@ local function is_open(pos, allow_wooden_door)
 		and (def.liquidtype == nil or def.liquidtype == "none")
 end
 
+local function collision_box_top(def)
+	local box = def and def.collision_box
+	if not box or box.type ~= "fixed" then return 0.5 end
+	local fixed = box.fixed
+	if type(fixed) ~= "table" then return -0.5 end
+	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
+	local top = -0.5
+	for _, part in ipairs(fixed) do
+		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
+	end
+	return top
+end
+
 local function is_supported(pos)
-	local def = node_def({x = pos.x, y = pos.y - 1, z = pos.z})
-	return def and def.walkable
+	local support = {x = pos.x, y = pos.y - 1, z = pos.z}
+	local node = core.get_node_or_nil(support)
+	local def = node and core.registered_nodes[node.name]
+	if not def or not def.walkable then return false end
+	-- A villager's feet are at the top of the supporting node. Low slabs do not
+	-- reach that height; fences and trapdoors are not walkable floor surfaces.
+	if collision_box_top(def) < 0.49 then return false end
+	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
+		return false
+	end
+	if (def.damage_per_second or 0) > 0 then return false end
+	return core.get_item_group(node.name, "fire") == 0
+		and core.get_item_group(node.name, "cactus") == 0
+		and core.get_item_group(node.name, "dangerous") == 0
 end
 
 -- Mirror the legacy gopath start normalization. Villagers on stairs often have
@@ -139,6 +170,7 @@ local function stop(self)
 	self.current_target = nil
 	self.waypoints = nil
 	self.callback_arrived = nil
+	self._villages_blocked_door = nil
 	self.object:set_velocity(vector.zero())
 end
 
@@ -377,6 +409,11 @@ end
 local function recover_stalled_route(self, destination)
 	local route = self[destination.route_field]
 	if not route or route.status ~= "travelling" or self.state ~= PATHFINDING then return false end
+	if self._villages_blocked_door then
+		self._villages_blocked_door = nil
+		stop(self)
+		return recover_route(self, destination)
+	end
 	local pos = self.object:get_pos()
 	if not pos then return false end
 	if not route.last_progress_pos or vector.distance(pos, route.last_progress_pos) >= PROGRESS_DISTANCE then
@@ -416,6 +453,14 @@ local function install(def)
 	end
 
 	def.do_pathfind_action = function(self, action)
+		if action and action.type == "door" and action.action == "open"
+			and action.target and iron_door_at(action.target) then
+			-- The door changed after planning or was replaced with an iron door.
+			-- Do not keep retrying an action that cannot succeed; the next custom
+			-- tick replans around it or records a bounded route failure.
+			self._villages_blocked_door = vector.new(action.target)
+			return
+		end
 		if action and action.type == "door" and action.action == "close"
 			and action.target and wooden_door_at(action.target) and door_is_in_use(action.target, self.object) then
 			local key = core.hash_node_position(action.target)

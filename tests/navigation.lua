@@ -4,8 +4,11 @@ local path_available = true
 local required_path_range = 0
 local engine_paths = nil
 local support_available = true
+local support_node = "stone"
 local wooden_door = false
+local iron_door = false
 local glass_pane = false
+local low_ceiling = false
 local timeofday = 0.8
 local jobsite_present = true
 local nearby_objects = {}
@@ -21,7 +24,13 @@ minetest = {
 		["mcl_beds:bed_red_bottom"] = {walkable = false, liquidtype = "none"},
 		["mcl_composters:composter"] = {walkable = true},
 		["mcl_doors:wooden_door_b_1"] = {walkable = false, liquidtype = "none"},
+		["mcl_doors:iron_door_b_1"] = {walkable = false, liquidtype = "none"},
 		["mcl_panes:glass_pane"] = {walkable = false, liquidtype = "none", collision_box = {type = "fixed"}},
+		["test:low_slab"] = {walkable = true, collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0, 0.5}}},
+		["test:stair"] = {walkable = true, collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}},
+		["test:fence"] = {walkable = true},
+		["test:trapdoor"] = {walkable = true},
+		["test:cactus"] = {walkable = true},
 	},
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
@@ -37,10 +46,16 @@ minetest = {
 		if glass_pane and pos.x == 1 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_panes:glass_pane"}
 		end
+		if low_ceiling and pos.x == 1 and pos.y == 1 and pos.z == 0 then
+			return {name = "mcl_panes:glass_pane"}
+		end
+		if iron_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_doors:iron_door_b_1"}
+		end
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_doors:wooden_door_b_1"}
 		end
-		if pos.y == -1 and support_available then return {name = "stone"} end
+		if pos.y == -1 and support_available then return {name = support_node} end
 		return {name = "air"}
 	end,
 	find_node_near = function() return nil end,
@@ -50,7 +65,11 @@ minetest = {
 	end,
 	get_item_group = function(name, group)
 		return group == "bed" and name:find("bed", 1, true) and 1
-			or group == "door" and name:find("door", 1, true) and 1 or 0
+			or group == "door" and name:find("door", 1, true) and 1
+			or group == "door_iron" and name:find("iron_door", 1, true) and 1
+			or group == "fence" and name == "test:fence" and 1
+			or group == "trapdoor" and name == "test:trapdoor" and 1
+			or group == "cactus" and name == "test:cactus" and 1 or 0
 	end,
 	find_path = function(start, target, range)
 		preflight_start, preflight_range = start, range
@@ -152,6 +171,19 @@ assert(def.gopath(pane_entity, pane_entity._bed, nil, true))
 assert(gopath_target.x == -1 and gopath_target.z == 0)
 glass_pane = false
 
+-- The standing box needs a clear head node as well as a clear feet node.
+low_ceiling = true
+local low_ceiling_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(def.gopath(low_ceiling_entity, low_ceiling_entity._bed, nil, true))
+assert(gopath_target.x == -1 and gopath_target.z == 0)
+low_ceiling = false
+
 def.do_custom(entity, 0.1)
 assert(entity._villages_bed_route.status == "arrived")
 
@@ -177,6 +209,31 @@ assert(failed_entity._villages_bed_route.reason:find("no safe standing", 1, true
 assert(not failed_entity._villages_bed_route.target)
 path_available = true
 support_available = true
+
+-- Fallback routes require floor-height, non-hazardous support. Low slabs,
+-- fences, and cactus support must not produce a standable bed approach.
+for _, unsafe_support in ipairs({"test:low_slab", "test:fence", "test:trapdoor", "test:cactus"}) do
+	support_node = unsafe_support
+	local unsafe_entity = {
+		_bed = {x = 0, y = 0, z = 0}, state = "stand",
+		object = {
+			get_pos = function() return {x = 5, y = 0, z = 0} end,
+			set_velocity = function() end,
+		},
+	}
+	assert(not failed_def.gopath(unsafe_entity, unsafe_entity._bed, nil, true))
+	assert(unsafe_entity._villages_bed_route.reason:find("no safe standing", 1, true))
+end
+support_node = "test:stair"
+local stair_support_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(def.gopath(stair_support_entity, stair_support_entity._bed, nil, true))
+support_node = "stone"
 
 local cooldown_called = false
 local cooldown_def = {
@@ -459,6 +516,26 @@ recovery_def.do_custom(exhausted_recovery_entity, 0.1)
 assert(exhausted_recovery_entity._villages_bed_route.status == "retry")
 assert(exhausted_recovery_entity._villages_bed_route.reason:find("stair planner", 1, true))
 support_available = true
+
+-- A wooden door that becomes iron after planning causes an immediate bounded
+-- replan instead of waiting for the no-progress watchdog.
+local changed_door_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "gowp",
+	_villages_bed_route = {status = "travelling", mode = "legacy", id = 1, target = {x = -1, y = 0, z = 0}},
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+iron_door = true
+recovery_def.do_pathfind_action(changed_door_entity, {
+	type = "door", action = "open", target = {x = 1, y = 0, z = 0},
+})
+assert(changed_door_entity._villages_blocked_door)
+recovery_def.do_custom(changed_door_entity, 0.1)
+assert(changed_door_entity.state == "gowp")
+assert(changed_door_entity._villages_bed_route.mode == "planner")
+iron_door = false
 
 -- A work-period interruption invalidates a farm route and its chosen crop as
 -- one unit, so farmer.lua can choose a fresh crop next time work begins.
