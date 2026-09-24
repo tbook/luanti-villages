@@ -2,24 +2,30 @@ local now = 100
 local gopath_target, arrived, preflight_start, preflight_range = nil, nil, nil, nil
 local path_available = true
 local support_available = true
+local wooden_door = false
 
 minetest = {
 	registered_nodes = {
 		["air"] = {walkable = false, liquidtype = "none"},
 		["stone"] = {walkable = true},
 		["mcl_beds:bed_red_bottom"] = {walkable = false, liquidtype = "none"},
+		["mcl_doors:wooden_door_b_1"] = {walkable = false, liquidtype = "none"},
 	},
 	get_timeofday = function() return 0.8 end,
 	get_gametime = function() return now end,
 	get_modpath = function() return "." end,
 	get_node_or_nil = function(pos)
 		if pos.x == 0 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
+		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_doors:wooden_door_b_1"}
+		end
 		if pos.y == -1 and support_available then return {name = "stone"} end
 		return {name = "air"}
 	end,
 	find_node_near = function() return nil end,
 	get_item_group = function(name, group)
-		return group == "bed" and name:find("bed", 1, true) and 1 or 0
+		return group == "bed" and name:find("bed", 1, true) and 1
+			or group == "door" and name:find("door", 1, true) and 1 or 0
 	end,
 	find_path = function(start, _, range)
 		preflight_start, preflight_range = start, range
@@ -130,6 +136,30 @@ local fallback_entity = {
 assert(fallback_def.gopath(fallback_entity, fallback_entity._bed, nil, true))
 assert(fallback_entity.state == "gowp")
 assert(fallback_entity.current_target and fallback_entity.waypoints)
+
+local door_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return false end,
+}
+dofile("navigation.lua")(door_def)
+path_available = false
+wooden_door = true
+local door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(door_def.gopath(door_entity, door_entity._bed, nil, true))
+local opens_door = door_entity.current_target.action and door_entity.current_target.action.action == "open"
+for _, waypoint in ipairs(door_entity.waypoints) do
+	if waypoint.action and waypoint.action.action == "open" then opens_door = true end
+end
+assert(opens_door)
+wooden_door = false
+path_available = true
 
 local proactive_target = nil
 local proactive_def = {

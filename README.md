@@ -21,6 +21,11 @@ owner directly. Owner IDs are resolved to a nearby loaded villager where
 possible. The tool retains its normal lookup behavior for all other targets
 and players.
 
+For night-time bed trips, Villages first uses VoxeLibre's normal pathing and
+then falls back to a bounded route planner that can follow ordinary stairs and
+wooden doors. Iron doors remain impassable. The planner is currently used for
+beds only; workstation and gathering travel will follow in later work.
+
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
 ## Attribution and licenses
