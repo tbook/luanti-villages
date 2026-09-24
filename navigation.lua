@@ -112,10 +112,6 @@ local function has_farm_target(self)
 	return node and common.farm_replant_node(node.name)
 end
 
-local choose_approach
-local plan_stair_route
-local job_search_target
-
 local function stop(self)
 	self.state = "stand"
 	self._target = nil
@@ -141,7 +137,7 @@ local function arrival_callback(route_field, target, callback_arrived, sleep)
 	end
 end
 
-choose_approach = function(self, candidates)
+local function choose_approach(self, candidates)
 	local start = self.object:get_pos()
 	if not start then return nil end
 	start = legacy_path_start(start)
@@ -175,7 +171,7 @@ local function nearest_walk_position(pos)
 	return best
 end
 
-plan_stair_route = function(self, candidates)
+local function plan_stair_route(self, candidates)
 	local start = self.object:get_pos()
 	start = start and nearest_walk_position(start)
 	if not start then return nil, nil, "stair planner found no nearby walk position" end
@@ -208,7 +204,7 @@ end
 
 -- Do not claim here: native get_a_job still finds this station within one
 -- block and invokes its own employ function after the villager arrives.
-job_search_target = function(self)
+local function job_search_target(self)
 	if self._jobsite or not self._id then return end
 	local pos = self.object:get_pos()
 	if not pos then return end
@@ -224,10 +220,14 @@ job_search_target = function(self)
 			-- Native employ uses find_node_near(..., 1, ...); a diagonal
 			-- destination is not close enough to complete the native claim.
 			local candidates = approaches(site, true)
-			local _, engine_path = choose_approach(self, candidates)
-			if engine_path then return site end
+			local approach, engine_path = choose_approach(self, candidates)
+			if engine_path then
+				return {site = site, candidates = candidates, target = approach, engine_path = engine_path}
+			end
 			local stair_target, stair_path = plan_stair_route(self, candidates)
-			if stair_target and stair_path then return site end
+			if stair_target and stair_path then
+				return {site = site, candidates = candidates, target = stair_target, planner_path = stair_path}
+			end
 		end
 	end
 end
@@ -344,13 +344,15 @@ local function install(def)
 		elseif not self._jobsite and not is_sleep_time() then
 			local node = core.get_node_or_nil(target)
 			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
-				local site = job_search_target(self)
-				if site then
+				local selection = job_search_target(self)
+				if selection then
 					destination = {
-						pos = site, site = site, route_field = "_villages_job_search_route", kind = "jobsite search",
+						pos = selection.site, site = selection.site, candidates = selection.candidates,
+						target = selection.target, engine_path = selection.engine_path, planner_path = selection.planner_path,
+						route_field = "_villages_job_search_route", kind = "jobsite search",
 						cardinal_only = true,
 						claimed = function(entity)
-							return not entity._jobsite and core.get_meta(site):get_string("villager") == ""
+							return not entity._jobsite and core.get_meta(selection.site):get_string("villager") == ""
 						end,
 					}
 				else
@@ -385,8 +387,9 @@ local function install(def)
 			return false
 		end
 
-		local candidates = approaches(destination.pos, destination.cardinal_only)
-		local candidate, engine_path = choose_approach(self, candidates)
+		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only)
+		local candidate, engine_path = destination.target, destination.engine_path
+		if not candidate then candidate, engine_path = choose_approach(self, candidates) end
 		if not candidate then
 			fail(self, destination.route_field, "no safe standing space beside " .. destination.kind)
 			return false
@@ -404,7 +407,12 @@ local function install(def)
 			self[destination.route_field].mode = "engine"
 			return true
 		end
-		local stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
+		local stair_target, stair_path, planner_failure
+		if destination.planner_path then
+			stair_target, stair_path = destination.target, destination.planner_path
+		else
+			stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
+		end
 		if stair_target and start_engine_path(self, stair_target, stair_path,
 			arrival_callback(destination.route_field, stair_target, callback_arrived, destination.sleep), true) then
 			self[destination.route_field].target = vector.new(stair_target)
