@@ -1,11 +1,11 @@
 # Villages
 
-Adds a visible sleeping pose and slow, bed-limited births to VoxeLibre
-villagers while leaving VoxeLibre's trading, professions, and bed ownership
-format in place. Install the repository as a directory named `villages` in
-Luanti's mods directory (or a world's `worldmods` directory). Removing the mod
-restores the game's default villager behavior; existing child villagers and bed
-claims remain in the world.
+Extends VoxeLibre villagers with sleeping, bed-limited births, work travel,
+and tavern life. Install the repository as a directory named `villages` in
+Luanti's mods directory (or a world's `worldmods` directory). The `mcl_decor`
+mod is required for tavern furniture. Removing Villages restores the game's
+default villager behavior; existing children, bed claims, and placed furniture
+remain in the world.
 
 A village can produce a child when a valid bed is unclaimed, provided two
 nearby adults own beds and no nearby adult is bedless.
@@ -21,10 +21,23 @@ owner directly. Owner IDs are resolved to a nearby loaded villager where
 possible. The tool retains its normal lookup behavior for all other targets
 and players.
 
-For night-time bed trips, Villages first uses VoxeLibre's normal pathing and
+For destination trips, Villages first uses VoxeLibre's normal pathing and
 then falls back to a bounded route planner that can follow ordinary stairs and
-wooden doors. Iron doors remain impassable. The planner is currently used for
-beds only; workstation and gathering travel will follow in later work.
+wooden doors. Iron doors remain impassable.
+
+Newly generated taverns have two tables with plates and chairs. Existing
+generated taverns are not refurnished automatically. The tavern keeper is a
+new villager profession that claims the existing jukebox. Villagers visit a
+staffed tavern once each evening; the keeper serves visual meals, and diners
+return home after the dinner window. Players can sneak-click an on-duty keeper
+to order a meal, sit at an empty table, and pay when food appears on the plate.
+Ordinary click opens the keeper's takeaway trades. Unserved orders expire
+without charge.
+
+The profession and extended evening schedule require the VoxeLibre extension
+described in [`upstream/README.md`](upstream/README.md). Stock VoxeLibre does
+not yet expose that API. Villages loads its existing features and furnished
+taverns without it, but keeper and dinner service remain disabled.
 
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
@@ -44,3 +57,8 @@ plains, profession, and tier-badge textures. Mineclonia's
 `mobs_mc/LICENSE-media.md` lists textures not otherwise named there under the
 MIT License. The source game and its attribution are available at
 https://git.minetest.land/Mineclonia/Mineclonia.
+
+`schematics/tavern_furnished.mts` is a modification of VoxeLibre's
+`mcl_villages` tavern schematic. Its original schematic is credited to
+MysticTempest in VoxeLibre's `mcl_villages/README.txt` and is licensed
+CC BY-SA 4.0; this modified schematic is also CC BY-SA 4.0.

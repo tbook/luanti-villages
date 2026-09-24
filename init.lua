@@ -23,6 +23,7 @@ local profession_overlay = {
 	cleric = "cleric",
 	mason = "mason",
 	nitwit = "nitwit",
+	tavern_keeper = "butcher",
 }
 local badges = {"stone", "iron", "gold", "emerald", "diamond"}
 local animation = {
@@ -37,6 +38,9 @@ local function skin(self)
 	local overlay = profession_overlay[self._profession]
 	if overlay then
 		texture = texture .. "^villages_villager_profession_" .. overlay .. ".png"
+		if self._profession == "tavern_keeper" then
+			texture = texture .. "^[colorize:#6b3520:35"
+		end
 		if overlay ~= "nitwit" then
 			local tier = math.max(1, math.min(5, self._max_trade_tier or 1))
 			texture = texture .. "^villages_villager_badge_" .. badges[tier] .. ".png"
@@ -231,4 +235,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
+	dofile(core.get_modpath("villages") .. "/tavern.lua")(def)
 end)
+
+dofile(core.get_modpath("villages") .. "/tavern_schematic.lua")

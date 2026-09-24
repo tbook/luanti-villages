@@ -1,0 +1,74 @@
+diff --git a/API.md b/API.md
+index db5ac77..106bf83 100644
+--- a/API.md
++++ b/API.md
+@@ -58,6 +58,21 @@ but function and attribute names of Mobs Redo 1.41 are kept.
+ If you have code for a mod which works fine under Mobs Redo, it should be easy to make it work in VoxeLibre.
+ chances are good that it works out of the box.
+ 
++#### Villager professions and schedule
++
++`mobs_mc.register_villager_profession(id, definition)` registers a profession
++for the regular villager. `definition` contains `name` (translated display
++name), `texture` (texture name), `jobsite` (node name or `group:` selector),
++and `trades` (the same tiered trade table format as built-in professions).
++Register during mod initialization after depending on `mobs_mc`. Registered
++professions participate in native jobsite claiming, trading, and save/load.
++
++`mobs_mc.register_villager_activity_modifier(function(tod) ... end)` adds a
++schedule modifier. The callback receives time in 0–23999 game ticks and
++returns an activity string or `nil` to use the default schedule. Modifiers run
++in registration order; the first non-`nil` result wins. Thunderstorms always
++take precedence and send villagers to sleep.
++
+ ### Help
+ * Item help texts: `HELP/doc/doc_items`
+ * Low-level help entry and category framework: `HELP/doc/doc`
+diff --git a/mods/ENTITIES/mobs_mc/villager.lua b/mods/ENTITIES/mobs_mc/villager.lua
+index 305f24c..7941694 100644
+--- a/mods/ENTITIES/mobs_mc/villager.lua
++++ b/mods/ENTITIES/mobs_mc/villager.lua
+@@ -700,6 +700,28 @@ end
+ 
+ jobsites = populate_jobsites()
+ 
++-- Mods may add professions after mobs_mc has initialized. Keep the native
++-- jobsite search list in sync so both new and saved villagers can claim them.
++function mobs_mc.register_villager_profession(id, definition)
++	assert(type(id) == "string" and id ~= "", "villager profession id must be a nonempty string")
++	assert(not professions[id], "villager profession already registered: " .. id)
++	assert(type(definition) == "table" and type(definition.name) == "string"
++		and type(definition.texture) == "string" and type(definition.jobsite) == "string"
++		and type(definition.trades) == "table", "invalid villager profession definition")
++	professions[id] = table.copy(definition)
++	table.insert(profession_names, id)
++	jobsites = populate_jobsites()
++end
++
++local activity_modifiers = {}
++
++-- A modifier receives the current time in game ticks and may return an
++-- activity string. Returning nil leaves the default schedule in control.
++function mobs_mc.register_villager_activity_modifier(modifier)
++	assert(type(modifier) == "function", "villager activity modifier must be a function")
++	table.insert(activity_modifiers, modifier)
++end
++
+ local function stand_still(self)
+ 	self.walk_chance = 0
+ 	self.jump = false
+@@ -760,6 +782,14 @@ function get_activity(tod)
+ 	if weather_mod and mcl_weather.get_weather() == "thunder" then
+ 		mcl_log("Better get to bed. Weather is: " .. mcl_weather.get_weather())
+ 		activity = SLEEP
++	else
++		for _, modifier in ipairs(activity_modifiers) do
++			activity = modifier(tod)
++			if activity ~= nil then return activity end
++		end
++	end
++	if activity == SLEEP then
++		return activity
+ 	elseif (tod > work_start and tod < lunch_start) or  (tod > lunch_end and tod < work_end) then
+ 		activity = WORK
+ 	elseif is_night() then

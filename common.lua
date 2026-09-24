@@ -13,6 +13,7 @@ local workstation_nodes = {
 	["mcl_smithing_table:table"] = true,
 	["mcl_brewing:stand_000"] = true,
 	["mcl_stonecutter:stonecutter"] = true,
+	["mcl_jukebox:jukebox"] = true,
 }
 local farm_replant_nodes = {
 	["mcl_farming:wheat"] = "mcl_farming:wheat_1",
@@ -36,14 +37,20 @@ local workstation_professions = {
 	["mcl_smithing_table:table"] = "tool_smith",
 	["mcl_brewing:stand_000"] = "cleric",
 	["mcl_stonecutter:stonecutter"] = "mason",
+	["mcl_jukebox:jukebox"] = "tavern_keeper",
 }
 local workstation_search_node_names = {"group:cauldron"}
 for name in pairs(workstation_nodes) do table.insert(workstation_search_node_names, name) end
 
+local function tavern_supported()
+	return mobs_mc and mobs_mc.register_villager_profession
+		and mobs_mc.register_villager_activity_modifier
+end
+
 return {
 	is_sleep_time = function()
 		local tod = core.get_timeofday() * 24000
-		return tod > 17500 or tod < 6500
+		return tod >= (tavern_supported() and 18500 or 17500) or tod < 6500
 			or (mcl_weather and mcl_weather.get_weather
 				and mcl_weather.get_weather() == "thunder")
 	end,
@@ -52,7 +59,16 @@ return {
 			return false
 		end
 		local tod = core.get_timeofday() * 24000
-		return (tod > 7500 and tod < 11000) or (tod > 13500 and tod < 16000)
+		return (tod > 7500 and tod < 11000)
+			or (tod > 13500 and tod < (tavern_supported() and 15000 or 16000))
+	end,
+	is_dinner_time = function()
+		if not tavern_supported() then return false end
+		if mcl_weather and mcl_weather.get_weather and mcl_weather.get_weather() == "thunder" then
+			return false
+		end
+		local tod = core.get_timeofday() * 24000
+		return tod >= 15000 and tod < 18500
 	end,
 	is_workstation_node = function(name)
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
