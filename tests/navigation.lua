@@ -1,6 +1,7 @@
 local now = 100
-local gopath_target, arrived, preflight_start, preflight_range = nil, nil, nil, nil
+local gopath_target, arrived, preflight_start, preflight_range, preflight_found = nil, nil, nil, nil, nil
 local path_available = true
+local required_path_range = 0
 local support_available = true
 local wooden_door = false
 local glass_pane = false
@@ -52,7 +53,8 @@ minetest = {
 	end,
 	find_path = function(start, _, range)
 		preflight_start, preflight_range = start, range
-		return path_available and {{x = 1, y = 0, z = 0}} or nil
+		preflight_found = path_available and range >= required_path_range
+		return preflight_found and {{x = 1, y = 0, z = 0}} or nil
 	end,
 	get_objects_inside_radius = function() return nearby_objects end,
 	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
@@ -92,11 +94,25 @@ local entity = {
 }
 assert(def.gopath(entity, entity._bed, function() end, true))
 assert(gopath_target and not (gopath_target.x == 0 and gopath_target.z == 0))
-assert(preflight_start.y == 1 and preflight_range == 25)
+assert(preflight_start.y == 1 and preflight_range == 40)
 assert(entity._villages_bed_route.status == "travelling")
 arrived(entity)
 assert(entity.order == "sleep")
 assert(entity._villages_bed_route.status == "arrived")
+
+-- Routes just beyond the legacy 25-node preflight remain eligible for the
+-- engine path check under the expanded 40-node bound.
+required_path_range = 26
+local expanded_range_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(def.gopath(expanded_range_entity, expanded_range_entity._bed, nil, true))
+assert(preflight_range == 40 and preflight_found)
+required_path_range = 0
 
 -- A pane is non-walkable but has collision geometry, so it cannot be used as
 -- a standing position beside a bed.
