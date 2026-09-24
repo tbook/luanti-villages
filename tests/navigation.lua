@@ -512,9 +512,17 @@ local exhausted_recovery_entity = {
 assert(recovery_def.gopath(exhausted_recovery_entity, exhausted_recovery_entity._bed, nil, true))
 exhausted_recovery_entity.state = "stand"
 support_available = false
+local no_bed_approach_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	if pos.y == -1 and pos.x >= 4 then return {name = "stone"} end
+	return no_bed_approach_node(pos)
+end
 recovery_def.do_custom(exhausted_recovery_entity, 0.1)
 assert(exhausted_recovery_entity._villages_bed_route.status == "retry")
 assert(exhausted_recovery_entity._villages_bed_route.reason:find("stair planner", 1, true))
+assert(exhausted_recovery_entity._villages_bed_route.reason:find("after 0 nodes", 1, true))
+assert(exhausted_recovery_entity._villages_bed_route.planner.searched == 0)
+minetest.get_node_or_nil = no_bed_approach_node
 support_available = true
 
 -- A wooden door that becomes iron after planning causes an immediate bounded

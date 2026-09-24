@@ -190,11 +190,12 @@ local function cancel_route(self, route_field)
 	if route and route.status == "travelling" then stop(self) end
 end
 
-local function fail(self, route_field, reason, target, retry_seconds)
+local function fail(self, route_field, reason, target, retry_seconds, planner_report)
 	local now = core.get_gametime()
 	set_route(self, route_field, {
 		status = "retry", reason = reason, retry_at = now + (retry_seconds or RETRY_SECONDS),
 		target = target and vector.new(target) or nil,
+		planner = planner_report,
 	})
 	stop(self)
 end
@@ -262,29 +263,48 @@ local function plan_stair_route(self, candidates)
 	local start = self.object:get_pos()
 	start = start and nearest_walk_position(start)
 	if not start then return nil, nil, "stair planner found no nearby walk position" end
+	if #candidates == 0 then
+		return nil, nil, "stair planner found no route after 0 nodes", nil, {
+			start = vector.new(start), candidates = {}, status = "unreachable", searched = 0, trail = {},
+		}
+	end
 	local function can_stand(pos)
 		return is_open(pos, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
 	end
-	local visited, hit_search_limit = 0, false
-	local best_target, best_path, best_cost
-	for _, target in ipairs(candidates) do
-		local path, searched, status = planner.find_path(start, can_stand, function(pos)
-			return same_pos(pos, target)
-		end, {
-			range = 48,
-			heuristic = function(pos) return math.abs(pos.x - target.x) + math.abs(pos.z - target.z) + math.abs(pos.y - target.y) end,
-		})
-		visited = visited + searched
-		if path then
-			local cost = path_cost(path)
-			if not best_cost or cost < best_cost then best_target, best_path, best_cost = target, path, cost end
-		elseif status == "search_limit" then
-			hit_search_limit = true
+	local targets = {}
+	for _, target in ipairs(candidates) do targets[target.x .. ":" .. target.y .. ":" .. target.z] = target end
+	-- Bed approaches share nearly all of their map search. Search them as one
+	-- multi-goal route so two open sides do not each consume the full budget.
+	local function distance_to_target(pos)
+		local best
+		for _, target in pairs(targets) do
+			local distance = math.abs(pos.x - target.x) + math.abs(pos.z - target.z) + math.abs(pos.y - target.y)
+			if not best or distance < best then best = distance end
 		end
+		return best
 	end
-	if best_path then return best_target, best_path, nil, best_cost end
-	local outcome = hit_search_limit and "reached its search limit" or "found no route"
-	return nil, nil, string.format("stair planner %s after %d nodes", outcome, visited)
+	local path, visited, status, details = planner.find_path(start, can_stand, function(pos)
+		return targets[pos.x .. ":" .. pos.y .. ":" .. pos.z] ~= nil
+	end, {
+		range = 48,
+		heuristic = distance_to_target,
+		distance = distance_to_target,
+	})
+	local report = {
+		start = vector.new(start), candidates = {}, status = status, searched = visited,
+		closest = details and details.closest and vector.new(details.closest) or nil,
+		closest_distance = details and details.closest_distance or nil,
+		closest_cost = details and details.closest_cost or nil,
+		trail = {},
+	}
+	for _, target in pairs(targets) do table.insert(report.candidates, vector.new(target)) end
+	for _, pos in ipairs(details and details.closest_path or {}) do table.insert(report.trail, vector.new(pos)) end
+	if path then
+		local target = path[#path]
+		return target, path, nil, path_cost(path), report
+	end
+	local outcome = status == "search_limit" and "reached its search limit" or "found no route"
+	return nil, nil, string.format("stair planner %s after %d nodes", outcome, visited), nil, report
 end
 
 local function has_traded(self)
@@ -380,17 +400,18 @@ end
 local function recover_route(self, destination)
 	local route = self[destination.route_field]
 	if not route or route.status ~= "travelling" or self.state == PATHFINDING then return false end
-	local planner_failure
+	local planner_failure, planner_report
 	-- A legacy route may start successfully, then wedge on stairs or a door.
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
 		local target, path
-		target, path, planner_failure = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
+		target, path, planner_failure, _, planner_report = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
 		if target and path then
 			local recovered = set_route(self, destination.route_field, {
 				status = "travelling", mode = "planner", target = vector.new(target),
 				started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
 				site = route.site and vector.new(route.site) or nil,
+				planner = planner_report,
 			})
 			if start_engine_path(self, target, path,
 				arrival_callback(destination.route_field, recovered.id, target, route.callback, destination.sleep), true) then
@@ -402,7 +423,7 @@ local function recover_route(self, destination)
 	local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
 		and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
 		or destination.kind .. " route was canceled before arrival"
-	fail(self, destination.route_field, planner_failure or reason, route.target)
+	fail(self, destination.route_field, planner_failure or reason, route.target, nil, planner_report)
 	return false
 end
 
@@ -560,19 +581,21 @@ local function install(def)
 			self[destination.route_field].mode = "engine"
 			return true
 		end
-		local stair_target, stair_path, planner_failure
+		local stair_target, stair_path, planner_failure, _, planner_report
 		if destination.planner_path then
 			stair_target, stair_path = destination.target, destination.planner_path
 		else
-			stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
+			stair_target, stair_path, planner_failure, _, planner_report = plan_stair_route(self, candidates)
 		end
 		if stair_target and start_engine_path(self, stair_target, stair_path,
 			arrival_callback(destination.route_field, route.id, stair_target, callback_arrived, destination.sleep), true) then
 			self[destination.route_field].target = vector.new(stair_target)
 			self[destination.route_field].mode = "planner"
+			self[destination.route_field].planner = planner_report
 			return true
 		end
-		fail(self, destination.route_field, planner_failure or "pathfinder could not start a route to " .. destination.kind, candidate)
+		fail(self, destination.route_field, planner_failure or "pathfinder could not start a route to " .. destination.kind,
+			candidate, nil, planner_report)
 		return false
 	end
 
