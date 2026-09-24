@@ -20,16 +20,19 @@ local function heuristic(a, b)
 	return math.abs(a.x - b.x) + math.abs(a.z - b.z) + math.abs(a.y - b.y) * 1.25
 end
 
-local function push(heap, node)
-	table.insert(heap, node)
+-- Heap entries are immutable snapshots. A better route to an open position
+-- pushes a new entry instead of mutating one that is already in the heap;
+-- stale snapshots are discarded when popped.
+local function push(heap, entry)
+	table.insert(heap, entry)
 	local i = #heap
 	while i > 1 do
 		local parent = math.floor(i / 2)
-		if heap[parent].f <= node.f then break end
+		if heap[parent].f <= entry.f then break end
 		heap[i] = heap[parent]
 		i = parent
 	end
-	heap[i] = node
+	heap[i] = entry
 end
 
 local function pop(heap)
@@ -61,7 +64,8 @@ end
 
 -- `can_stand(pos)` returns true for an open, head-clear walk position with
 -- support beneath. Positions have integral coordinates. `goal(pos)` returns
--- true for an acceptable arrival position.
+-- true for an acceptable arrival position. The third return value is `found`,
+-- `unreachable`, or `search_limit`.
 function planner.find_path(start, can_stand, goal, options)
 	options = options or {}
 	local range = options.range or 48
@@ -75,16 +79,17 @@ function planner.find_path(start, can_stand, goal, options)
 	local start_key = key(start)
 	local start_node = {pos = copy(start), g = 0, f = 0}
 	nodes[start_key] = start_node
-	push(open, start_node)
+	push(open, {key = start_key, g = 0, f = 0})
 	local visited = 0
 
 	while #open > 0 and visited < max_nodes do
-		local current = pop(open)
-		local current_key = key(current.pos)
-		if not closed[current_key] then
+		local entry = pop(open)
+		local current = nodes[entry.key]
+		if current and not closed[entry.key] and current.g == entry.g then
+			local current_key = entry.key
 			closed[current_key] = true
 			visited = visited + 1
-			if goal(current.pos) then return reconstruct(nodes, current), visited end
+			if goal(current.pos) then return reconstruct(nodes, current), visited, "found" end
 
 			for _, direction in ipairs(directions) do
 				for _, dy in ipairs(vertical_offsets) do
@@ -102,11 +107,10 @@ function planner.find_path(start, can_stand, goal, options)
 							local g = current.g + 1 + math.abs(dy) * 0.25
 							local known = nodes[next_key]
 							if not known or g < known.g then
-								local node = known or {pos = next_pos}
-								node.g, node.parent = g, current_key
+								local node = {pos = next_pos, g = g, parent = current_key}
 								node.f = g + (options.heuristic and options.heuristic(next_pos) or 0)
 								nodes[next_key] = node
-								push(open, node)
+								push(open, {key = next_key, g = node.g, f = node.f})
 							end
 						end
 						break -- Prefer the smallest vertical change for this direction.
@@ -115,7 +119,7 @@ function planner.find_path(start, can_stand, goal, options)
 			end
 		end
 	end
-	return nil, visited
+	return nil, visited, visited >= max_nodes and "search_limit" or "unreachable"
 end
 
 planner.heuristic = heuristic

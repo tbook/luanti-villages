@@ -31,8 +31,14 @@ local flat_path = planner.find_path({x = 0, y = 1, z = 0}, flat_can_stand,
 	{range = 8, heuristic = function(pos) return planner.heuristic(pos, {x = 2, y = 1, z = 0}) end})
 assert(flat_path and flat_path[2].y == 1)
 
-local none = planner.find_path({x = 0, y = 1, z = 0}, can_stand,
+local none, _, none_status = planner.find_path({x = 0, y = 1, z = 0}, can_stand,
 	function(pos) return pos.x == 9 end, {range = 8})
 assert(none == nil)
+assert(none_status == "unreachable")
+
+local _, limited_visited, limit_status = planner.find_path({x = 0, y = 1, z = 0},
+	function() return true end, function() return false end, {range = 8, max_nodes = 2})
+assert(limited_visited == 2)
+assert(limit_status == "search_limit")
 
 print("planner.lua: ok")

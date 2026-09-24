@@ -179,15 +179,28 @@ local function arrival_callback(route_field, route_id, target, callback_arrived,
 	end
 end
 
+local function path_cost(path)
+	local cost = 0
+	for index = 2, #path do
+		cost = cost + 1 + math.abs(path[index].y - path[index - 1].y) * 0.25
+	end
+	return cost
+end
+
 local function choose_approach(self, candidates)
 	local start = self.object:get_pos()
 	if not start then return nil end
 	start = legacy_path_start(start)
 	if not start then return nil end
+	local best_candidate, best_path, best_cost
 	for _, candidate in ipairs(candidates) do
 		local path = core.find_path(start, candidate, PATH_RANGE, 1, 4)
-		if path then return candidate, path end
+		local cost = path and path_cost(path)
+		if cost and (not best_cost or cost < best_cost) then
+			best_candidate, best_path, best_cost = candidate, path, cost
+		end
 	end
+	if best_path then return best_candidate, best_path, best_cost end
 	-- The legacy gopath has limited door stitching of its own. Let it attempt a
 	-- safe candidate even when the plain engine route cannot see one.
 	return candidates[1]
@@ -220,18 +233,26 @@ local function plan_stair_route(self, candidates)
 	local function can_stand(pos)
 		return is_open(pos, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
 	end
-	local visited = 0
+	local visited, hit_search_limit = 0, false
+	local best_target, best_path, best_cost
 	for _, target in ipairs(candidates) do
-		local path, searched = planner.find_path(start, can_stand, function(pos)
+		local path, searched, status = planner.find_path(start, can_stand, function(pos)
 			return same_pos(pos, target)
 		end, {
 			range = 48,
 			heuristic = function(pos) return math.abs(pos.x - target.x) + math.abs(pos.z - target.z) + math.abs(pos.y - target.y) end,
 		})
-		if path then return target, path end
 		visited = visited + searched
+		if path then
+			local cost = path_cost(path)
+			if not best_cost or cost < best_cost then best_target, best_path, best_cost = target, path, cost end
+		elseif status == "search_limit" then
+			hit_search_limit = true
+		end
 	end
-	return nil, nil, string.format("stair planner found no route after %d nodes", visited)
+	if best_path then return best_target, best_path, nil, best_cost end
+	local outcome = hit_search_limit and "reached its search limit" or "found no route"
+	return nil, nil, string.format("stair planner %s after %d nodes", outcome, visited)
 end
 
 local function has_traded(self)
@@ -244,6 +265,16 @@ local function has_traded(self)
 	return false
 end
 
+local function better_jobsite(pos, site, cost, best)
+	if not best or cost < best.cost then return true end
+	if cost ~= best.cost then return false end
+	local distance, best_distance = vector.distance(pos, site), vector.distance(pos, best.site)
+	if distance ~= best_distance then return distance < best_distance end
+	if site.x ~= best.site.x then return site.x < best.site.x end
+	if site.y ~= best.site.y then return site.y < best.site.y end
+	return site.z < best.site.z
+end
+
 -- Do not claim here: native get_a_job still finds this station within one
 -- block and invokes its own employ function after the villager arrives.
 local function job_search_target(self)
@@ -253,8 +284,8 @@ local function job_search_target(self)
 	local minp = {x = pos.x - 48, y = pos.y - 48, z = pos.z - 48}
 	local maxp = {x = pos.x + 48, y = pos.y + 48, z = pos.z + 48}
 	local sites = core.find_nodes_in_area(minp, maxp, common.workstation_search_nodes())
-	table.sort(sites, function(a, b) return vector.distance(pos, a) < vector.distance(pos, b) end)
 	local profession = has_traded(self) and self._profession or nil
+	local best
 	for _, site in ipairs(sites) do
 		local node = core.get_node_or_nil(site)
 		if node and core.get_meta(site):get_string("villager") == ""
@@ -262,16 +293,22 @@ local function job_search_target(self)
 			-- Native employ uses find_node_near(..., 1, ...); a diagonal
 			-- destination is not close enough to complete the native claim.
 			local candidates = approaches(site, true)
-			local approach, engine_path = choose_approach(self, candidates)
+			local approach, engine_path, engine_cost = choose_approach(self, candidates)
 			if engine_path then
-				return {site = site, candidates = candidates, target = approach, engine_path = engine_path}
-			end
-			local stair_target, stair_path = plan_stair_route(self, candidates)
-			if stair_target and stair_path then
-				return {site = site, candidates = candidates, target = stair_target, planner_path = stair_path}
+				if better_jobsite(pos, site, engine_cost, best) then
+					best = {site = site, candidates = candidates, target = approach,
+						engine_path = engine_path, cost = engine_cost}
+				end
+			else
+				local stair_target, stair_path, _, stair_cost = plan_stair_route(self, candidates)
+				if stair_target and stair_path and better_jobsite(pos, site, stair_cost, best) then
+					best = {site = site, candidates = candidates, target = stair_target,
+						planner_path = stair_path, cost = stair_cost}
+				end
 			end
 		end
 	end
+	return best
 end
 
 -- gopath occasionally rejects a path that minetest.find_path has returned,
