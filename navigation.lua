@@ -348,10 +348,12 @@ end
 local function recover_route(self, destination)
 	local route = self[destination.route_field]
 	if not route or route.status ~= "travelling" or self.state == PATHFINDING then return false end
+	local planner_failure
 	-- A legacy route may start successfully, then wedge on stairs or a door.
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
-		local target, path = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
+		local target, path
+		target, path, planner_failure = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
 		if target and path then
 			local recovered = set_route(self, destination.route_field, {
 				status = "travelling", mode = "planner", target = vector.new(target),
@@ -368,7 +370,7 @@ local function recover_route(self, destination)
 	local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
 		and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
 		or destination.kind .. " route was canceled before arrival"
-	fail(self, destination.route_field, reason, route.target)
+	fail(self, destination.route_field, planner_failure or reason, route.target)
 	return false
 end
 

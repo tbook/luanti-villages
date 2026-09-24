@@ -443,6 +443,23 @@ recovery_entity.callback_arrived(recovery_entity)
 assert(bed_callback_called)
 path_available = true
 
+-- A fallback planner failure is preserved in route diagnostics instead of being
+-- reported as a generic native-path cancellation.
+local exhausted_recovery_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(recovery_def.gopath(exhausted_recovery_entity, exhausted_recovery_entity._bed, nil, true))
+exhausted_recovery_entity.state = "stand"
+support_available = false
+recovery_def.do_custom(exhausted_recovery_entity, 0.1)
+assert(exhausted_recovery_entity._villages_bed_route.status == "retry")
+assert(exhausted_recovery_entity._villages_bed_route.reason:find("stair planner", 1, true))
+support_available = true
+
 -- A work-period interruption invalidates a farm route and its chosen crop as
 -- one unit, so farmer.lua can choose a fresh crop next time work begins.
 timeofday = 0.5

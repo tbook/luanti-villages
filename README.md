@@ -21,6 +21,10 @@ owner directly. Owner IDs are resolved to a nearby loaded villager where
 possible. The tool retains its normal lookup behavior for all other targets
 and players.
 
+[`docs/navigation-scenarios.md`](docs/navigation-scenarios.md) provides
+repeatable in-game scenarios for complex bed returns, first-job selection,
+reloads, following, shared doors, and bounded-search failures.
+
 For night-time bed trips, Villages first uses VoxeLibre's normal pathing and
 then falls back to a bounded route planner that can follow ordinary stairs and
 wooden doors. Iron doors remain impassable. The planner is currently used for

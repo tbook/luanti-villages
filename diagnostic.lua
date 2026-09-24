@@ -103,15 +103,26 @@ end
 
 local function route_status(route)
 	if not route then return "none" end
+	local details = {}
+	if route.id then table.insert(details, "id " .. route.id) end
+	if route.mode then table.insert(details, "mode " .. route.mode) end
+	if route.started_at then
+		table.insert(details, string.format("age %.0fs", math.max(core.get_gametime() - route.started_at, 0)))
+	end
+	if route.last_progress_at then
+		table.insert(details, string.format("progress %.0fs ago", math.max(core.get_gametime() - route.last_progress_at, 0)))
+	end
+	if route.last_progress_pos then table.insert(details, "last " .. pos_string(route.last_progress_pos)) end
+	local suffix = #details > 0 and " [" .. table.concat(details, ", ") .. "]" or ""
 	if route.status == "travelling" then
-		return "travelling to " .. pos_string(route.target)
+		return "travelling to " .. pos_string(route.target) .. suffix
 	end
 	if route.status == "retry" then
 		local remaining = math.max((route.retry_at or core.get_gametime()) - core.get_gametime(), 0)
 		local target = route.target and " to " .. pos_string(route.target) or ""
-		return string.format("retry in %.0fs%s: %s", remaining, target, route.reason or "unknown failure")
+		return string.format("retry in %.0fs%s: %s", remaining, target, route.reason or "unknown failure") .. suffix
 	end
-	return route.status
+	return route.status .. suffix
 end
 
 local function work_status(villager, job_ok)
