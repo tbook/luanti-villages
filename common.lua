@@ -21,6 +21,23 @@ local farm_replant_nodes = {
 	["mcl_farming:beetroot"] = "mcl_farming:beetroot_0",
 }
 
+-- Used when a villager who has already traded loses a jobsite: it may seek
+-- only a replacement for its existing profession.
+local workstation_professions = {
+	["mcl_composters:composter"] = "farmer",
+	["mcl_barrels:barrel_closed"] = "fisherman",
+	["mcl_fletching_table:fletching_table"] = "fletcher",
+	["mcl_loom:loom"] = "shepherd",
+	["mcl_lectern:lectern"] = "librarian",
+	["mcl_cartography_table:cartography_table"] = "cartographer",
+	["mcl_blast_furnace:blast_furnace"] = "armorer",
+	["mcl_smoker:smoker"] = "butcher",
+	["mcl_grindstone:grindstone"] = "weapon_smith",
+	["mcl_smithing_table:table"] = "tool_smith",
+	["mcl_brewing:stand_000"] = "cleric",
+	["mcl_stonecutter:stonecutter"] = "mason",
+}
+
 return {
 	is_sleep_time = function()
 		local tod = core.get_timeofday() * 24000
@@ -39,4 +56,13 @@ return {
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
 	farm_replant_node = function(name) return farm_replant_nodes[name] end,
+	workstation_profession = function(name)
+		return workstation_professions[name]
+			or (core.get_item_group(name, "cauldron") > 0 and "leatherworker")
+	end,
+	workstation_search_nodes = function()
+		local names = {"group:cauldron"}
+		for name in pairs(workstation_nodes) do table.insert(names, name) end
+		return names
+	end,
 }

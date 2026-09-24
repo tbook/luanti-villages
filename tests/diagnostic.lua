@@ -72,6 +72,7 @@ local object = {
 			order = "work", state = "stand", waypoints = {{x = 1}}, _villages_birth_check_day = 3,
 			_villages_bed_route = {status = "travelling", target = {x = 1, y = 0, z = 0}},
 			_villages_job_route = {status = "retry", target = {x = 3, y = 0, z = 0}, retry_at = 120, reason = "test"},
+			_villages_job_search_route = {status = "retry", target = {x = 4, y = 0, z = 0}, retry_at = 120, reason = "no route"},
 			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
 		}
 	end,
@@ -88,6 +89,7 @@ assert(shown.form:find("Jobsite claim: assigned jobsite is not claimed by this v
 assert(shown.form:find("travelling to bed", 1, true))
 assert(shown.form:find("Bed route: travelling to (1.0, 0.0, 0.0)", 1, true))
 assert(shown.form:find("Jobsite route: retry in 20s to (3.0, 0.0, 0.0): test", 1, true))
+assert(shown.form:find("Job search route: retry in 20s to (4.0, 0.0, 0.0): no route", 1, true))
 assert(shown.form:find("Births: checked today; local cooldown until day 4", 1, true))
 assert(original_uses == 0)
 

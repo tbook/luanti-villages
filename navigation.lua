@@ -71,13 +71,15 @@ local function legacy_path_start(pos)
 	return core.find_node_near(start, 1, {"air"})
 end
 
-local function approaches(bed)
+local function approaches(node_pos, cardinal_only)
 	local result = {}
-	for _, offset in ipairs({
+	local offsets = {
 		{x = 1, z = 0}, {x = -1, z = 0}, {x = 0, z = 1}, {x = 0, z = -1},
 		{x = 1, z = 1}, {x = 1, z = -1}, {x = -1, z = 1}, {x = -1, z = -1},
-	}) do
-		local pos = {x = bed.x + offset.x, y = bed.y, z = bed.z + offset.z}
+	}
+	for index, offset in ipairs(offsets) do
+		if cardinal_only and index > 4 then break end
+		local pos = {x = node_pos.x + offset.x, y = node_pos.y, z = node_pos.z + offset.z}
 		if is_open(pos) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
 			and is_supported(pos) then
 			table.insert(result, pos)
@@ -190,6 +192,46 @@ local function plan_stair_route(self, candidates)
 	return nil, nil, string.format("stair planner found no route after %d nodes", visited)
 end
 
+local function has_traded(self)
+	if not self._trades or not core.deserialize then return false end
+	local trades = core.deserialize(self._trades)
+	if type(trades) ~= "table" then return false end
+	for _, trade in pairs(trades) do
+		if type(trade) == "table" and trade.traded_once then return true end
+	end
+	return false
+end
+
+-- Do not claim here: native get_a_job still finds this station within one
+-- block and invokes its own employ function after the villager arrives.
+local function job_search_target(self)
+	if self._jobsite or not self._id then return end
+	local pos = self.object:get_pos()
+	if not pos then return end
+	local minp = {x = pos.x - 48, y = pos.y - 48, z = pos.z - 48}
+	local maxp = {x = pos.x + 48, y = pos.y + 48, z = pos.z + 48}
+	local sites = core.find_nodes_in_area(minp, maxp, common.workstation_search_nodes())
+	table.sort(sites, function(a, b) return vector.distance(pos, a) < vector.distance(pos, b) end)
+	local profession = has_traded(self) and self._profession or nil
+	for _, site in ipairs(sites) do
+		local node = core.get_node_or_nil(site)
+		if node and core.get_meta(site):get_string("villager") == ""
+			and (not profession or common.workstation_profession(node.name) == profession) then
+			-- Native employ uses find_node_near(..., 1, ...); a diagonal
+			-- destination is not close enough to complete the native claim.
+			local candidates = approaches(site, true)
+			local approach, engine_path = choose_approach(self, candidates)
+			if engine_path then
+				return {site = site, candidates = candidates, target = approach, engine_path = engine_path}
+			end
+			local stair_target, stair_path = plan_stair_route(self, candidates)
+			if stair_target and stair_path then
+				return {site = site, candidates = candidates, target = stair_target, planner_path = stair_path}
+			end
+		end
+	end
+end
+
 -- gopath occasionally rejects a path that minetest.find_path has returned,
 -- particularly from stair landings. Reuse its waypoint mover directly for that
 -- narrow case, rather than abandoning a known-valid route.
@@ -230,11 +272,12 @@ local function recover_route(self, destination)
 	-- A legacy route may start successfully, then wedge on stairs or a door.
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
-		local target, path = plan_stair_route(self, approaches(destination.pos))
+		local target, path = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
 		if target and path then
 			self[destination.route_field] = {
 				status = "travelling", mode = "planner", target = vector.new(target),
 				started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
+				site = route.site and vector.new(route.site) or nil,
 			}
 			if start_engine_path(self, target, path,
 				arrival_callback(destination.route_field, target, route.callback, destination.sleep), true) then
@@ -263,6 +306,7 @@ local function install(def)
 		self._villages_job_route = nil
 		self._villages_farm_route = nil
 		self._villages_farm_target = nil
+		self._villages_job_search_route = nil
 		self._villages_pending_door_closes = nil
 		return result
 	end
@@ -279,6 +323,7 @@ local function install(def)
 
 	def.gopath = function(self, target, callback_arrived, prioritised)
 		local destination
+		local no_jobsite_candidate = false
 		if self._bed and same_pos(target, self._bed) and is_sleep_time() then
 			destination = {
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
@@ -296,6 +341,28 @@ local function install(def)
 				pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
 				claimed = has_farm_target,
 			}
+		elseif not self._jobsite and not is_sleep_time() then
+			local node = core.get_node_or_nil(target)
+			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
+				local selection = job_search_target(self)
+				if selection then
+					destination = {
+						pos = selection.site, site = selection.site, candidates = selection.candidates,
+						target = selection.target, engine_path = selection.engine_path, planner_path = selection.planner_path,
+						route_field = "_villages_job_search_route", kind = "jobsite search",
+						cardinal_only = true,
+						claimed = function(entity)
+							return not entity._jobsite and core.get_meta(selection.site):get_string("villager") == ""
+						end,
+					}
+				else
+					destination = {
+						pos = target, route_field = "_villages_job_search_route", kind = "jobsite search",
+						claimed = function() return false end,
+					}
+					no_jobsite_candidate = true
+				end
+			end
 		end
 		if not destination then
 			return original_gopath(self, target, callback_arrived, prioritised)
@@ -307,6 +374,10 @@ local function install(def)
 			stop(self)
 			return false
 		end
+		if no_jobsite_candidate then
+			fail(self, destination.route_field, "no reachable unclaimed workstation", target)
+			return false
+		end
 		-- gopath enforces its own failure cooldown. Check it before selecting an
 		-- approach so that a restart or a quick retry is reported accurately.
 		if self.ready_to_path and not self:ready_to_path(true) then
@@ -316,8 +387,9 @@ local function install(def)
 			return false
 		end
 
-		local candidates = approaches(destination.pos)
-		local candidate, engine_path = choose_approach(self, candidates)
+		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only)
+		local candidate, engine_path = destination.target, destination.engine_path
+		if not candidate then candidate, engine_path = choose_approach(self, candidates) end
 		if not candidate then
 			fail(self, destination.route_field, "no safe standing space beside " .. destination.kind)
 			return false
@@ -326,6 +398,7 @@ local function install(def)
 		self[destination.route_field] = {
 			status = "travelling", mode = "legacy", target = vector.new(candidate), started_at = now,
 			wall_started_at = os.time(), callback = callback_arrived,
+			site = destination.site and vector.new(destination.site) or nil,
 		}
 		local arrived = arrival_callback(destination.route_field, candidate, callback_arrived, destination.sleep)
 		local started = original_gopath(self, candidate, arrived, true)
@@ -334,7 +407,12 @@ local function install(def)
 			self[destination.route_field].mode = "engine"
 			return true
 		end
-		local stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
+		local stair_target, stair_path, planner_failure
+		if destination.planner_path then
+			stair_target, stair_path = destination.target, destination.planner_path
+		else
+			stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
+		end
 		if stair_target and start_engine_path(self, stair_target, stair_path,
 			arrival_callback(destination.route_field, stair_target, callback_arrived, destination.sleep), true) then
 			self[destination.route_field].target = vector.new(stair_target)
@@ -388,6 +466,22 @@ local function install(def)
 			claimed = has_farm_target,
 		}) then
 			return result
+		end
+		if self._jobsite or is_sleep_time() then
+			self._villages_job_search_route = nil
+		else
+			local search_route = self._villages_job_search_route
+			if search_route and search_route.site and recover_route(self, {
+				pos = search_route.site, route_field = "_villages_job_search_route", kind = "jobsite search",
+				cardinal_only = true,
+				claimed = function(entity)
+					local route = entity._villages_job_search_route
+					return route and route.site and not entity._jobsite
+						and core.get_meta(route.site):get_string("villager") == ""
+				end,
+			}) then
+				return result
+			end
 		end
 		return result
 	end
