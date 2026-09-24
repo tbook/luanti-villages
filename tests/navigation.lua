@@ -3,6 +3,7 @@ local gopath_target, arrived, preflight_start, preflight_range = nil, nil, nil, 
 local path_available = true
 local support_available = true
 local wooden_door = false
+local glass_pane = false
 local timeofday = 0.8
 local jobsite_present = true
 local nearby_objects = {}
@@ -16,6 +17,7 @@ minetest = {
 		["mcl_beds:bed_red_bottom"] = {walkable = false, liquidtype = "none"},
 		["mcl_composters:composter"] = {walkable = true},
 		["mcl_doors:wooden_door_b_1"] = {walkable = false, liquidtype = "none"},
+		["mcl_panes:glass_pane"] = {walkable = false, liquidtype = "none", collision_box = {type = "fixed"}},
 	},
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
@@ -27,6 +29,9 @@ minetest = {
 		end
 		if (pos.x == 20 or pos.x == 30) and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_composters:composter"}
+		end
+		if glass_pane and pos.x == 1 and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_panes:glass_pane"}
 		end
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_doors:wooden_door_b_1"}
@@ -86,6 +91,20 @@ assert(entity._villages_bed_route.status == "travelling")
 arrived(entity)
 assert(entity.order == "sleep")
 assert(entity._villages_bed_route.status == "arrived")
+
+-- A pane is non-walkable but has collision geometry, so it cannot be used as
+-- a standing position beside a bed.
+glass_pane = true
+local pane_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(def.gopath(pane_entity, pane_entity._bed, nil, true))
+assert(gopath_target.x == -1 and gopath_target.z == 0)
+glass_pane = false
 
 def.do_custom(entity, 0.1)
 assert(entity._villages_bed_route.status == "arrived")

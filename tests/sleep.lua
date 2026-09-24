@@ -76,9 +76,9 @@ mcl_mobs = {mob_class = {
 
 dofile("init.lua")
 
-local function make_villager(id, is_child)
+local function make_villager(id, is_child, start_pos)
 	local props = {mesh = "old.b3d", textures = {"old.png"}}
-	local pos = {x = 0, y = 0, z = 0}
+	local pos = start_pos or {x = 0, y = 0, z = 0}
 	local self = {
 		name = "mobs_mc:villager", _id = id, _bed = bed,
 		_profession = "weapon_smith", _max_trade_tier = 2,
@@ -98,7 +98,7 @@ local function make_villager(id, is_child)
 	return self, props
 end
 
-local alice, alice_props = make_villager("alice")
+local alice, alice_props = make_villager("alice", false, {x = 1, y = 0, z = 0})
 objects = {alice.object}
 entity_def.on_activate(alice, "", 0)
 assert(alice._villages_sleeping)
@@ -118,6 +118,11 @@ alice_props.textures = {"old.png"} -- VoxeLibre refreshes this after a trade.
 entity_def.do_custom(alice, 0.6)
 assert(alice_props.textures[1]:find("badge_gold", 1, true))
 
+-- Reactivation while asleep must retain the pre-sleep exit, rather than
+-- replacing it with the in-bed sleeping position.
+entity_def.on_activate(alice, "", 0)
+assert(alice._villages_sleeping)
+
 local bob = make_villager("bob")
 objects = {alice.object, bob.object}
 entity_def.on_activate(bob, "", 0)
@@ -128,6 +133,9 @@ entity_def.do_custom(alice, 1)
 assert(not alice._villages_sleeping)
 assert(alice.last_animation == "stand")
 assert(alice_props.collisionbox[5] == 1.94)
+local alice_pos = alice.object:get_pos()
+assert(alice_pos.x == 1 and alice_pos.y == 0 and alice_pos.z == 0,
+	"waking must return a villager to its pre-sleep standing position")
 
 metadata[key(top)].player = "player1"
 local player_bed_villager = make_villager("alice")

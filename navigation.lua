@@ -51,7 +51,8 @@ local function is_open(pos, allow_wooden_door)
 		return allow_wooden_door and core.get_item_group(node.name, "door_iron") == 0
 	end
 	local def = node_def(pos)
-	return def and not def.walkable and (def.liquidtype == nil or def.liquidtype == "none")
+	return def and not def.walkable and (not def.collision_box or def.collision_box.type == "none")
+		and (def.liquidtype == nil or def.liquidtype == "none")
 end
 
 local function is_supported(pos)
