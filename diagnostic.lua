@@ -125,6 +125,30 @@ local function route_status(route)
 	return route.status .. suffix
 end
 
+local function planner_status(route)
+	local report = route and route.planner
+	if not report then return "none" end
+	local approaches = {}
+	for _, pos in ipairs(report.candidates or {}) do table.insert(approaches, pos_string(pos)) end
+	local text = "start " .. pos_string(report.start)
+		.. "; approaches " .. (#approaches > 0 and table.concat(approaches, ", ") or "none")
+		.. "; " .. (report.status or "unknown") .. " after " .. (report.searched or 0) .. " nodes"
+	if report.closest then
+		text = text .. "; closest " .. pos_string(report.closest)
+			.. " (" .. (report.closest_distance or 0) .. " steps from an approach"
+			.. (report.closest_cost and ", route cost " .. string.format("%.2f", report.closest_cost) or "") .. ")"
+	end
+	return text
+end
+
+local function planner_trail(route)
+	local report = route and route.planner
+	if not report or not report.trail or #report.trail == 0 then return "none" end
+	local positions = {}
+	for _, pos in ipairs(report.trail) do table.insert(positions, pos_string(pos)) end
+	return table.concat(positions, " -> ")
+end
+
 local function work_status(villager, job_ok)
 	local route = villager._villages_job_route
 	if route and route.status == "travelling" then return "travelling to jobsite" end
@@ -219,13 +243,19 @@ local function show(player, villager)
 		"Bed claim: " .. bed_status(villager),
 		"Sleep status: " .. sleep_status(villager, bed_ok),
 		"Bed route: " .. route_status(villager._villages_bed_route),
+		"Planner: " .. planner_status(villager._villages_bed_route),
+		"Planner trail: " .. planner_trail(villager._villages_bed_route),
 		"",
 		"Jobsite: " .. pos_string(villager._jobsite) .. " [" .. node_name(villager._jobsite) .. "]",
 		"Jobsite owner: " .. claim_owner(villager._jobsite, villager, "jobsite"),
 		"Jobsite claim: " .. status_of_claim(villager._jobsite, villager._id, "jobsite"),
 		"Work status: " .. work_status(villager, job_ok),
 		"Jobsite route: " .. route_status(villager._villages_job_route),
+		"Jobsite planner: " .. planner_status(villager._villages_job_route),
+		"Jobsite planner trail: " .. planner_trail(villager._villages_job_route),
 		"Job search route: " .. route_status(villager._villages_job_search_route),
+		"Job-search planner: " .. planner_status(villager._villages_job_search_route),
+		"Job-search planner trail: " .. planner_trail(villager._villages_job_search_route),
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}

@@ -53,9 +53,10 @@ local function pop(heap)
 	return first
 end
 
-local function reconstruct(nodes, node)
+local function reconstruct(nodes, node, limit)
 	local path = {}
-	while node do
+	limit = limit or math.huge
+	while node and #path < limit do
 		table.insert(path, 1, copy(node.pos))
 		node = node.parent and nodes[node.parent] or nil
 	end
@@ -69,18 +70,19 @@ end
 function planner.find_path(start, can_stand, goal, options)
 	options = options or {}
 	local range = options.range or 48
-	local max_drop = options.max_drop or 4
 	local max_nodes = options.max_nodes or 4096
-	-- Check level ground first, then a one-node rise, then progressively deeper
-	-- drops. This makes the first valid neighbor the least vertical detour.
-	local vertical_offsets = {0, 1}
-	for drop = 1, max_drop do table.insert(vertical_offsets, -drop) end
+	-- A waypoint mover travels directly between consecutive positions. Limit an
+	-- edge to one level so it cannot cut diagonally through floors or walls on a
+	-- multi-node drop. Consider every valid height: a higher floor beside the
+	-- villager must not hide the stair or descent below it.
+	local vertical_offsets = {0, 1, -1}
 	local open, nodes, closed = {}, {}, {}
 	local start_key = key(start)
 	local start_node = {pos = copy(start), g = 0, f = 0}
 	nodes[start_key] = start_node
 	push(open, {key = start_key, g = 0, f = 0})
 	local visited = 0
+	local closest, closest_distance, closest_cost, closest_path
 
 	while #open > 0 and visited < max_nodes do
 		local entry = pop(open)
@@ -89,7 +91,18 @@ function planner.find_path(start, can_stand, goal, options)
 			local current_key = entry.key
 			closed[current_key] = true
 			visited = visited + 1
-			if goal(current.pos) then return reconstruct(nodes, current), visited, "found" end
+			local distance = options.distance and options.distance(current.pos)
+			if distance and (not closest_distance or distance < closest_distance
+				or (distance == closest_distance and current.g < closest_cost)) then
+				closest, closest_distance, closest_cost = copy(current.pos), distance, current.g
+				closest_path = reconstruct(nodes, current, 12)
+			end
+			if goal(current.pos) then
+				return reconstruct(nodes, current), visited, "found", {
+					closest = closest, closest_distance = closest_distance, closest_cost = closest_cost,
+					closest_path = closest_path,
+				}
+			end
 
 			for _, direction in ipairs(directions) do
 				for _, dy in ipairs(vertical_offsets) do
@@ -113,13 +126,15 @@ function planner.find_path(start, can_stand, goal, options)
 								push(open, {key = next_key, g = node.g, f = node.f})
 							end
 						end
-						break -- Prefer the smallest vertical change for this direction.
 					end
 				end
 			end
 		end
 	end
-	return nil, visited, visited >= max_nodes and "search_limit" or "unreachable"
+	return nil, visited, visited >= max_nodes and "search_limit" or "unreachable", {
+		closest = closest, closest_distance = closest_distance, closest_cost = closest_cost,
+		closest_path = closest_path,
+	}
 end
 
 planner.heuristic = heuristic

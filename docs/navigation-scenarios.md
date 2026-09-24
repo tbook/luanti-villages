@@ -63,6 +63,25 @@ Expected result: diagnostics show a retry whose reason includes `search limit`,
 not a misleading generic cancellation. Removing the obstruction permits a fresh
 route after the retry delay.
 
+## 7. Separate upstairs rooms
+
+Build two adjacent two-floor buildings with an exterior door between them. Put
+a villager in an upstairs room of one building and its bed in the upstairs room
+of the other. The only route should go downstairs, through the door, and up the
+other stair.
+
+Expected result: the villager follows that physical route. It must not attempt
+to cross the separating wall or descend directly through a floor.
+
+## 8. Downstairs bed behind a door
+
+Put a villager upstairs with its bed downstairs, so the proper route reaches an
+adjacent wooden door before descending. Leave the wall between the rooms solid.
+
+Expected result: the villager uses the door and stairs. If the route cannot be
+completed, it enters a bounded retry with a route reason instead of pushing at
+the wall.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.
