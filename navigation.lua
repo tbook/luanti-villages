@@ -14,6 +14,9 @@ local LEGACY_FAILURE_WAIT = 30
 local PATH_RANGE = 25
 local PATHFINDING = "gowp"
 local DOOR_USE_RADIUS = 2.5
+-- Door closes must outlive the villager that scheduled them: an entity can be
+-- unloaded or despawned while another villager is still passing through.
+local deferred_door_closes = {}
 
 local function same_pos(a, b)
 	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
@@ -32,9 +35,9 @@ local function wooden_door_at(pos)
 	end
 end
 
-local function door_is_in_use(self, door)
+local function door_is_in_use(door, ignored_object)
 	for _, object in ipairs(core.get_objects_inside_radius(door, DOOR_USE_RADIUS)) do
-		if object ~= self.object then
+		if object ~= ignored_object then
 			local entity = object:get_luaentity()
 			if entity and entity.name == "mobs_mc:villager" and entity.state == PATHFINDING then
 				return true
@@ -42,6 +45,21 @@ local function door_is_in_use(self, door)
 		end
 	end
 	return false
+end
+
+local function flush_deferred_door_closes()
+	for key, deferred in pairs(deferred_door_closes) do
+		if not wooden_door_at(deferred.action.target) then
+			deferred_door_closes[key] = nil
+		elseif not door_is_in_use(deferred.action.target, deferred.object) then
+			deferred_door_closes[key] = nil
+			deferred.close()
+		end
+	end
+end
+
+if core.register_globalstep then
+	core.register_globalstep(flush_deferred_door_closes)
 end
 
 local function is_open(pos, allow_wooden_door)
@@ -307,15 +325,20 @@ local function install(def)
 		self._villages_farm_route = nil
 		self._villages_farm_target = nil
 		self._villages_job_search_route = nil
-		self._villages_pending_door_closes = nil
 		return result
 	end
 
 	def.do_pathfind_action = function(self, action)
 		if action and action.type == "door" and action.action == "close"
-			and action.target and wooden_door_at(action.target) and door_is_in_use(self, action.target) then
-			self._villages_pending_door_closes = self._villages_pending_door_closes or {}
-			self._villages_pending_door_closes[core.hash_node_position(action.target)] = action
+			and action.target and wooden_door_at(action.target) and door_is_in_use(action.target, self.object) then
+			local key = core.hash_node_position(action.target)
+			deferred_door_closes[key] = {
+				action = action,
+				-- This is compared by identity only during later checks, so it is
+				-- safe if the originating villager has since been removed.
+				object = self.object,
+				close = function() return original_door_action(self, action) end,
+			}
 			return
 		end
 		return original_door_action(self, action)
@@ -324,26 +347,29 @@ local function install(def)
 	def.gopath = function(self, target, callback_arrived, prioritised)
 		local destination
 		local no_jobsite_candidate = false
+		local now = core.get_gametime()
 		if self._bed and same_pos(target, self._bed) and is_sleep_time() then
 			destination = {
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
-				claimed = has_claimed_bed,
 			}
 		elseif self._jobsite and same_pos(target, self._jobsite) and is_work_time()
 			and has_claimed_jobsite(self) then
 			destination = {
 				pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
-				claimed = has_claimed_jobsite,
 			}
 		elseif self._villages_farm_target and same_pos(target, self._villages_farm_target)
 			and is_work_time() and has_farm_target(self) then
 			destination = {
 				pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
-				claimed = has_farm_target,
 			}
 		elseif not self._jobsite and not is_sleep_time() then
 			local node = core.get_node_or_nil(target)
 			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
+				local route = self._villages_job_search_route
+				if route and route.status == "retry" and now < route.retry_at then
+					stop(self)
+					return false
+				end
 				local selection = job_search_target(self)
 				if selection then
 					destination = {
@@ -351,14 +377,10 @@ local function install(def)
 						target = selection.target, engine_path = selection.engine_path, planner_path = selection.planner_path,
 						route_field = "_villages_job_search_route", kind = "jobsite search",
 						cardinal_only = true,
-						claimed = function(entity)
-							return not entity._jobsite and core.get_meta(selection.site):get_string("villager") == ""
-						end,
 					}
 				else
 					destination = {
 						pos = target, route_field = "_villages_job_search_route", kind = "jobsite search",
-						claimed = function() return false end,
 					}
 					no_jobsite_candidate = true
 				end
@@ -368,7 +390,6 @@ local function install(def)
 			return original_gopath(self, target, callback_arrived, prioritised)
 		end
 
-		local now = core.get_gametime()
 		local route = self[destination.route_field]
 		if route and route.status == "retry" and now < route.retry_at then
 			stop(self)
@@ -425,15 +446,9 @@ local function install(def)
 
 	def.do_custom = function(self, dtime)
 		local result = original_custom(self, dtime)
-		local pending = self._villages_pending_door_closes
-		if pending then
-			for key, action in pairs(pending) do
-				if not wooden_door_at(action.target) or not door_is_in_use(self, action.target) then
-					pending[key] = nil
-					if wooden_door_at(action.target) then original_door_action(self, action) end
-				end
-			end
-		end
+		-- The global step is the authoritative cleanup path. This also keeps
+		-- standalone callers responsive in environments without global steps.
+		if not core.register_globalstep then flush_deferred_door_closes() end
 		if result == false then return false end
 		if not is_sleep_time() then
 			self._villages_bed_route = nil
@@ -455,6 +470,7 @@ local function install(def)
 		if not working then
 			self._villages_job_route = nil
 			self._villages_farm_route = nil
+			self._villages_farm_target = nil
 		elseif recover_route(self, {
 			pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 			claimed = has_claimed_jobsite,

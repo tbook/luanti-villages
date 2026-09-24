@@ -37,6 +37,8 @@ local workstation_professions = {
 	["mcl_brewing:stand_000"] = "cleric",
 	["mcl_stonecutter:stonecutter"] = "mason",
 }
+local workstation_search_node_names = {"group:cauldron"}
+for name in pairs(workstation_nodes) do table.insert(workstation_search_node_names, name) end
 
 return {
 	is_sleep_time = function()
@@ -60,9 +62,5 @@ return {
 		return workstation_professions[name]
 			or (core.get_item_group(name, "cauldron") > 0 and "leatherworker")
 	end,
-	workstation_search_nodes = function()
-		local names = {"group:cauldron"}
-		for name in pairs(workstation_nodes) do table.insert(names, name) end
-		return names
-	end,
+	workstation_search_nodes = function() return workstation_search_node_names end,
 }

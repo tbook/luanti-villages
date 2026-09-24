@@ -7,7 +7,9 @@ local timeofday = 0.8
 local jobsite_present = true
 local nearby_objects = {}
 local search_sites = {}
+local job_search_scans = 0
 local jobsite_claimed = true
+local globalstep = nil
 
 minetest = {
 	registered_nodes = {
@@ -35,7 +37,10 @@ minetest = {
 		return {name = "air"}
 	end,
 	find_node_near = function() return nil end,
-	find_nodes_in_area = function() return search_sites end,
+	find_nodes_in_area = function()
+		job_search_scans = job_search_scans + 1
+		return search_sites
+	end,
 	get_item_group = function(name, group)
 		return group == "bed" and name:find("bed", 1, true) and 1
 			or group == "door" and name:find("door", 1, true) and 1 or 0
@@ -46,6 +51,7 @@ minetest = {
 	end,
 	get_objects_inside_radius = function() return nearby_objects end,
 	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
+	register_globalstep = function(callback) globalstep = callback end,
 }
 vector = {
 	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
@@ -309,6 +315,9 @@ local no_site_entity = {
 assert(not job_def.gopath(no_site_entity, {x = 10, y = 0, z = 0}, nil, true))
 assert(no_site_entity._villages_job_search_route.status == "retry")
 assert(no_site_entity._villages_job_search_route.reason == "no reachable unclaimed workstation")
+local scans_after_failure = job_search_scans
+assert(not job_def.gopath(no_site_entity, {x = 10, y = 0, z = 0}, nil, true))
+assert(job_search_scans == scans_after_failure, "job-search retry must not rescan during its cooldown")
 minetest.get_node_or_nil = original_node
 search_sites = {}
 jobsite_claimed = true
@@ -346,6 +355,21 @@ recovery_entity.callback_arrived(recovery_entity)
 assert(bed_callback_called)
 path_available = true
 
+-- A work-period interruption invalidates a farm route and its chosen crop as
+-- one unit, so farmer.lua can choose a fresh crop next time work begins.
+timeofday = 0.5
+local interrupted_farmer = {
+	_villages_farm_target = {x = 2, y = 0, z = 0},
+	_villages_farm_route = {status = "travelling"},
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+job_def.do_custom(interrupted_farmer, 0.1)
+assert(not interrupted_farmer._villages_farm_route)
+assert(not interrupted_farmer._villages_farm_target)
+
 -- A close action waits while another villager is actively crossing the same
 -- wooden door, then uses the normal mob close action once the doorway clears.
 wooden_door = true
@@ -362,6 +386,7 @@ local door_entity = {
 	object = {
 		set_velocity = function() end,
 		get_pos = function() return {x = 0, y = 0, z = 0} end,
+		get_luaentity = function() return {name = "mobs_mc:villager", state = "gowp"} end,
 	},
 }
 nearby_objects = {{
@@ -370,11 +395,13 @@ nearby_objects = {{
 local close = {type = "door", action = "close", target = {x = 1, y = 0, z = 0}}
 door_action_def.do_pathfind_action(door_entity, close)
 assert(not closed_action)
-assert(door_entity._villages_pending_door_closes)
-nearby_objects = {}
-assert(door_action_def.do_custom(door_entity, 0.1) == false)
+assert(globalstep)
+-- The initiating villager can still be pathfinding just past the doorway; it
+-- must not prevent its own deferred close from being retried.
+nearby_objects = {door_entity.object}
+door_action_def.on_activate(door_entity)
+globalstep(0.1)
 assert(closed_action == close)
-assert(not next(door_entity._villages_pending_door_closes))
 wooden_door = false
 
 print("navigation.lua: ok")
