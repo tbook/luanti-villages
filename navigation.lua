@@ -4,6 +4,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
+local planner = dofile(core.get_modpath("villages") .. "/planner.lua")
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
 -- Match VoxeLibre's legacy gopath range. A wider preflight can claim a route
@@ -20,7 +21,20 @@ local function node_def(pos)
 	return node and core.registered_nodes[node.name]
 end
 
-local function is_open(pos)
+local function wooden_door_at(pos)
+	local node = core.get_node_or_nil(pos)
+	if node and core.get_item_group(node.name, "door") > 0
+		and core.get_item_group(node.name, "door_iron") == 0 then
+		return pos
+	end
+end
+
+local function is_open(pos, allow_wooden_door)
+	local node = core.get_node_or_nil(pos)
+	if not node then return false end
+	if core.get_item_group(node.name, "door") > 0 then
+		return allow_wooden_door and core.get_item_group(node.name, "door_iron") == 0
+	end
 	local def = node_def(pos)
 	return def and not def.walkable and (def.liquidtype == nil or def.liquidtype == "none")
 end
@@ -100,14 +114,66 @@ local function choose_approach(self, candidates)
 	return candidates[1]
 end
 
+local function nearest_walk_position(pos)
+	local origin = vector.round(pos)
+	local best, best_distance
+	for x = origin.x - 1, origin.x + 1 do
+		for y = origin.y - 2, origin.y + 2 do
+			for z = origin.z - 1, origin.z + 1 do
+				local candidate = {x = x, y = y, z = z}
+				if is_open(candidate, true) and is_open({x = x, y = y + 1, z = z}, true) and is_supported(candidate) then
+					local dx, dy, dz = x - pos.x, y - pos.y, z - pos.z
+					local distance = dx * dx + dy * dy + dz * dz
+					if not best_distance or distance < best_distance then
+						best, best_distance = candidate, distance
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function plan_stair_route(self, candidates)
+	local start = self.object:get_pos()
+	start = start and nearest_walk_position(start)
+	if not start then return nil, nil, "stair planner found no nearby walk position" end
+	local function can_stand(pos)
+		return is_open(pos, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
+	end
+	local visited = 0
+	for _, target in ipairs(candidates) do
+		local path, searched = planner.find_path(start, can_stand, function(pos)
+			return same_pos(pos, target)
+		end, {
+			range = 48,
+			heuristic = function(pos) return math.abs(pos.x - target.x) + math.abs(pos.z - target.z) + math.abs(pos.y - target.y) end,
+		})
+		if path then return target, path end
+		visited = visited + searched
+	end
+	return nil, nil, string.format("stair planner found no route after %d nodes", visited)
+end
+
 -- gopath occasionally rejects a path that minetest.find_path has returned,
 -- particularly from stair landings. Reuse its waypoint mover directly for that
 -- narrow case, rather than abandoning a known-valid route.
-local function start_engine_path(self, target, path, arrived)
+local function start_engine_path(self, target, path, arrived, door_actions)
 	if not path or #path == 0 then return false end
 	local waypoints = {}
 	for _, pos in ipairs(path) do
 		table.insert(waypoints, {pos = vector.new(pos), failed_attempts = 0})
+	end
+	if door_actions then
+		for i = 2, #waypoints do
+			local door = wooden_door_at(waypoints[i].pos)
+			if door then
+				waypoints[i - 1].action = {type = "door", action = "open", target = vector.new(door)}
+				if waypoints[i + 1] then
+					waypoints[i + 1].action = {type = "door", action = "close", target = vector.new(door)}
+				end
+			end
+		end
 	end
 	local pos = self.object:get_pos()
 	local current = table.remove(waypoints, 1)
@@ -155,14 +221,15 @@ local function install(def)
 			return false
 		end
 
-		local candidate, engine_path = choose_approach(self, approaches(self._bed))
+		local candidates = approaches(self._bed)
+		local candidate, engine_path = choose_approach(self, candidates)
 		if not candidate then
 		fail(self, "no safe standing space beside bed")
 			return false
 		end
 
 		self._villages_bed_route = {
-			status = "travelling", target = vector.new(candidate), started_at = now,
+			status = "travelling", mode = "legacy", target = vector.new(candidate), started_at = now,
 			wall_started_at = os.time(),
 		}
 		local function arrived(entity)
@@ -172,8 +239,16 @@ local function install(def)
 		end
 		local started = original_gopath(self, candidate, arrived, true)
 		if started or self.state == PATHFINDING then return started end
-		if start_engine_path(self, candidate, engine_path, arrived) then return true end
-		fail(self, "pathfinder could not start a route to bed", candidate)
+		if start_engine_path(self, candidate, engine_path, arrived) then
+			self._villages_bed_route.mode = "engine"
+			return true
+		end
+		local stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
+		if start_engine_path(self, stair_target, stair_path, arrived, true) then
+			self._villages_bed_route.mode = "planner"
+			return true
+		end
+		fail(self, planner_failure or "pathfinder could not start a route to bed", candidate)
 		return false
 	end
 
@@ -195,6 +270,19 @@ local function install(def)
 		end
 		if not route then return result end
 		if route.status == "travelling" and self.state ~= PATHFINDING then
+			-- A legacy route may start successfully, then wedge on stairs or a
+			-- door. Hand that case to the Villages planner before backing off.
+			if route.mode ~= "planner" then
+				local target, path = plan_stair_route(self, approaches(self._bed))
+				if target and path then
+					local function arrived(entity)
+						entity._villages_bed_route = {status = "arrived", mode = "planner", target = vector.new(target)}
+						entity.order = "sleep"
+					end
+					self._villages_bed_route = {status = "travelling", mode = "planner", target = vector.new(target), started_at = core.get_gametime()}
+					if start_engine_path(self, target, path, arrived, true) then return result end
+				end
+			end
 			local failed_at = self._pf_last_failed
 			local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
 				and "legacy pathfinder gave up on the bed approach"

@@ -1,6 +1,7 @@
 local now = 100
 local gopath_target, arrived, preflight_start, preflight_range = nil, nil, nil, nil
 local path_available = true
+local support_available = true
 
 minetest = {
 	registered_nodes = {
@@ -13,7 +14,7 @@ minetest = {
 	get_modpath = function() return "." end,
 	get_node_or_nil = function(pos)
 		if pos.x == 0 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
-		if pos.y == -1 then return {name = "stone"} end
+		if pos.y == -1 and support_available then return {name = "stone"} end
 		return {name = "air"}
 	end,
 	find_node_near = function() return nil end,
@@ -75,6 +76,7 @@ local failed_def = {
 }
 dofile("navigation.lua")(failed_def)
 path_available = false
+support_available = false
 local failed_entity = {
 	_bed = {x = 0, y = 0, z = 0}, state = "stand",
 	object = {
@@ -85,9 +87,10 @@ local failed_entity = {
 assert(not failed_def.gopath(failed_entity, failed_entity._bed, nil, true))
 assert(failed_entity.state == "stand")
 assert(failed_entity._villages_bed_route.status == "retry")
-assert(failed_entity._villages_bed_route.reason:find("could not start", 1, true))
-assert(failed_entity._villages_bed_route.target)
+assert(failed_entity._villages_bed_route.reason:find("no safe standing", 1, true))
+assert(not failed_entity._villages_bed_route.target)
 path_available = true
+support_available = true
 
 local cooldown_called = false
 local cooldown_def = {
