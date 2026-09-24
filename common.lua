@@ -14,6 +14,12 @@ local workstation_nodes = {
 	["mcl_brewing:stand_000"] = true,
 	["mcl_stonecutter:stonecutter"] = true,
 }
+local farm_replant_nodes = {
+	["mcl_farming:wheat"] = "mcl_farming:wheat_1",
+	["mcl_farming:potato"] = "mcl_farming:potato_1",
+	["mcl_farming:carrot"] = "mcl_farming:carrot_1",
+	["mcl_farming:beetroot"] = "mcl_farming:beetroot_0",
+}
 
 return {
 	is_sleep_time = function()
@@ -32,4 +38,5 @@ return {
 	is_workstation_node = function(name)
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
+	farm_replant_node = function(name) return farm_replant_nodes[name] end,
 }

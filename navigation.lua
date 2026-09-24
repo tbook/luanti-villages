@@ -105,6 +105,11 @@ local function has_claimed_jobsite(self)
 	return core.get_meta(self._jobsite):get_string("villager") == self._id
 end
 
+local function has_farm_target(self)
+	local node = self._villages_farm_target and core.get_node_or_nil(self._villages_farm_target)
+	return node and common.farm_replant_node(node.name)
+end
+
 local function stop(self)
 	self.state = "stand"
 	self._target = nil
@@ -256,6 +261,8 @@ local function install(def)
 		-- An in-progress route cannot survive a mapblock unload safely.
 		self._villages_bed_route = nil
 		self._villages_job_route = nil
+		self._villages_farm_route = nil
+		self._villages_farm_target = nil
 		self._villages_pending_door_closes = nil
 		return result
 	end
@@ -282,6 +289,12 @@ local function install(def)
 			destination = {
 				pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 				claimed = has_claimed_jobsite,
+			}
+		elseif self._villages_farm_target and same_pos(target, self._villages_farm_target)
+			and is_work_time() and has_farm_target(self) then
+			destination = {
+				pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
+				claimed = has_farm_target,
 			}
 		end
 		if not destination then
@@ -360,11 +373,19 @@ local function install(def)
 			}) then return result end
 		end
 
-		if not is_work_time() then
+		local working = is_work_time()
+		if not working then
 			self._villages_job_route = nil
+			self._villages_farm_route = nil
 		elseif recover_route(self, {
 			pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 			claimed = has_claimed_jobsite,
+		}) then
+			return result
+		end
+		if working and recover_route(self, {
+			pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
+			claimed = has_farm_target,
 		}) then
 			return result
 		end
