@@ -538,4 +538,30 @@ assert(activated_entity.state == "stand")
 assert(not activated_entity._target and not activated_entity.current_target and not activated_entity.waypoints)
 assert(not activated_entity.callback_arrived and not activated_entity._villages_bed_route)
 
+-- Tavern routes use the same no-progress recovery path as beds, jobsites, and
+-- farm plots; dinner support is normally supplied by the extension API.
+mobs_mc = {
+	register_villager_profession = function() end,
+	register_villager_activity_modifier = function() end,
+}
+timeofday = 0.7
+now = 600
+local stalled_tavern_entity = {
+	state = "gowp", _villages_route_id = 1,
+	_villages_tavern_target = {x = 10, y = 0, z = 0},
+	_villages_tavern_route = {
+		status = "travelling", mode = "legacy", id = 1,
+		last_progress_at = now, last_progress_pos = {x = 15, y = 0, z = 0},
+	},
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+now = now + 21
+stalled_def.do_custom(stalled_tavern_entity, 0.1)
+assert(stalled_tavern_entity.state == "gowp")
+assert(stalled_tavern_entity._villages_tavern_route.mode == "planner")
+assert(stalled_tavern_entity._villages_tavern_route.id == 2)
+
 print("navigation.lua: ok")

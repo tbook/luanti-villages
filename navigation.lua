@@ -551,14 +551,17 @@ local function install(def)
 		if working and (recover_stalled_route(self, farm_destination) or recover_route(self, farm_destination)) then return result end
 		if not common.is_dinner_time() then
 			cancel_route(self, "_villages_tavern_route")
-		elseif self._villages_tavern_target and recover_route(self, {
-			pos = self._villages_tavern_target, route_field = "_villages_tavern_route",
-			kind = "tavern", claimed = function(entity)
-				local node = core.get_node_or_nil(entity._villages_tavern_target)
-				return node and node.name ~= "air" and node.name ~= "ignore"
-			end,
-		}) then
-			return result
+		elseif self._villages_tavern_target then
+			local tavern_destination = {
+				pos = self._villages_tavern_target, route_field = "_villages_tavern_route",
+				kind = "tavern", claimed = function(entity)
+					local node = core.get_node_or_nil(entity._villages_tavern_target)
+					return node and node.name ~= "air" and node.name ~= "ignore"
+				end,
+			}
+			if recover_stalled_route(self, tavern_destination) or recover_route(self, tavern_destination) then
+				return result
+			end
 		end
 		if self._jobsite or is_sleep_time() then
 			cancel_route(self, "_villages_job_search_route")
