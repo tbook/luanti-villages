@@ -6,6 +6,7 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local FARM_RADIUS = 8
 local FARM_INTERVAL = 5
+local HARVEST_DROP_RADIUS = 1
 local crop_names = {}
 for _, name in ipairs({"mcl_farming:wheat", "mcl_farming:potato", "mcl_farming:carrot", "mcl_farming:beetroot"}) do
 	table.insert(crop_names, name)
@@ -31,11 +32,29 @@ local function nearest_crop(self)
 	return best
 end
 
+-- The legacy villager pickup callback treats food as breeding input.  Harvest
+-- drops are work output, not an invitation to breed, so collect only the item
+-- entities created by this specific dig.  Snapshotting first also leaves
+-- players' and other villagers' nearby dropped items alone.
+local function collect_harvest_drops(crop, before)
+	for _, object in ipairs(core.get_objects_inside_radius(crop, HARVEST_DROP_RADIUS)) do
+		if not before[object] then
+			local entity = object:get_luaentity()
+			if entity and entity.name == "__builtin:item" then object:remove() end
+		end
+	end
+end
+
 local function harvest_and_replant(self, crop)
 	local node = core.get_node_or_nil(crop)
 	local replacement = node and common.farm_replant_node(node.name)
 	if replacement and not core.is_protected(crop, "") then
+		local before = {}
+		for _, object in ipairs(core.get_objects_inside_radius(crop, HARVEST_DROP_RADIUS)) do
+			before[object] = true
+		end
 		core.dig_node(crop, self.object)
+		collect_harvest_drops(crop, before)
 		core.set_node(crop, {name = replacement})
 	end
 	self._villages_farm_target = nil
