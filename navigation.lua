@@ -326,6 +326,8 @@ local function install(def)
 		self._villages_farm_route = nil
 		self._villages_farm_target = nil
 		self._villages_job_search_route = nil
+		self._villages_tavern_route = nil
+		self._villages_tavern_target = nil
 		return result
 	end
 
@@ -362,6 +364,11 @@ local function install(def)
 			and is_work_time() and has_farm_target(self) then
 			destination = {
 				pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
+			}
+		elseif self._villages_tavern_target and same_pos(target, self._villages_tavern_target)
+			and common.is_dinner_time() then
+			destination = {
+				pos = target, route_field = "_villages_tavern_route", kind = "tavern",
 			}
 		elseif not self._jobsite and not is_sleep_time() then
 			local node = core.get_node_or_nil(target)
@@ -481,6 +488,17 @@ local function install(def)
 		if working and recover_route(self, {
 			pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
 			claimed = has_farm_target,
+		}) then
+			return result
+		end
+		if not common.is_dinner_time() then
+			self._villages_tavern_route = nil
+		elseif self._villages_tavern_target and recover_route(self, {
+			pos = self._villages_tavern_target, route_field = "_villages_tavern_route",
+			kind = "tavern", claimed = function(entity)
+				local node = core.get_node_or_nil(entity._villages_tavern_target)
+				return node and node.name ~= "air" and node.name ~= "ignore"
+			end,
 		}) then
 			return result
 		end

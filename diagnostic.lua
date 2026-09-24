@@ -215,6 +215,11 @@ local function show(player, villager)
 		"Work status: " .. work_status(villager, job_ok),
 		"Jobsite route: " .. route_status(villager._villages_job_route),
 		"Job search route: " .. route_status(villager._villages_job_search_route),
+		"Tavern: " .. pos_string(villager._villages_tavern_jukebox),
+		"Tavern route: " .. route_status(villager._villages_tavern_route),
+		"Dinner: " .. (villager._villages_dining and "at table"
+			or villager._villages_last_dinner_day == core.get_day_count() and "finished today"
+			or "not yet visited today"),
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}
