@@ -2,6 +2,8 @@
 -- game's bed claims and movement implementation, but direct trips to an open
 -- square beside a bed and retain enough state for useful diagnostics.
 local core = minetest
+local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local is_sleep_time = common.is_sleep_time
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
 -- Match VoxeLibre's legacy gopath range. A wider preflight can claim a route
@@ -11,13 +13,6 @@ local PATHFINDING = "gowp"
 
 local function same_pos(a, b)
 	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
-end
-
-local function is_sleep_time()
-	local tod = core.get_timeofday() * 24000
-	return tod > 17500 or tod < 6500
-		or (mcl_weather and mcl_weather.get_weather
-			and mcl_weather.get_weather() == "thunder")
 end
 
 local function node_def(pos)
@@ -67,7 +62,11 @@ local function has_claimed_bed(self)
 	local node = core.get_node_or_nil(self._bed)
 	if not node or core.get_item_group(node.name, "bed") ~= 1 then return false end
 	local meta = core.get_meta(self._bed)
-	return meta:get_string("villager") == self._id and meta:get_string("player") == ""
+	if meta:get_string("villager") ~= self._id or meta:get_string("player") ~= "" then
+		return false
+	end
+	local top = mcl_beds.get_bed_top(self._bed)
+	return core.get_meta(top):get_string("player") == ""
 end
 
 local function stop(self)

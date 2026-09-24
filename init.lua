@@ -1,6 +1,8 @@
 -- Keep VoxeLibre's villager AI, trades, and bed ownership. Add a sleeping pose
 -- adapted from Mineclonia and bed-limited village births.
 local core = minetest
+local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local is_sleep_time = common.is_sleep_time
 local MODEL = "villages_villager.b3d"
 local BASE = "villages_villager_base.png^villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
@@ -94,13 +96,6 @@ local function sleep_position(bed, node)
 	local pos = vector.offset(bed, dir.x * 0.35, 0.06, dir.z * 0.35)
 	local yaw = atan2(dir.z, dir.x) + math.pi / 2
 	return pos, yaw
-end
-
-local function is_sleep_time()
-	local tod = core.get_timeofday() * 24000
-	return tod > 17500 or tod < 6500
-		or (mcl_weather and mcl_weather.get_weather
-			and mcl_weather.get_weather() == "thunder")
 end
 
 core.register_on_mods_loaded(function()

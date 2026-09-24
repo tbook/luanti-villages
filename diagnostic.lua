@@ -2,6 +2,8 @@
 -- This intentionally reflects state only; it does not claim, release, or alter
 -- beds, jobs, paths, or villager AI.
 local core = minetest
+local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local is_sleep_time = common.is_sleep_time
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
@@ -78,13 +80,6 @@ local function bed_status(villager)
 		return "bed top is player-owned"
 	end
 	return "valid claim"
-end
-
-local function is_sleep_time()
-	local tod = core.get_timeofday() * 24000
-	return tod > 17500 or tod < 6500
-		or (mcl_weather and mcl_weather.get_weather
-			and mcl_weather.get_weather() == "thunder")
 end
 
 local function sleep_status(villager, bed_ok)

@@ -43,6 +43,7 @@ minetest = {
 		return {get_string = function(_, name) return values[name] or "" end}
 	end,
 	get_timeofday = function() return 0.8 end,
+	get_modpath = function() return "." end,
 	get_day_count = function() return 3 end,
 	find_nodes_in_area = function() return {{x = 1, y = 0, z = 0}} end,
 	formspec_escape = function(value) return value end,

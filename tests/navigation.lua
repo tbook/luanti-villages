@@ -10,6 +10,7 @@ minetest = {
 	},
 	get_timeofday = function() return 0.8 end,
 	get_gametime = function() return now end,
+	get_modpath = function() return "." end,
 	get_node_or_nil = function(pos)
 		if pos.x == 0 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
 		if pos.y == -1 then return {name = "stone"} end
@@ -33,6 +34,9 @@ vector = {
 		return math.sqrt(x * x + y * y + z * z)
 	end,
 }
+mcl_beds = {get_bed_top = function(pos)
+	return {x = pos.x, y = pos.y + 1, z = pos.z}
+end}
 mcl_mobs = {mob_class = {}}
 
 local def = {
@@ -143,12 +147,32 @@ local proactive_entity = {
 		set_velocity = function() end,
 	},
 }
--- Supply the bed claim required by the proactive controller.
-minetest.get_meta = function()
-	return {get_string = function(_, name) return name == "villager" and "villager-1" or "" end}
+-- Supply the bed claim required by the proactive controller. A player claim on
+-- either bed half must suppress the trip, just as it suppresses sleeping.
+local top_claimed_by_player = false
+minetest.get_meta = function(pos)
+	return {get_string = function(_, name)
+		if name == "villager" and pos.y == 0 then return "villager-1" end
+		if name == "player" and top_claimed_by_player and pos.y == 1 then return "player" end
+		return ""
+	end}
 end
 proactive_def.do_custom(proactive_entity, 0.1)
 assert(proactive_target and not (proactive_target.x == 0 and proactive_target.z == 0))
 assert(proactive_entity._villages_bed_route.status == "travelling")
+
+top_claimed_by_player = true
+proactive_target = nil
+local blocked_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "walk",
+	gopath = proactive_def.gopath,
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+proactive_def.do_custom(blocked_entity, 0.1)
+assert(not proactive_target)
+assert(not blocked_entity._villages_bed_route)
 
 print("navigation.lua: ok")
