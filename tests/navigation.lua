@@ -2,6 +2,7 @@ local now = 100
 local gopath_target, arrived, preflight_start, preflight_range, preflight_found = nil, nil, nil, nil, nil
 local path_available = true
 local required_path_range = 0
+local engine_paths = nil
 local support_available = true
 local wooden_door = false
 local glass_pane = false
@@ -51,9 +52,10 @@ minetest = {
 		return group == "bed" and name:find("bed", 1, true) and 1
 			or group == "door" and name:find("door", 1, true) and 1 or 0
 	end,
-	find_path = function(start, _, range)
+	find_path = function(start, target, range)
 		preflight_start, preflight_range = start, range
 		preflight_found = path_available and range >= required_path_range
+		if engine_paths then return engine_paths[target.x .. ":" .. target.y .. ":" .. target.z] end
 		return preflight_found and {{x = 1, y = 0, z = 0}} or nil
 	end,
 	get_objects_inside_radius = function() return nearby_objects end,
@@ -99,6 +101,28 @@ assert(entity._villages_bed_route.status == "travelling")
 arrived(entity)
 assert(entity.order == "sleep")
 assert(entity._villages_bed_route.status == "arrived")
+
+-- Select the lowest-cost reachable bed approach rather than the first compass
+-- direction returned by approaches().
+local function path_with_length(length)
+	local path = {}
+	for index = 1, length do table.insert(path, {x = index, y = 0, z = 0}) end
+	return path
+end
+engine_paths = {
+	["1:0:0"] = path_with_length(10),
+	["-1:0:0"] = path_with_length(2),
+}
+local cost_aware_bed_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(def.gopath(cost_aware_bed_entity, cost_aware_bed_entity._bed, nil, true))
+assert(gopath_target.x == -1 and gopath_target.z == 0)
+engine_paths = nil
 
 -- Routes just beyond the legacy 25-node preflight remain eligible for the
 -- engine path check under the expanded 40-node bound.
@@ -201,6 +225,13 @@ local door_def = {
 dofile("navigation.lua")(door_def)
 path_available = false
 wooden_door = true
+local door_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	-- Force the only valid bed approach to be beyond the door; otherwise the
+	-- cost-aware planner correctly chooses a shorter route around it.
+	if pos.y == -1 and pos.z ~= 0 then return {name = "air"} end
+	return door_node(pos)
+end
 local door_entity = {
 	_bed = {x = 0, y = 0, z = 0}, state = "stand",
 	object = {
@@ -214,6 +245,7 @@ for _, waypoint in ipairs(door_entity.waypoints) do
 	if waypoint.action and waypoint.action.action == "open" then opens_door = true end
 end
 assert(opens_door)
+minetest.get_node_or_nil = door_node
 wooden_door = false
 path_available = true
 
@@ -329,6 +361,27 @@ assert(job_target and job_target.x >= 29)
 assert(searching_entity._villages_job_search_route.status == "travelling")
 assert(not searching_entity._jobsite)
 minetest.get_node_or_nil = original_node
+search_sites = {}
+jobsite_claimed = true
+
+-- A first jobsite is selected by route cost, not straight-line distance. The
+-- farther station has the short path and must win over the nearer long route.
+jobsite_claimed = false
+search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
+engine_paths = {
+	["21:0:0"] = path_with_length(10),
+	["31:0:0"] = path_with_length(2),
+}
+local cost_aware_job_entity = {
+	_id = "villager-1", state = "stand",
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(job_def.gopath(cost_aware_job_entity, {x = 10, y = 0, z = 0}, nil, true))
+assert(job_target.x == 31 and job_target.z == 0)
+engine_paths = nil
 search_sites = {}
 jobsite_claimed = true
 
