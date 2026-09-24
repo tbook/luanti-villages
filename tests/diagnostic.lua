@@ -23,11 +23,16 @@ minetest = {
 	get_node_or_nil = function(pos)
 		if pos.x == 1 then return {name = "mcl_beds:bed_red_bottom"} end
 		if pos.x == 2 then return {name = "mcl_beds:bed_red_top"} end
-		return {name = "mcl_villages:composter"}
+		if pos.x == 4 then return {name = "mcl_composters:composter"} end
+		return {name = "mcl_core:stone"}
 	end,
 	get_item_group = function(name, group)
-		return group == "bed" and name:find("bed", 1, true) and 1 or 0
+		if group == "bed" and name:find("bed", 1, true) then
+			return name:find("_top", 1, true) and 2 or 1
+		end
+		return 0
 	end,
+	facedir_to_dir = function() return {x = 1, y = 0, z = 0} end,
 	get_objects_inside_radius = function()
 		return {{get_luaentity = function()
 			return {name = "mobs_mc:villager", _id = "villager-2", _profession = "cleric"}
@@ -78,11 +83,26 @@ assert(shown.form:find("Jobsite claim: assigned jobsite is not claimed by this v
 assert(shown.form:find("travelling to bed", 1, true))
 assert(original_uses == 0)
 
+lookup("stack", player, {type = "node", under = {x = 1, y = 0, z = 0}})
+assert(shown.formname == "villages:bed_diagnostic")
+assert(shown.form:find("Recorded owner: villager villager-1", 1, true))
+
+lookup("stack", player, {type = "node", under = {x = 2, y = 0, z = 0}})
+assert(shown.formname == "villages:bed_diagnostic")
+assert(shown.form:find("Position: (1.0, 0.0, 0.0)", 1, true))
+
+lookup("stack", player, {type = "node", under = {x = 4, y = 0, z = 0}})
+assert(shown.formname == "villages:workstation_diagnostic")
+assert(shown.form:find("Recorded owner: villager villager-2 (loaded cleric)", 1, true))
+
 local visitor = {
 	is_player = function() return true end,
 	get_player_name = function() return "visitor" end,
 }
 lookup("stack", visitor, {type = "object", ref = object})
 assert(original_uses == 1)
+
+lookup("stack", player, {type = "node", under = {x = 9, y = 0, z = 0}})
+assert(original_uses == 2)
 
 print("diagnostic.lua: ok")

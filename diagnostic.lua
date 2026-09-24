@@ -37,7 +37,7 @@ local function claim_owner(pos, villager, kind)
 	if player ~= "" then return "player " .. player end
 	local owner = meta:get_string("villager")
 	if owner == "" then return "unclaimed" end
-	if owner == villager._id then return "this villager" end
+	if villager and owner == villager._id then return "this villager" end
 	local other = loaded_villager(owner, pos)
 	if other then
 		return "villager " .. owner .. " (loaded " .. (other._profession or "unemployed") .. ")"
@@ -99,6 +99,45 @@ local function target_string(target)
 	return target and tostring(target) or "none"
 end
 
+local workstations = {
+	["mcl_composters:composter"] = true,
+	["mcl_barrels:barrel_closed"] = true,
+	["mcl_fletching_table:fletching_table"] = true,
+	["mcl_loom:loom"] = true,
+	["mcl_lectern:lectern"] = true,
+	["mcl_cartography_table:cartography_table"] = true,
+	["mcl_blast_furnace:blast_furnace"] = true,
+	["mcl_smoker:smoker"] = true,
+	["mcl_grindstone:grindstone"] = true,
+	["mcl_smithing_table:table"] = true,
+	["mcl_brewing:stand_000"] = true,
+	["mcl_stonecutter:stonecutter"] = true,
+}
+
+local function inspectable_node(pos)
+	local node = core.get_node_or_nil(pos)
+	if not node then return nil end
+	local bed_group = core.get_item_group(node.name, "bed")
+	if bed_group == 2 then
+		local dir = core.facedir_to_dir(node.param2)
+		pos = {x = pos.x - dir.x, y = pos.y - dir.y, z = pos.z - dir.z}
+		node = core.get_node_or_nil(pos)
+		if not node then return nil end
+		bed_group = node and core.get_item_group(node.name, "bed") or 0
+	end
+	if bed_group == 1 then return "bed", pos, node end
+	if workstations[node.name] or core.get_item_group(node.name, "cauldron") > 0 then
+		return "workstation", pos, node
+	end
+end
+
+local function show_form(player, name, lines)
+	local form = "formspec_version[4]size[11,8]" ..
+		"textarea[0.35,0.3;10.3,6.9;report;;" .. core.formspec_escape(table.concat(lines, "\n")) .. "]" ..
+		"button_exit[4,7.35;3,0.5;close;Close]"
+	core.show_formspec(player:get_player_name(), name, form)
+end
+
 local function show(player, villager)
 	local bed_ok = bed_status(villager) == "valid claim"
 	local pos = villager.object and villager.object:get_pos()
@@ -129,10 +168,20 @@ local function show(player, villager)
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}
-	local form = "formspec_version[4]size[11,8]" ..
-		"textarea[0.35,0.3;10.3,6.9;report;;" .. core.formspec_escape(table.concat(lines, "\n")) .. "]" ..
-		"button_exit[4,7.35;3,0.5;close;Close]"
-	core.show_formspec(player:get_player_name(), "villages:diagnostic", form)
+	show_form(player, "villages:diagnostic", lines)
+end
+
+local function show_node(player, kind, pos, node)
+	local label = kind == "bed" and "Bed" or "Workstation"
+	show_form(player, "villages:" .. kind .. "_diagnostic", {
+		label .. " diagnostics (read-only)",
+		"",
+		"Position: " .. pos_string(pos),
+		"Node: " .. node.name,
+		"Recorded owner: " .. claim_owner(pos, nil, kind),
+		"",
+		"Owner resolution is limited to villagers loaded within 64 nodes.",
+	})
 end
 
 local function permitted(player)
@@ -149,12 +198,20 @@ local function install(_)
 		if item and item.on_use then
 			local original = item.on_use
 			local wrapped = function(stack, player, pointed_thing)
-				if permitted(player) and pointed_thing and pointed_thing.type == "object" then
-					local object = pointed_thing.ref
-					local villager = object and object:get_luaentity()
-					if villager and villager.name == "mobs_mc:villager" then
-						show(player, villager)
-						return stack
+				if permitted(player) and pointed_thing then
+					if pointed_thing.type == "object" then
+						local object = pointed_thing.ref
+						local villager = object and object:get_luaentity()
+						if villager and villager.name == "mobs_mc:villager" then
+							show(player, villager)
+							return stack
+						end
+					elseif pointed_thing.type == "node" then
+						local kind, pos, node = inspectable_node(pointed_thing.under)
+						if kind then
+							show_node(player, kind, pos, node)
+							return stack
+						end
 					end
 				end
 				return original(stack, player, pointed_thing)
