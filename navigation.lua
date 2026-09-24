@@ -9,6 +9,8 @@ local is_workstation_node = common.is_workstation_node
 local planner = dofile(core.get_modpath("villages") .. "/planner.lua")
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
+local NO_PROGRESS_SECONDS = 20
+local PROGRESS_DISTANCE = 0.35
 -- Match VoxeLibre's legacy gopath range. A wider preflight can claim a route
 -- is viable when gopath will reject that same route.
 local PATH_RANGE = 25
@@ -136,21 +138,42 @@ local function stop(self)
 	self._target = nil
 	self.current_target = nil
 	self.waypoints = nil
+	self.callback_arrived = nil
 	self.object:set_velocity(vector.zero())
+end
+
+local function set_route(self, route_field, route)
+	self._villages_route_id = (self._villages_route_id or 0) + 1
+	route.id = self._villages_route_id
+	local pos = self.object:get_pos()
+	route.last_progress_at = core.get_gametime()
+	route.last_progress_pos = pos and vector.new(pos) or nil
+	self[route_field] = route
+	return route
+end
+
+local function cancel_route(self, route_field)
+	local route = self[route_field]
+	self[route_field] = nil
+	if route and route.status == "travelling" then stop(self) end
 end
 
 local function fail(self, route_field, reason, target, retry_seconds)
 	local now = core.get_gametime()
-	self[route_field] = {
+	set_route(self, route_field, {
 		status = "retry", reason = reason, retry_at = now + (retry_seconds or RETRY_SECONDS),
 		target = target and vector.new(target) or nil,
-	}
+	})
 	stop(self)
 end
 
-local function arrival_callback(route_field, target, callback_arrived, sleep)
+local function arrival_callback(route_field, route_id, target, callback_arrived, sleep)
 	return function(entity)
-		entity[route_field] = {status = "arrived", target = vector.new(target)}
+		local route = entity[route_field]
+		-- Native path callbacks can fire after a route was canceled or replaced.
+		-- Only the route that created this callback may complete it.
+		if not route or route.status ~= "travelling" or route.id ~= route_id then return end
+		entity[route_field] = {status = "arrived", id = route_id, target = vector.new(target)}
 		if sleep then entity.order = "sleep" end
 		if callback_arrived then return callback_arrived(entity, target) end
 	end
@@ -293,13 +316,13 @@ local function recover_route(self, destination)
 	if destination.claimed(self) and route.mode ~= "planner" then
 		local target, path = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
 		if target and path then
-			self[destination.route_field] = {
+			local recovered = set_route(self, destination.route_field, {
 				status = "travelling", mode = "planner", target = vector.new(target),
 				started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
 				site = route.site and vector.new(route.site) or nil,
-			}
+			})
 			if start_engine_path(self, target, path,
-				arrival_callback(destination.route_field, target, route.callback, destination.sleep), true) then
+				arrival_callback(destination.route_field, recovered.id, target, route.callback, destination.sleep), true) then
 				return true
 			end
 		end
@@ -312,6 +335,25 @@ local function recover_route(self, destination)
 	return false
 end
 
+local function recover_stalled_route(self, destination)
+	local route = self[destination.route_field]
+	if not route or route.status ~= "travelling" or self.state ~= PATHFINDING then return false end
+	local pos = self.object:get_pos()
+	if not pos then return false end
+	if not route.last_progress_pos or vector.distance(pos, route.last_progress_pos) >= PROGRESS_DISTANCE then
+		route.last_progress_pos = vector.new(pos)
+		route.last_progress_at = core.get_gametime()
+		return false
+	end
+	if core.get_gametime() - (route.last_progress_at or core.get_gametime()) < NO_PROGRESS_SECONDS then
+		return false
+	end
+	-- A mover that remains in gowp can otherwise be stuck forever. Stop it
+	-- before recovery so the planner may take ownership of the trip.
+	stop(self)
+	return recover_route(self, destination)
+end
+
 local function install(def)
 	local original_gopath = def.gopath or mcl_mobs.mob_class.gopath
 	local original_custom = def.do_custom
@@ -321,6 +363,11 @@ local function install(def)
 	def.on_activate = function(self, staticdata, dtime)
 		local result = original_activate(self, staticdata, dtime)
 		-- An in-progress route cannot survive a mapblock unload safely.
+		local had_managed_route = (self._villages_bed_route and self._villages_bed_route.status == "travelling")
+			or (self._villages_job_route and self._villages_job_route.status == "travelling")
+			or (self._villages_farm_route and self._villages_farm_route.status == "travelling")
+			or (self._villages_job_search_route and self._villages_job_search_route.status == "travelling")
+			or (self._villages_tavern_route and self._villages_tavern_route.status == "travelling")
 		self._villages_bed_route = nil
 		self._villages_job_route = nil
 		self._villages_farm_route = nil
@@ -328,6 +375,7 @@ local function install(def)
 		self._villages_job_search_route = nil
 		self._villages_tavern_route = nil
 		self._villages_tavern_target = nil
+		if had_managed_route then stop(self) end
 		return result
 	end
 
@@ -424,14 +472,14 @@ local function install(def)
 			return false
 		end
 
-		self[destination.route_field] = {
+		local route = set_route(self, destination.route_field, {
 			status = "travelling", mode = "legacy", target = vector.new(candidate), started_at = now,
 			wall_started_at = os.time(), callback = callback_arrived,
 			site = destination.site and vector.new(destination.site) or nil,
-		}
-		local arrived = arrival_callback(destination.route_field, candidate, callback_arrived, destination.sleep)
+		})
+		local arrived = arrival_callback(destination.route_field, route.id, candidate, callback_arrived, destination.sleep)
 		local started = original_gopath(self, candidate, arrived, true)
-		if started or self.state == PATHFINDING then return started end
+		if started or self.state == PATHFINDING then return true end
 		if start_engine_path(self, candidate, engine_path, arrived) then
 			self[destination.route_field].mode = "engine"
 			return true
@@ -443,7 +491,7 @@ local function install(def)
 			stair_target, stair_path, planner_failure = plan_stair_route(self, candidates)
 		end
 		if stair_target and start_engine_path(self, stair_target, stair_path,
-			arrival_callback(destination.route_field, stair_target, callback_arrived, destination.sleep), true) then
+			arrival_callback(destination.route_field, route.id, stair_target, callback_arrived, destination.sleep), true) then
 			self[destination.route_field].target = vector.new(stair_target)
 			self[destination.route_field].mode = "planner"
 			return true
@@ -458,8 +506,17 @@ local function install(def)
 		-- standalone callers responsive in environments without global steps.
 		if not core.register_globalstep then flush_deferred_door_closes() end
 		if result == false then return false end
+		if self.following then
+			cancel_route(self, "_villages_bed_route")
+			cancel_route(self, "_villages_job_route")
+			cancel_route(self, "_villages_farm_route")
+			cancel_route(self, "_villages_job_search_route")
+			cancel_route(self, "_villages_tavern_route")
+			self._villages_farm_target = nil
+			return result
+		end
 		if not is_sleep_time() then
-			self._villages_bed_route = nil
+			cancel_route(self, "_villages_bed_route")
 		else
 			-- VoxeLibre only schedules activity every five seconds. Start a bed trip
 			-- promptly at night so a wandering villager does not wait for that timer.
@@ -468,31 +525,32 @@ local function install(def)
 			and vector.distance(self.object:get_pos(), self._bed) >= 2 then
 				self:gopath(self._bed, nil, true)
 			end
-			if recover_route(self, {
+			local bed_destination = {
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
 				claimed = has_claimed_bed,
-			}) then return result end
+			}
+			if recover_stalled_route(self, bed_destination) or recover_route(self, bed_destination) then return result end
 		end
 
 		local working = is_work_time()
 		if not working then
-			self._villages_job_route = nil
-			self._villages_farm_route = nil
+			cancel_route(self, "_villages_job_route")
+			cancel_route(self, "_villages_farm_route")
 			self._villages_farm_target = nil
-		elseif recover_route(self, {
+		else
+			local job_destination = {
 			pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 			claimed = has_claimed_jobsite,
-		}) then
-			return result
+			}
+			if recover_stalled_route(self, job_destination) or recover_route(self, job_destination) then return result end
 		end
-		if working and recover_route(self, {
+		local farm_destination = {
 			pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
 			claimed = has_farm_target,
-		}) then
-			return result
-		end
+		}
+		if working and (recover_stalled_route(self, farm_destination) or recover_route(self, farm_destination)) then return result end
 		if not common.is_dinner_time() then
-			self._villages_tavern_route = nil
+			cancel_route(self, "_villages_tavern_route")
 		elseif self._villages_tavern_target and recover_route(self, {
 			pos = self._villages_tavern_target, route_field = "_villages_tavern_route",
 			kind = "tavern", claimed = function(entity)
@@ -503,19 +561,22 @@ local function install(def)
 			return result
 		end
 		if self._jobsite or is_sleep_time() then
-			self._villages_job_search_route = nil
+			cancel_route(self, "_villages_job_search_route")
 		else
 			local search_route = self._villages_job_search_route
-			if search_route and search_route.site and recover_route(self, {
-				pos = search_route.site, route_field = "_villages_job_search_route", kind = "jobsite search",
-				cardinal_only = true,
-				claimed = function(entity)
-					local route = entity._villages_job_search_route
-					return route and route.site and not entity._jobsite
-						and core.get_meta(route.site):get_string("villager") == ""
-				end,
-			}) then
-				return result
+			if search_route and search_route.site then
+				local search_destination = {
+					pos = search_route.site, route_field = "_villages_job_search_route", kind = "jobsite search",
+					cardinal_only = true,
+					claimed = function(entity)
+						local route = entity._villages_job_search_route
+						return route and route.site and not entity._jobsite
+							and core.get_meta(route.site):get_string("villager") == ""
+					end,
+				}
+				if recover_stalled_route(self, search_destination) or recover_route(self, search_destination) then
+					return result
+				end
 			end
 		end
 		return result
