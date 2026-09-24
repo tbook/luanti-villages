@@ -122,14 +122,24 @@ core.register_on_mods_loaded(function()
 	def.head_bone_position = vector.new(0, 6.48, 0)
 
 	local function wake(self)
+		local exit = self._villages_bed_exit
 		self._villages_sleeping = nil
+		self._villages_bed_exit = nil
 		self.collisionbox = normal_box(self, original_box)
 		self.object:set_properties({collisionbox = self.collisionbox})
+		-- Return to the position from which this villager entered the bed. That
+		-- position was already safe for its full standing collision box, unlike
+		-- the sleeping position within the bed itself.
+		if exit then self.object:set_pos(exit) end
 		self._current_animation = nil
 		original_animation(self, "stand")
 	end
 
 	local function begin_sleep(self, bed, node)
+		local exit = self.object:get_pos()
+		if exit and not self._villages_bed_exit then
+			self._villages_bed_exit = {x = exit.x, y = exit.y, z = exit.z}
+		end
 		local pos, yaw = sleep_position(bed, node)
 		self._villages_sleeping = true
 		self.state = "stand"
