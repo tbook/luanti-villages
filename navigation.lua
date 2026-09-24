@@ -11,9 +11,9 @@ local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
 local NO_PROGRESS_SECONDS = 20
 local PROGRESS_DISTANCE = 0.35
--- Match VoxeLibre's legacy gopath range. A wider preflight can claim a route
--- is viable when gopath will reject that same route.
-local PATH_RANGE = 25
+-- Allow ordinary multi-room trips beyond the legacy 25-node preflight while
+-- staying inside the fallback planner's 48-node search boundary.
+local PATH_RANGE = 40
 local PATHFINDING = "gowp"
 local DOOR_USE_RADIUS = 2.5
 -- Door closes must outlive the villager that scheduled them: an entity can be
