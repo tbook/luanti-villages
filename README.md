@@ -14,6 +14,12 @@ Food-triggered breeding also needs a free bed, but does not wait for the slow
 birth timer. Player-owned beds do not count. Spawn eggs and zombie-villager
 curing remain unchanged.
 
+Administrators with the `server` or `debug` privilege can use VoxeLibre's
+Lookup Tool on a villager to inspect its current AI, bed, jobsite, path, and
+birth-timing state. Bed and jobsite owner IDs are shown too; a different owner
+is resolved to its nearby loaded villager where possible. The tool retains its
+normal lookup behavior for all other targets and players.
+
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
 ## Attribution and licenses

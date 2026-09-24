@@ -1,0 +1,171 @@
+-- A read-only, privileged inspector for the existing VoxeLibre Lookup Tool.
+-- This intentionally reflects state only; it does not claim, release, or alter
+-- beds, jobs, paths, or villager AI.
+local core = minetest
+
+local function pos_string(pos)
+	if not pos then return "none" end
+	return string.format("(%.1f, %.1f, %.1f)", pos.x, pos.y, pos.z)
+end
+
+local function distance(a, b)
+	if not a or not b then return nil end
+	local x, y, z = a.x - b.x, a.y - b.y, a.z - b.z
+	return math.sqrt(x * x + y * y + z * z)
+end
+
+local function node_name(pos)
+	local node = pos and core.get_node_or_nil(pos)
+	return node and node.name or "unloaded"
+end
+
+local function loaded_villager(id, near)
+	if not id or id == "" or not core.get_objects_inside_radius then return nil end
+	for _, object in ipairs(core.get_objects_inside_radius(near, 64)) do
+		local entity = object:get_luaentity()
+		if entity and entity.name == "mobs_mc:villager" and entity._id == id then
+			return entity
+		end
+	end
+end
+
+local function claim_owner(pos, villager, kind)
+	if not pos then return "none (no assigned " .. kind .. ")" end
+	if not core.get_node_or_nil(pos) then return "unknown (position is unloaded)" end
+	local meta = core.get_meta(pos)
+	local player = kind == "bed" and meta:get_string("player") or ""
+	if player ~= "" then return "player " .. player end
+	local owner = meta:get_string("villager")
+	if owner == "" then return "unclaimed" end
+	if owner == villager._id then return "this villager" end
+	local other = loaded_villager(owner, pos)
+	if other then
+		return "villager " .. owner .. " (loaded " .. (other._profession or "unemployed") .. ")"
+	end
+	return "villager " .. owner .. " (not loaded nearby)"
+end
+
+local function status_of_claim(pos, id, kind)
+	if not pos then return "none assigned" end
+	local node = core.get_node_or_nil(pos)
+	if not node then return "assigned position is unloaded" end
+	local meta = core.get_meta(pos)
+	if meta:get_string("villager") ~= id then
+		return "assigned " .. kind .. " is not claimed by this villager"
+	end
+	return "valid claim"
+end
+
+local function bed_status(villager)
+	local bed = villager._bed
+	if not bed then return "none assigned" end
+	local node = core.get_node_or_nil(bed)
+	if not node then return "assigned position is unloaded" end
+	if core.get_item_group(node.name, "bed") ~= 1 then
+		return "assigned node is not a bed bottom (" .. node.name .. ")"
+	end
+	local meta = core.get_meta(bed)
+	if meta:get_string("villager") ~= villager._id then
+		return "bed is not claimed by this villager"
+	end
+	if meta:get_string("player") ~= "" then return "bed is player-owned" end
+	local top = mcl_beds.get_bed_top(bed)
+	if core.get_meta(top):get_string("player") ~= "" then
+		return "bed top is player-owned"
+	end
+	return "valid claim"
+end
+
+local function is_sleep_time()
+	local tod = core.get_timeofday() * 24000
+	return tod > 17500 or tod < 6500
+		or (mcl_weather and mcl_weather.get_weather
+			and mcl_weather.get_weather() == "thunder")
+end
+
+local function sleep_status(villager, bed_ok)
+	if villager._villages_sleeping then return "sleeping" end
+	if not bed_ok then return "no valid claimed bed" end
+	if not is_sleep_time() then return "waiting for night" end
+	if villager.order ~= "sleep" then return "nighttime, but no sleep order" end
+	local pos = villager.object and villager.object:get_pos()
+	local d = distance(pos, villager._bed)
+	if d and d >= 2 then return string.format("travelling to bed (%.1f nodes away)", d) end
+	return "waiting to enter bed"
+end
+
+local function target_string(target)
+	if type(target) == "table" and target.x then return pos_string(target) end
+	return target and tostring(target) or "none"
+end
+
+local function show(player, villager)
+	local bed_ok = bed_status(villager) == "valid claim"
+	local pos = villager.object and villager.object:get_pos()
+	local path_count = type(villager.waypoints) == "table" and #villager.waypoints or 0
+	local profession = villager._profession or "unemployed"
+	local age = villager.child and "child" or "adult"
+	local day = math.floor(core.get_gametime() / 1200)
+	local last_check = villager._villages_birth_check_day
+	local birth_check = villager.child and "not eligible (child)"
+		or string.format("automatic check: day %s; current day %d", last_check or "not yet", day)
+	local lines = {
+		"Villager diagnostics (read-only)",
+		"",
+		"ID: " .. (villager._id or "unknown"),
+		"Profession: " .. profession .. "    Age: " .. age,
+		"State: " .. (villager.state or "none") .. "    Order: " .. (villager.order or "none"),
+		"Sleep pose: " .. (villager._villages_sleeping and "yes" or "no"),
+		"Position: " .. pos_string(pos),
+		"",
+		"Bed: " .. pos_string(villager._bed) .. " [" .. node_name(villager._bed) .. "]",
+		"Bed owner: " .. claim_owner(villager._bed, villager, "bed"),
+		"Bed claim: " .. bed_status(villager),
+		"Sleep status: " .. sleep_status(villager, bed_ok),
+		"",
+		"Jobsite: " .. pos_string(villager._jobsite) .. " [" .. node_name(villager._jobsite) .. "]",
+		"Jobsite owner: " .. claim_owner(villager._jobsite, villager, "jobsite"),
+		"Jobsite claim: " .. status_of_claim(villager._jobsite, villager._id, "jobsite"),
+		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
+		"Births: " .. birth_check,
+	}
+	local form = "formspec_version[4]size[11,8]" ..
+		"textarea[0.35,0.3;10.3,6.9;report;;" .. core.formspec_escape(table.concat(lines, "\n")) .. "]" ..
+		"button_exit[4,7.35;3,0.5;close;Close]"
+	core.show_formspec(player:get_player_name(), "villages:diagnostic", form)
+end
+
+local function permitted(player)
+	if not player or not player:is_player() or not core.check_player_privs then return false end
+	local name = player:get_player_name()
+	return core.check_player_privs(name, {server = true})
+		or core.check_player_privs(name, {debug = true})
+end
+
+local function install(_)
+	local items = core.registered_items or {}
+	for _, name in ipairs({"doc_identifier:identifier_solid", "doc_identifier:identifier_liquid"}) do
+		local item = items[name]
+		if item and item.on_use then
+			local original = item.on_use
+			local wrapped = function(stack, player, pointed_thing)
+				if permitted(player) and pointed_thing and pointed_thing.type == "object" then
+					local object = pointed_thing.ref
+					local villager = object and object:get_luaentity()
+					if villager and villager.name == "mobs_mc:villager" then
+						show(player, villager)
+						return stack
+					end
+				end
+				return original(stack, player, pointed_thing)
+			end
+			if core.override_item then
+				core.override_item(name, {on_use = wrapped})
+			else
+				item.on_use = wrapped
+			end
+		end
+	end
+end
+
+return install
