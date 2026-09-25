@@ -619,9 +619,16 @@ local function install(def)
 			-- VoxeLibre only schedules activity every five seconds. Start a bed trip
 			-- promptly at night so a wandering villager does not wait for that timer.
 			if not self._villages_bed_route and not self.following and self.state ~= PATHFINDING
-			and has_claimed_bed(self) and self.object:get_pos()
-			and vector.distance(self.object:get_pos(), self._bed) >= 2 then
-				self:gopath(self._bed, nil, true)
+			and has_claimed_bed(self) and self.object:get_pos() then
+				if vector.distance(self.object:get_pos(), self._bed) >= 2 then
+					self:gopath(self._bed, nil, true)
+				elseif self.order ~= "sleep" then
+					-- Already close enough that no trip is needed. Without this,
+					-- a villager standing near its bed at nightfall would still
+					-- wait out VoxeLibre's five-second activity poll before its
+					-- order flips to "sleep" and it can lie down.
+					self.order = "sleep"
+				end
 			end
 			local bed_destination = {
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
