@@ -234,6 +234,18 @@ local function show_form(player, name, lines)
 	core.show_formspec(player:get_player_name(), name, form)
 end
 
+local function visual_status(villager)
+	local props = villager.object and villager.object:get_properties()
+	if not props then return "unavailable (no live properties)" end
+	local textures = props.textures and table.concat(props.textures, ", ") or "none"
+	local size = props.visual_size
+	local size_string = size and string.format("(%.2f, %.2f, %.2f)",
+		size.x or 0, size.y or 0, size.z or (size.y or 0)) or "none"
+	return string.format("mesh %s, textures [%s], visual_size %s, is_visible %s",
+		props.mesh or "none", textures, size_string,
+		props.is_visible == nil and "true (default)" or tostring(props.is_visible))
+end
+
 local function show(player, villager)
 	local bed_ok = bed_status(villager) == "valid claim"
 	local job_ok = status_of_claim(villager._jobsite, villager._id, "jobsite") == "valid claim"
@@ -250,6 +262,7 @@ local function show(player, villager)
 		"State: " .. (villager.state or "none") .. "    Order: " .. (villager.order or "none"),
 		"Sleep pose: " .. (villager._villages_sleeping and "yes" or "no"),
 		"Position: " .. pos_string(pos),
+		"Visual: " .. visual_status(villager),
 		"",
 		"Bed: " .. pos_string(villager._bed) .. " [" .. node_name(villager._bed) .. "]",
 		"Bed owner: " .. claim_owner(villager._bed, villager, "bed"),
