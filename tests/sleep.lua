@@ -38,7 +38,11 @@ local entity_def = {
 	_child_animations = {stand_start = 71},
 	head_swivel = "head.control",
 	head_bone_position = {x = 0, y = 6.3, z = 0},
-	do_custom = function() end,
+	-- Stands in for mobs_mc/villager.lua's own do_custom (its periodic
+	-- do_activity() polls the bed and can issue turns/movement of its own).
+	do_custom = function(self)
+		self._original_custom_calls = (self._original_custom_calls or 0) + 1
+	end,
 	on_activate = function() end,
 }
 minetest = {
@@ -72,17 +76,11 @@ mcl_mobs = {mob_class = {
 			_villages_sleeping = self._villages_sleeping,
 		}
 	end,
-	-- Spawned villager instances do not reliably inherit these through their
-	-- metatable, so villages/init.lua calls them as plain functions captured
-	-- from def/mob_class at mod-load time, never as self:method(). Mock them
-	-- the same way here, on mob_class, rather than per villager instance.
-	cancel_navigation = function(self)
-		self._cancel_navigation_calls = (self._cancel_navigation_calls or 0) + 1
-	end,
-	halt_in_tracks = function(self)
-		self._halt_in_tracks_calls = (self._halt_in_tracks_calls or 0) + 1
-	end,
-	set_yaw = function(self, yaw) self._yaw = yaw end,
+	-- mob_class:set_yaw only records target_yaw/delay; a separate, always-on
+	-- check_smooth_rotation() is what actually turns the model each tick.
+	-- Track calls here rather than on self.object.set_yaw, since
+	-- villages/init.lua must route through this, not a raw object call.
+	set_yaw = function(self, yaw, delay) self._yaw, self._yaw_delay = yaw, delay end,
 }}
 
 dofile("init.lua")
@@ -94,22 +92,24 @@ local function make_villager(id, is_child, start_pos)
 		name = "mobs_mc:villager", _id = id, _bed = bed,
 		_profession = "weapon_smith", _max_trade_tier = 2,
 		order = "sleep", child = is_child,
-		_cancel_navigation_calls = 0, _halt_in_tracks_calls = 0,
 	}
+	local velocity, acceleration
 	self.object = {
 		get_pos = function() return pos end,
 		set_pos = function(_, value) pos = value end,
 		set_yaw = function() end,
+		set_velocity = function(_, v) velocity = v end,
+		set_acceleration = function(_, v) acceleration = v end,
 		get_properties = function() return props end,
 		set_properties = function(_, values)
 			for k, v in pairs(values) do props[k] = v end
 		end,
 		get_luaentity = function() return self end,
 	}
-	return self, props
+	return self, props, function() return velocity, acceleration end
 end
 
-local alice, alice_props = make_villager("alice", false, {x = 1, y = 0, z = 0})
+local alice, alice_props, alice_motion = make_villager("alice", false, {x = 1, y = 0, z = 0})
 objects = {alice.object}
 entity_def.on_activate(alice, "", 0)
 assert(alice._villages_sleeping)
@@ -128,18 +128,22 @@ alice._max_trade_tier = 3
 alice_props.textures = {"old.png"} -- VoxeLibre refreshes this after a trade.
 entity_def.do_custom(alice, 0.6)
 assert(alice_props.textures[1]:find("badge_gold", 1, true))
+assert(not alice._original_custom_calls,
+	"the vanilla villager do_custom must not run while asleep")
 
--- Regression test: navigation/movement/motion/ai already ran for the tick by
--- the time do_custom is called, so a sleeping villager must be re-pinned to
--- the bed every tick, not just once when it fell asleep. It must also cancel
--- the wander/pathfinding AI's movement goal every tick (cancel_navigation +
--- halt_in_tracks), and turn via the mob's own set_yaw rather than a raw
--- object:set_yaw call: set_yaw is what keeps rotate_step's gradual-turn
--- target in sync, so skipping it lets rotate_step keep chasing whatever
--- heading the (uncancelled) wander AI last wanted, spinning the villager.
+-- Regression test: navigation/movement/motion/physics steps already ran for
+-- the tick by the time do_custom is called, so a sleeping villager must be
+-- re-pinned to the bed every tick, not just once when it fell asleep. It
+-- must also turn via the mob's own set_yaw (which records target_yaw) and
+-- not a raw object:set_yaw call: a separate check_smooth_rotation() runs
+-- every tick regardless of do_custom, chasing target_yaw on its own, so
+-- skipping set_yaw lets it keep chasing whatever heading the villager's own
+-- AI wanted before falling asleep, spinning the villager. And the vanilla
+-- villager do_custom (whose periodic do_activity() re-checks the bed and can
+-- issue its own competing turns) must stay skipped every tick asleep, not
+-- just on the tick sleep began.
 local sleep_pos = alice.object:get_pos()
-local cancels_before, halts_before
-	= alice._cancel_navigation_calls, alice._halt_in_tracks_calls
+local custom_calls_before = alice._original_custom_calls
 -- A small nudge, well within the "too far away, must have been kicked out
 -- of bed" wake threshold checked below, but enough to reveal the drift bug.
 alice.object:set_pos(vector.offset(sleep_pos, 0.2, 0, 0))
@@ -147,12 +151,17 @@ alice._yaw = -1 -- an arbitrary yaw a fighting wander AI might have left behind
 entity_def.do_custom(alice, 0.1)
 assert(vector.equals(alice.object:get_pos(), sleep_pos),
 	"a sleeping villager must be re-pinned to the bed every tick")
-assert(alice._cancel_navigation_calls > cancels_before,
-	"a sleeping villager's pathfinding must be cancelled every tick")
-assert(alice._halt_in_tracks_calls > halts_before,
-	"a sleeping villager's movement must be halted every tick")
+local velocity, acceleration = alice_motion()
+assert(velocity and vector.equals(velocity, vector.zero()),
+	"a sleeping villager's velocity must be cleared every tick")
+assert(acceleration and vector.equals(acceleration, vector.zero()),
+	"a sleeping villager's acceleration must be cleared every tick")
+assert(vector.equals(alice.acc, vector.zero()),
+	"a sleeping villager's own steering vector (self.acc) must be cleared every tick")
 assert(math.abs(alice._yaw - math.pi) < 1e-9,
-	"a sleeping villager must be turned via set_yaw, not a raw object:set_yaw, every tick")
+	"a sleeping villager must be turned via the mob's own set_yaw, not a raw object:set_yaw, every tick")
+assert(alice._original_custom_calls == custom_calls_before,
+	"the vanilla villager do_custom must stay skipped on every asleep tick, not just the first")
 
 -- Reactivation while asleep must retain the pre-sleep exit, rather than
 -- replacing it with the in-bed sleeping position.
