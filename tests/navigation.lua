@@ -354,6 +354,24 @@ proactive_def.do_custom(blocked_entity, 0.1)
 assert(not proactive_target)
 assert(not blocked_entity._villages_bed_route)
 
+-- A villager already standing near its claimed bed at nightfall needs no
+-- trip, but must still get order = "sleep" promptly rather than waiting on
+-- VoxeLibre's five-second do_activity poll (#61).
+top_claimed_by_player = false
+proactive_target = nil
+local already_home_entity = {
+	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+	gopath = proactive_def.gopath,
+	object = {
+		get_pos = function() return {x = 1, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+proactive_def.do_custom(already_home_entity, 0.1)
+assert(not proactive_target, "an already-close villager must not be sent on a bed trip")
+assert(already_home_entity.order == "sleep",
+	"an already-close villager must get order = sleep immediately, not after VoxeLibre's poll")
+
 -- VoxeLibre chooses and claims the jobsite. During its existing work periods,
 -- adapt only the trip to that claimed solid node into a safe approach route.
 timeofday = 0.4
