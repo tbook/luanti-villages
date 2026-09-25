@@ -130,6 +130,23 @@ entity_def.do_custom(alice, 0.6)
 assert(alice_props.textures[1]:find("badge_gold", 1, true))
 assert(not alice._original_custom_calls,
 	"the vanilla villager do_custom must not run while asleep")
+assert(alice_props.visual_size and alice_props.visual_size.x == 1 and alice_props.visual_size.y == 1,
+	"an adult villager's visual_size must be the full 1x scale")
+
+-- Regression test: mcl_mobs/api.lua aliases (does not copy) self.base_size
+-- when scaling a child's rendered size, mutating it in place; repeated
+-- reactivations while a child decay it toward zero, and growing up then
+-- copies that decayed value straight into visual_size, rendering the
+-- villager invisible. villages/init.lua cannot fix mcl_mobs itself, so it
+-- must notice and correct a wrong visual_size the same way it already
+-- corrects mesh/texture drift.
+alice_props.visual_size = {x = 0.0001, y = 0.0001} -- simulate the decayed upstream value
+alice.base_size = {x = 0.0001, y = 0.0001}
+entity_def.do_custom(alice, 0.6)
+assert(alice_props.visual_size.x == 1 and alice_props.visual_size.y == 1,
+	"a corrupted visual_size must be corrected back to full scale")
+assert(alice.base_size.x == 1 and alice.base_size.y == 1,
+	"self.base_size must also be corrected so future growth transitions are not re-corrupted")
 
 -- Regression test: navigation/movement/motion/physics steps already ran for
 -- the tick by the time do_custom is called, so a sleeping villager must be
