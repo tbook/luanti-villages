@@ -143,10 +143,14 @@ core.register_on_mods_loaded(function()
 		local pos, yaw = sleep_position(bed, node)
 		self._villages_sleeping = true
 		self.state = "stand"
-		self.object:set_velocity(vector.zero())
-		self.object:set_acceleration(vector.zero())
+		-- Stop the mob's own wander/pathfinding AI from fighting the sleep
+		-- pose: it is otherwise unaware a villages-managed sleep is underway
+		-- and keeps steering (and re-aiming set_yaw's rotate_step target)
+		-- toward its own movement goals every tick.
+		self:cancel_navigation()
+		self:halt_in_tracks(true, true)
 		self.object:set_pos(pos)
-		self.object:set_yaw(yaw)
+		self:set_yaw(yaw)
 		self.collisionbox = table.copy(SLEEP_BOX)
 		if self.child then
 			for i, value in ipairs(self.collisionbox) do
@@ -220,12 +224,16 @@ core.register_on_mods_loaded(function()
 				-- navigation_step/movement_step/motion_step/ai_step already ran
 				-- earlier this tick, before do_custom is called, so returning
 				-- false here alone does not stop the villager from drifting.
-				-- Re-pin it to the sleep pose every tick instead.
+				-- Keep cancelling any movement goal the wander/pathfinding AI
+				-- tries to set (nothing should while _villages_sleeping holds
+				-- do_custom's false return, but this is cheap insurance), and
+				-- use set_yaw (not the raw object call) so rotate_step's own
+				-- gradual-turn target stays in sync instead of fighting us.
 				local pos, yaw = sleep_position(bed, node)
+				self:cancel_navigation()
+				self:halt_in_tracks(true, true)
 				self.object:set_pos(pos)
-				self.object:set_yaw(yaw)
-				self.object:set_velocity(vector.zero())
-				self.object:set_acceleration(vector.zero())
+				self:set_yaw(yaw)
 				return false
 			end
 		elseif self.order == "sleep" and is_sleep_time() and bed

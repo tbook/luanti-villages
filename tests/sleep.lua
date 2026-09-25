@@ -83,13 +83,21 @@ local function make_villager(id, is_child, start_pos)
 		name = "mobs_mc:villager", _id = id, _bed = bed,
 		_profession = "weapon_smith", _max_trade_tier = 2,
 		order = "sleep", child = is_child,
+		_cancel_navigation_calls = 0, _halt_in_tracks_calls = 0,
 	}
+	-- Stand-ins for the mcl_mobs mob_class methods that stop the wander/
+	-- pathfinding AI and drive rotate_step's turn target in production.
+	self.cancel_navigation = function(s)
+		s._cancel_navigation_calls = s._cancel_navigation_calls + 1
+	end
+	self.halt_in_tracks = function(s)
+		s._halt_in_tracks_calls = s._halt_in_tracks_calls + 1
+	end
+	self.set_yaw = function(s, yaw) s._yaw = yaw end
 	self.object = {
 		get_pos = function() return pos end,
 		set_pos = function(_, value) pos = value end,
 		set_yaw = function() end,
-		set_velocity = function() end,
-		set_acceleration = function() end,
 		get_properties = function() return props end,
 		set_properties = function(_, values)
 			for k, v in pairs(values) do props[k] = v end
@@ -121,26 +129,28 @@ assert(alice_props.textures[1]:find("badge_gold", 1, true))
 
 -- Regression test: navigation/movement/motion/ai already ran for the tick by
 -- the time do_custom is called, so a sleeping villager must be re-pinned to
--- the bed (and have its velocity/acceleration cleared) every tick, not just
--- once when it fell asleep. Otherwise it drifts off the bed over time.
-local velocity_calls, acceleration_calls = {}, {}
-alice.object.set_velocity = function(_, value)
-	velocity_calls[#velocity_calls + 1] = value
-end
-alice.object.set_acceleration = function(_, value)
-	acceleration_calls[#acceleration_calls + 1] = value
-end
+-- the bed every tick, not just once when it fell asleep. It must also cancel
+-- the wander/pathfinding AI's movement goal every tick (cancel_navigation +
+-- halt_in_tracks), and turn via the mob's own set_yaw rather than a raw
+-- object:set_yaw call: set_yaw is what keeps rotate_step's gradual-turn
+-- target in sync, so skipping it lets rotate_step keep chasing whatever
+-- heading the (uncancelled) wander AI last wanted, spinning the villager.
 local sleep_pos = alice.object:get_pos()
+local cancels_before, halts_before
+	= alice._cancel_navigation_calls, alice._halt_in_tracks_calls
 -- A small nudge, well within the "too far away, must have been kicked out
 -- of bed" wake threshold checked below, but enough to reveal the drift bug.
 alice.object:set_pos(vector.offset(sleep_pos, 0.2, 0, 0))
+alice._yaw = -1 -- an arbitrary yaw a fighting wander AI might have left behind
 entity_def.do_custom(alice, 0.1)
 assert(vector.equals(alice.object:get_pos(), sleep_pos),
 	"a sleeping villager must be re-pinned to the bed every tick")
-assert(#velocity_calls > 0 and vector.equals(velocity_calls[#velocity_calls], vector.zero()),
-	"a sleeping villager's velocity must be cleared every tick")
-assert(#acceleration_calls > 0 and vector.equals(acceleration_calls[#acceleration_calls], vector.zero()),
-	"a sleeping villager's acceleration must be cleared every tick")
+assert(alice._cancel_navigation_calls > cancels_before,
+	"a sleeping villager's pathfinding must be cancelled every tick")
+assert(alice._halt_in_tracks_calls > halts_before,
+	"a sleeping villager's movement must be halted every tick")
+assert(math.abs(alice._yaw - math.pi) < 1e-9,
+	"a sleeping villager must be turned via set_yaw, not a raw object:set_yaw, every tick")
 
 -- Reactivation while asleep must retain the pre-sleep exit, rather than
 -- replacing it with the in-bed sleeping position.
