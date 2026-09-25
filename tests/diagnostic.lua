@@ -24,6 +24,7 @@ minetest = {
 		if pos.x == 1 then return {name = "mcl_beds:bed_red_bottom"} end
 		if pos.x == 2 then return {name = "mcl_beds:bed_red_top"} end
 		if pos.x == 4 then return {name = "mcl_composters:composter"} end
+		if pos.x == 5 then return {name = "mcl_beds:bed_red_bottom"} end
 		return {name = "mcl_core:stone"}
 	end,
 	get_item_group = function(name, group)
@@ -34,9 +35,19 @@ minetest = {
 	end,
 	facedir_to_dir = function() return {x = 1, y = 0, z = 0} end,
 	get_objects_inside_radius = function()
-		return {{get_luaentity = function()
-			return {name = "mobs_mc:villager", _id = "villager-2", _profession = "cleric"}
-		end}}
+		return {
+			{get_luaentity = function()
+				return {name = "mobs_mc:villager", _id = "villager-2", _profession = "cleric"}
+			end},
+			{get_luaentity = function()
+				return {
+					name = "mobs_mc:villager", _id = "villager-3", _profession = "farmer",
+					_bed = {x = 5, y = 0, z = 0}, order = "sleep", state = "stand",
+					_villages_sleeping = true,
+					object = {get_pos = function() return {x = 5, y = 0, z = 0.35} end},
+				}
+			end},
+		}
 	end,
 	get_meta = function(pos)
 		local values = metadata[key(pos)] or {}
@@ -121,6 +132,14 @@ assert(shown.form:find("Position: (1.0, 0.0, 0.0)", 1, true))
 lookup("stack", player, {type = "node", under = {x = 4, y = 0, z = 0}})
 assert(shown.formname == "villages:workstation_diagnostic")
 assert(shown.form:find("Recorded owner: villager villager-2 (loaded cleric)", 1, true))
+
+-- Punching an empty bed whose claiming villager is loaded nearby should
+-- surface where that villager actually is, not just that it is claimed.
+metadata["5,0,0"] = {villager = "villager-3"}
+lookup("stack", player, {type = "node", under = {x = 5, y = 0, z = 0}})
+assert(shown.formname == "villages:bed_diagnostic")
+assert(shown.form:find("Owner position: (5.0, 0.0, 0.3)", 1, true), shown.form)
+assert(shown.form:find("Owner sleep status: sleeping", 1, true), shown.form)
 
 metadata["4,0,0"] = {villager = "villager-1"}
 local far_worker = {

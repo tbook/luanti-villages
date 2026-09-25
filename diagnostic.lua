@@ -53,6 +53,19 @@ local function claim_owner(pos, villager, kind)
 	return "villager " .. owner .. " (not loaded nearby)"
 end
 
+-- Finds the claiming villager's own entity, if it happens to be loaded near
+-- its bed/workstation, so a punched-but-empty bed can point at where its
+-- occupant actually is instead of just confirming that it is claimed.
+local function claim_owner_entity(pos, kind)
+	if not pos or not core.get_node_or_nil(pos) then return nil end
+	local meta = core.get_meta(pos)
+	local player = kind == "bed" and meta:get_string("player") or ""
+	if player ~= "" then return nil end
+	local owner = meta:get_string("villager")
+	if owner == "" then return nil end
+	return loaded_villager(owner, pos)
+end
+
 local function status_of_claim(pos, id, kind)
 	if not pos then return "none assigned" end
 	local node = core.get_node_or_nil(pos)
@@ -264,15 +277,28 @@ end
 
 local function show_node(player, kind, pos, node)
 	local label = kind == "bed" and "Bed" or "Workstation"
-	show_form(player, "villages:" .. kind .. "_diagnostic", {
+	local lines = {
 		label .. " diagnostics (read-only)",
 		"",
 		"Position: " .. pos_string(pos),
 		"Node: " .. node.name,
 		"Recorded owner: " .. claim_owner(pos, nil, kind),
-		"",
-		"Owner resolution is limited to villagers loaded within 64 nodes.",
-	})
+	}
+	local owner = claim_owner_entity(pos, kind)
+	if owner then
+		local owner_pos = owner.object and owner.object:get_pos()
+		table.insert(lines, "Owner position: " .. pos_string(owner_pos))
+		if kind == "bed" then
+			local bed_ok = bed_status(owner) == "valid claim"
+			table.insert(lines, "Owner sleep status: " .. sleep_status(owner, bed_ok))
+		else
+			local job_ok = status_of_claim(owner._jobsite, owner._id, "jobsite") == "valid claim"
+			table.insert(lines, "Owner work status: " .. work_status(owner, job_ok))
+		end
+	end
+	table.insert(lines, "")
+	table.insert(lines, "Owner resolution is limited to villagers loaded within 64 nodes.")
+	show_form(player, "villages:" .. kind .. "_diagnostic", lines)
 end
 
 local function permitted(player)
