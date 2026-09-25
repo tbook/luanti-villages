@@ -56,6 +56,14 @@ local function refresh_visual(self)
 	self.base_texture = {texture}
 end
 
+local function tick_visual(self, dtime)
+	self._villages_visual_timer = (self._villages_visual_timer or 0) + dtime
+	if self._villages_visual_timer >= 0.5 then
+		self._villages_visual_timer = 0
+		refresh_visual(self)
+	end
+end
+
 local function normal_box(self, original_box)
 	local box = table.copy(original_box)
 	if self.child then
@@ -114,6 +122,16 @@ core.register_on_mods_loaded(function()
 	local original_custom = def.do_custom
 	local original_animation = def.set_animation or mcl_mobs.mob_class.set_animation
 	local original_staticdata = def.get_staticdata or mcl_mobs.mob_class.get_staticdata
+	-- mob_class:set_yaw(yaw, delay) does not rotate the model itself; it only
+	-- records self.target_yaw/self.delay. A separate check_smooth_rotation(),
+	-- which runs every tick regardless of do_custom's return value, is what
+	-- actually calls object:set_yaw() each tick, smoothly turning toward
+	-- target_yaw. Calling the raw object:set_yaw() directly (as this file
+	-- used to) never updates target_yaw, so check_smooth_rotation keeps
+	-- chasing whatever heading the villager's own AI last wanted before it
+	-- fell asleep, fighting our forced yaw and spinning the villager. Route
+	-- through the mob's own set_yaw instead, like set_animation above.
+	local mob_set_yaw = def.set_yaw or mcl_mobs.mob_class.set_yaw
 
 	def.initial_properties.mesh = MODEL
 	def.animation = table.copy(animation)
@@ -143,10 +161,14 @@ core.register_on_mods_loaded(function()
 		local pos, yaw = sleep_position(bed, node)
 		self._villages_sleeping = true
 		self.state = "stand"
+		self.object:set_pos(pos)
 		self.object:set_velocity(vector.zero())
 		self.object:set_acceleration(vector.zero())
-		self.object:set_pos(pos)
-		self.object:set_yaw(yaw)
+		-- self.acc is the mob's own Lua-side steering vector: on_step adds it
+		-- to velocity every tick (mcl_mobs/api.lua), so it must be cleared
+		-- too, not just the object's own velocity/acceleration.
+		self.acc = vector.zero()
+		mob_set_yaw(self, yaw)
 		self.collisionbox = table.copy(SLEEP_BOX)
 		if self.child then
 			for i, value in ipairs(self.collisionbox) do
@@ -203,32 +225,40 @@ core.register_on_mods_loaded(function()
 	end
 
 	def.do_custom = function(self, dtime)
-		local result = original_custom(self, dtime)
-		if result == false then return false end
-		self._villages_visual_timer = (self._villages_visual_timer or 0) + dtime
-		if self._villages_visual_timer >= 0.5 then
-			self._villages_visual_timer = 0
-			refresh_visual(self)
-		end
-
-		local bed, node = claimed_bed(self)
 		if self._villages_sleeping then
+			local bed, node = claimed_bed(self)
 			if self.order ~= "sleep" or not is_sleep_time() or not bed
 				or vector.distance(self.object:get_pos(), bed) >= 1 then
 				wake(self)
 			else
-				-- navigation_step/movement_step/motion_step/ai_step already ran
-				-- earlier this tick, before do_custom is called, so returning
-				-- false here alone does not stop the villager from drifting.
-				-- Re-pin it to the sleep pose every tick instead.
+				-- Do not call the vanilla villager do_custom (original_custom)
+				-- while asleep: its periodic do_activity() re-checks the bed
+				-- every ~5s and, given any excuse (the villager's position has
+				-- drifted even slightly), issues its own turn_in_direction()/
+				-- gopath() calls. Those queue a fresh target_yaw the same way
+				-- ours does, and since check_smooth_rotation() runs every tick
+				-- regardless of do_custom's return value, it would chase that
+				-- competing target and fight our fixed sleep pose. Re-pin
+				-- position/velocity/yaw every tick instead, since the earlier
+				-- physics/motion steps in on_step run before do_custom either
+				-- way and can still nudge the villager.
+				tick_visual(self, dtime)
 				local pos, yaw = sleep_position(bed, node)
 				self.object:set_pos(pos)
-				self.object:set_yaw(yaw)
 				self.object:set_velocity(vector.zero())
 				self.object:set_acceleration(vector.zero())
+				self.acc = vector.zero()
+				mob_set_yaw(self, yaw)
 				return false
 			end
-		elseif self.order == "sleep" and is_sleep_time() and bed
+		end
+
+		local result = original_custom(self, dtime)
+		if result == false then return false end
+		tick_visual(self, dtime)
+
+		local bed, node = claimed_bed(self)
+		if self.order == "sleep" and is_sleep_time() and bed
 			and vector.distance(self.object:get_pos(), bed) < 2
 			and not occupied_by_other(self, bed) then
 			begin_sleep(self, bed, node)
