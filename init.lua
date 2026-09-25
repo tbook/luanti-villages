@@ -114,6 +114,14 @@ core.register_on_mods_loaded(function()
 	local original_custom = def.do_custom
 	local original_animation = def.set_animation or mcl_mobs.mob_class.set_animation
 	local original_staticdata = def.get_staticdata or mcl_mobs.mob_class.get_staticdata
+	-- Spawned villager instances do not reliably inherit mob_class methods
+	-- through their metatable (self:cancel_navigation() etc. can be nil at
+	-- runtime even though def:cancel_navigation() resolves fine at mod-load
+	-- time), so capture these as plain functions here, like set_animation
+	-- and get_staticdata above, instead of calling them as self:method().
+	local cancel_navigation = def.cancel_navigation or mcl_mobs.mob_class.cancel_navigation
+	local halt_in_tracks = def.halt_in_tracks or mcl_mobs.mob_class.halt_in_tracks
+	local mob_set_yaw = def.set_yaw or mcl_mobs.mob_class.set_yaw
 
 	def.initial_properties.mesh = MODEL
 	def.animation = table.copy(animation)
@@ -147,10 +155,10 @@ core.register_on_mods_loaded(function()
 		-- pose: it is otherwise unaware a villages-managed sleep is underway
 		-- and keeps steering (and re-aiming set_yaw's rotate_step target)
 		-- toward its own movement goals every tick.
-		self:cancel_navigation()
-		self:halt_in_tracks(true, true)
+		cancel_navigation(self)
+		halt_in_tracks(self, true, true)
 		self.object:set_pos(pos)
-		self:set_yaw(yaw)
+		mob_set_yaw(self, yaw)
 		self.collisionbox = table.copy(SLEEP_BOX)
 		if self.child then
 			for i, value in ipairs(self.collisionbox) do
@@ -230,10 +238,10 @@ core.register_on_mods_loaded(function()
 				-- use set_yaw (not the raw object call) so rotate_step's own
 				-- gradual-turn target stays in sync instead of fighting us.
 				local pos, yaw = sleep_position(bed, node)
-				self:cancel_navigation()
-				self:halt_in_tracks(true, true)
+				cancel_navigation(self)
+				halt_in_tracks(self, true, true)
 				self.object:set_pos(pos)
-				self:set_yaw(yaw)
+				mob_set_yaw(self, yaw)
 				return false
 			end
 		elseif self.order == "sleep" and is_sleep_time() and bed

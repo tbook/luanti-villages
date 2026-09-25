@@ -72,6 +72,17 @@ mcl_mobs = {mob_class = {
 			_villages_sleeping = self._villages_sleeping,
 		}
 	end,
+	-- Spawned villager instances do not reliably inherit these through their
+	-- metatable, so villages/init.lua calls them as plain functions captured
+	-- from def/mob_class at mod-load time, never as self:method(). Mock them
+	-- the same way here, on mob_class, rather than per villager instance.
+	cancel_navigation = function(self)
+		self._cancel_navigation_calls = (self._cancel_navigation_calls or 0) + 1
+	end,
+	halt_in_tracks = function(self)
+		self._halt_in_tracks_calls = (self._halt_in_tracks_calls or 0) + 1
+	end,
+	set_yaw = function(self, yaw) self._yaw = yaw end,
 }}
 
 dofile("init.lua")
@@ -85,15 +96,6 @@ local function make_villager(id, is_child, start_pos)
 		order = "sleep", child = is_child,
 		_cancel_navigation_calls = 0, _halt_in_tracks_calls = 0,
 	}
-	-- Stand-ins for the mcl_mobs mob_class methods that stop the wander/
-	-- pathfinding AI and drive rotate_step's turn target in production.
-	self.cancel_navigation = function(s)
-		s._cancel_navigation_calls = s._cancel_navigation_calls + 1
-	end
-	self.halt_in_tracks = function(s)
-		s._halt_in_tracks_calls = s._halt_in_tracks_calls + 1
-	end
-	self.set_yaw = function(s, yaw) s._yaw = yaw end
 	self.object = {
 		get_pos = function() return pos end,
 		set_pos = function(_, value) pos = value end,
