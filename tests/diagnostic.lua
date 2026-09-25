@@ -94,7 +94,12 @@ local object = {
 					trail = {{x = 10, y = 0, z = 0}, {x = 4, y = 0, z = 0}}}},
 			_villages_job_search_route = {status = "retry", target = {x = 4, y = 0, z = 0}, retry_at = 120, reason = "no route",
 				planner = {start = {x = 10, y = 0, z = 0}, candidates = {}, status = "unreachable", searched = 0, trail = {}}},
-			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
+			object = {
+				get_pos = function() return {x = 10, y = 0, z = 0} end,
+				get_properties = function()
+					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+				end,
+			},
 		}
 	end,
 }
@@ -103,6 +108,9 @@ lookup("stack", player, {type = "object", ref = object})
 assert(shown and shown.name == "admin")
 assert(shown.form:find("Villager diagnostics", 1, true))
 assert(shown.form:find("Profession: farmer", 1, true))
+assert(shown.form:find(
+	"Visual: mesh villages_villager.b3d, textures [villages_villager_base.png], "
+	.. "visual_size none, is_visible true (default)", 1, true))
 assert(shown.form:find("Bed owner: this villager", 1, true))
 assert(shown.form:find("Bed claim: valid claim", 1, true))
 assert(shown.form:find("Jobsite owner: villager villager-2 (loaded cleric)", 1, true))
@@ -147,7 +155,12 @@ local far_worker = {
 		return {
 			name = "mobs_mc:villager", _id = "villager-1", _profession = "farmer",
 			_jobsite = {x = 4, y = 0, z = 0}, order = "work", state = "stand",
-			object = {get_pos = function() return {x = 10, y = 0, z = 0} end},
+			object = {
+				get_pos = function() return {x = 10, y = 0, z = 0} end,
+				get_properties = function()
+					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+				end,
+			},
 		}
 	end,
 }

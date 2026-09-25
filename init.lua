@@ -45,15 +45,32 @@ local function skin(self)
 	return texture
 end
 
+-- mcl_mobs/api.lua aliases (not copies) self.base_size when computing a
+-- child's rendered scale: `local vis_size = self.base_size; vis_size.x =
+-- vis_size.x * .5`. That mutates self.base_size in place, so every
+-- reactivation while still a child halves it again; it decays toward zero
+-- over enough mapblock unload/reload cycles. Growing up then copies that
+-- decayed self.base_size straight into visual_size, rendering the villager
+-- invisible. Not something this mod can fix upstream, so re-assert the
+-- correct scale here the same way mesh/texture drift is already corrected.
+local function expected_visual_size(self)
+	if self.child then return {x = 0.5, y = 0.5} end
+	return {x = 1, y = 1}
+end
+
 local function refresh_visual(self)
 	local texture = skin(self)
 	local props = self.object:get_properties()
 	if not props then return end
-	if props.mesh ~= MODEL or not props.textures or props.textures[1] ~= texture then
-		self.object:set_properties({mesh = MODEL, textures = {texture}})
+	local size = expected_visual_size(self)
+	local current = props.visual_size
+	local size_ok = current and current.x == size.x and current.y == size.y
+	if props.mesh ~= MODEL or not props.textures or props.textures[1] ~= texture or not size_ok then
+		self.object:set_properties({mesh = MODEL, textures = {texture}, visual_size = size})
 	end
 	self.base_mesh = MODEL
 	self.base_texture = {texture}
+	self.base_size = {x = 1, y = 1}
 end
 
 local function tick_visual(self, dtime)
