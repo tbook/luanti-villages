@@ -144,6 +144,7 @@ core.register_on_mods_loaded(function()
 		self._villages_sleeping = true
 		self.state = "stand"
 		self.object:set_velocity(vector.zero())
+		self.object:set_acceleration(vector.zero())
 		self.object:set_pos(pos)
 		self.object:set_yaw(yaw)
 		self.collisionbox = table.copy(SLEEP_BOX)
@@ -216,7 +217,16 @@ core.register_on_mods_loaded(function()
 				or vector.distance(self.object:get_pos(), bed) >= 1 then
 				wake(self)
 			else
-				return false -- Skip the generic standing/walking state machine.
+				-- navigation_step/movement_step/motion_step/ai_step already ran
+				-- earlier this tick, before do_custom is called, so returning
+				-- false here alone does not stop the villager from drifting.
+				-- Re-pin it to the sleep pose every tick instead.
+				local pos, yaw = sleep_position(bed, node)
+				self.object:set_pos(pos)
+				self.object:set_yaw(yaw)
+				self.object:set_velocity(vector.zero())
+				self.object:set_acceleration(vector.zero())
+				return false
 			end
 		elseif self.order == "sleep" and is_sleep_time() and bed
 			and vector.distance(self.object:get_pos(), bed) < 2

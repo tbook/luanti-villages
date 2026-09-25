@@ -89,6 +89,7 @@ local function make_villager(id, is_child, start_pos)
 		set_pos = function(_, value) pos = value end,
 		set_yaw = function() end,
 		set_velocity = function() end,
+		set_acceleration = function() end,
 		get_properties = function() return props end,
 		set_properties = function(_, values)
 			for k, v in pairs(values) do props[k] = v end
@@ -117,6 +118,29 @@ alice._max_trade_tier = 3
 alice_props.textures = {"old.png"} -- VoxeLibre refreshes this after a trade.
 entity_def.do_custom(alice, 0.6)
 assert(alice_props.textures[1]:find("badge_gold", 1, true))
+
+-- Regression test: navigation/movement/motion/ai already ran for the tick by
+-- the time do_custom is called, so a sleeping villager must be re-pinned to
+-- the bed (and have its velocity/acceleration cleared) every tick, not just
+-- once when it fell asleep. Otherwise it drifts off the bed over time.
+local velocity_calls, acceleration_calls = {}, {}
+alice.object.set_velocity = function(_, value)
+	velocity_calls[#velocity_calls + 1] = value
+end
+alice.object.set_acceleration = function(_, value)
+	acceleration_calls[#acceleration_calls + 1] = value
+end
+local sleep_pos = alice.object:get_pos()
+-- A small nudge, well within the "too far away, must have been kicked out
+-- of bed" wake threshold checked below, but enough to reveal the drift bug.
+alice.object:set_pos(vector.offset(sleep_pos, 0.2, 0, 0))
+entity_def.do_custom(alice, 0.1)
+assert(vector.equals(alice.object:get_pos(), sleep_pos),
+	"a sleeping villager must be re-pinned to the bed every tick")
+assert(#velocity_calls > 0 and vector.equals(velocity_calls[#velocity_calls], vector.zero()),
+	"a sleeping villager's velocity must be cleared every tick")
+assert(#acceleration_calls > 0 and vector.equals(acceleration_calls[#acceleration_calls], vector.zero()),
+	"a sleeping villager's acceleration must be cleared every tick")
 
 -- Reactivation while asleep must retain the pre-sleep exit, rather than
 -- replacing it with the in-bed sleeping position.
