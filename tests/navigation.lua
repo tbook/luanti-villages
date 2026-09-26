@@ -306,6 +306,45 @@ minetest.get_node_or_nil = door_node
 wooden_door = false
 path_available = true
 
+-- A waypoint's action fires when the mover leaves it for the next one. When
+-- the destination sits just past a door, the door is the second-to-last
+-- waypoint and the destination itself is last, so a close action attached to
+-- the destination would never fire. It must close on arrival instead (#60).
+local trailing_close_action = nil
+local trailing_door_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return false end,
+	do_pathfind_action = function(_, action) trailing_close_action = action end,
+}
+dofile("navigation.lua")(trailing_door_def)
+path_available = false
+local trailing_door_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	if pos.y == -1 and pos.z ~= 0 then return {name = "air"} end
+	if pos.x == 2 and pos.y == 0 and pos.z == 0 then return {name = "mcl_doors:wooden_door_b_1"} end
+	return trailing_door_node(pos)
+end
+local trailing_door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	do_pathfind_action = trailing_door_def.do_pathfind_action,
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(trailing_door_def.gopath(trailing_door_entity, trailing_door_entity._bed, nil, true))
+local no_close_waypoint = trailing_door_entity.current_target.action == nil
+for _, waypoint in ipairs(trailing_door_entity.waypoints) do
+	if waypoint.action and waypoint.action.action == "close" then no_close_waypoint = false end
+end
+assert(no_close_waypoint, "a close action must not be attached to the final waypoint")
+trailing_door_entity.callback_arrived(trailing_door_entity)
+assert(trailing_close_action and trailing_close_action.action == "close" and trailing_close_action.target.x == 2,
+	"arrival must close the door just behind the destination")
+minetest.get_node_or_nil = trailing_door_node
+path_available = true
+
 local proactive_target = nil
 local proactive_def = {
 	on_activate = function() end,

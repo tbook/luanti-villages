@@ -102,6 +102,16 @@ leaving the low, doorless opening in place.
 Expected result: the villager reaches the bed by the stair. It must not still
 attempt, or get diverted toward, the blocked direct rise.
 
+## 10. Bed just inside a door
+
+Build a corridor with a wooden door, with the claimed bed one node past the
+door rather than further down the corridor. Send the villager to bed from
+well down the corridor.
+
+Expected result: the villager opens the door, walks in, and reaches the bed.
+The door closes behind it instead of being left standing open, even though
+the bed is the very next node after the doorway.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.

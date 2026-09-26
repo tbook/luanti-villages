@@ -382,13 +382,22 @@ local function start_engine_path(self, target, path, arrived, door_actions)
 	for _, pos in ipairs(path) do
 		table.insert(waypoints, {pos = vector.new(pos), failed_attempts = 0})
 	end
+	-- A waypoint's action fires when the mover leaves it for the next one. The
+	-- final waypoint is never left, so a close action attached there (the
+	-- destination sits just past the door) would never run; close on arrival
+	-- instead (#60).
+	local trailing_door
 	if door_actions then
 		for i = 2, #waypoints do
 			local door = wooden_door_at(waypoints[i].pos)
 			if door then
 				waypoints[i - 1].action = {type = "door", action = "open", target = vector.new(door)}
 				if waypoints[i + 1] then
-					waypoints[i + 1].action = {type = "door", action = "close", target = vector.new(door)}
+					if i + 1 == #waypoints then
+						trailing_door = vector.new(door)
+					else
+						waypoints[i + 1].action = {type = "door", action = "close", target = vector.new(door)}
+					end
 				end
 			end
 		end
@@ -400,6 +409,15 @@ local function start_engine_path(self, target, path, arrived, door_actions)
 	end
 	if not current then return false end
 	self._target = vector.new(target)
+	if trailing_door then
+		local door, on_arrive = trailing_door, arrived
+		arrived = function(entity, arrived_target)
+			if entity.do_pathfind_action then
+				entity.do_pathfind_action(entity, {type = "door", action = "close", target = door})
+			end
+			if on_arrive then return on_arrive(entity, arrived_target) end
+		end
+	end
 	self.callback_arrived = arrived
 	self.current_target = current
 	self.waypoints = waypoints
