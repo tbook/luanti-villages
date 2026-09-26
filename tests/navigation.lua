@@ -380,6 +380,11 @@ minetest.get_node_or_nil = function(pos)
 	-- The only support at the bed's height is the top of this stair, one node
 	-- to its side rather than in front of it.
 	if pos.x == 1 and pos.y == 0 and pos.z == 0 then return {name = "test:stair"} end
+	-- Support only the corridor leading to that side. Every other direction
+	-- into the bed's approach is unsupported, so reaching it can only happen
+	-- by jumping onto the stair from here, not by detouring to some other
+	-- side the default floor would otherwise make just as easy.
+	if pos.y == -1 and not (pos.z == 0 and pos.x >= 1) then return {name = "air"} end
 	return stair_side_node(pos)
 end
 local stair_side_entity = {
@@ -393,6 +398,13 @@ assert(stair_side_def.gopath(stair_side_entity, stair_side_entity._bed, nil, tru
 assert(stair_side_entity._target and stair_side_entity._target.x == 1
 	and stair_side_entity._target.y == 1 and stair_side_entity._target.z == 0,
 	"the planner must reach the bed by jumping onto the stair from its side")
+-- Pin the actual rise edge, not just the final target, so a regression that
+-- reached the same target by some other means would still be caught.
+local side_rise = stair_side_entity.waypoints[#stair_side_entity.waypoints - 1].pos
+local side_arrival = stair_side_entity.waypoints[#stair_side_entity.waypoints].pos
+assert(side_rise.x == 2 and side_rise.y == 0 and side_rise.z == 0
+	and side_arrival.x == 1 and side_arrival.y == 1 and side_arrival.z == 0,
+	"the route must rise directly from the stair's side, not some other approach")
 minetest.get_node_or_nil = stair_side_node
 path_available = true
 
