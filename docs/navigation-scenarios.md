@@ -86,13 +86,21 @@ the wall.
 
 Build a two-block-high room with a doorless opening into a neighboring room
 whose floor is one block higher, so its own two-block interior sits entirely
-above the first room's ceiling. Put the villager's bed in the raised room and
-the villager in the lower one, next to the opening.
+above the first room's ceiling, and no other connection between the rooms.
+Put the villager's bed in the raised room and the villager in the lower one,
+next to the opening.
 
-Expected result: the villager walks to the opening, then up into the raised
-room, rather than repeatedly walking into the wall beneath it. It must not
-attempt the jump from underneath the low roof, since it would strike its head
-before clearing the ledge.
+Expected result: the villager cannot physically clear that rise (it would
+strike its head on the lower room's own ceiling before reaching the ledge), so
+it must not attempt the jump. With no other route available, the trip enters
+a bounded retry with a route reason instead of repeatedly walking into the
+wall beneath the ledge.
+
+Now add a proper stair connecting the two rooms elsewhere in the layout, still
+leaving the low, doorless opening in place.
+
+Expected result: the villager reaches the bed by the stair. It must not still
+attempt, or get diverted toward, the blocked direct rise.
 
 ## Interpretation
 
