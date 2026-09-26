@@ -342,6 +342,24 @@ assert(no_close_waypoint, "a close action must not be attached to the final wayp
 trailing_door_entity.callback_arrived(trailing_door_entity)
 assert(trailing_close_action and trailing_close_action.action == "close" and trailing_close_action.target.x == 2,
 	"arrival must close the door just behind the destination")
+
+-- A stale native callback from a superseded route must not close its old
+-- trailing door, just as it must not complete the wrapped arrival callback.
+trailing_close_action = nil
+local superseded_trailing_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	do_pathfind_action = trailing_door_def.do_pathfind_action,
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(trailing_door_def.gopath(superseded_trailing_entity, superseded_trailing_entity._bed, nil, true))
+local stale_trailing_arrived = superseded_trailing_entity.callback_arrived
+superseded_trailing_entity.state = "stand"
+assert(trailing_door_def.gopath(superseded_trailing_entity, superseded_trailing_entity._bed, nil, true))
+stale_trailing_arrived(superseded_trailing_entity)
+assert(not trailing_close_action, "a superseded route must not close its old trailing door")
 minetest.get_node_or_nil = trailing_door_node
 path_available = true
 

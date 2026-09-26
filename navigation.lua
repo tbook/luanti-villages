@@ -200,12 +200,16 @@ local function fail(self, route_field, reason, target, retry_seconds, planner_re
 	stop(self)
 end
 
+-- Native path callbacks can fire after a route was canceled or replaced. Only
+-- the route that created a callback may act on its behalf.
+local function owns_route(entity, route_field, route_id)
+	local route = entity[route_field]
+	return route and route.status == "travelling" and route.id == route_id
+end
+
 local function arrival_callback(route_field, route_id, target, callback_arrived, sleep)
 	return function(entity)
-		local route = entity[route_field]
-		-- Native path callbacks can fire after a route was canceled or replaced.
-		-- Only the route that created this callback may complete it.
-		if not route or route.status ~= "travelling" or route.id ~= route_id then return end
+		if not owns_route(entity, route_field, route_id) then return end
 		entity[route_field] = {status = "arrived", id = route_id, target = vector.new(target)}
 		if sleep then entity.order = "sleep" end
 		if callback_arrived then return callback_arrived(entity, target) end
@@ -376,7 +380,7 @@ end
 -- gopath occasionally rejects a path that minetest.find_path has returned,
 -- particularly from stair landings. Reuse its waypoint mover directly for that
 -- narrow case, rather than abandoning a known-valid route.
-local function start_engine_path(self, target, path, arrived, door_actions)
+local function start_engine_path(self, target, path, arrived, door_actions, route_field, route_id)
 	if not path or #path == 0 then return false end
 	local waypoints = {}
 	for _, pos in ipairs(path) do
@@ -412,7 +416,9 @@ local function start_engine_path(self, target, path, arrived, door_actions)
 	if trailing_door then
 		local door, on_arrive = trailing_door, arrived
 		arrived = function(entity, arrived_target)
-			if entity.do_pathfind_action then
+			-- A stale or superseded route must not act on this door either, just
+			-- as it must not complete the wrapped arrival callback below.
+			if owns_route(entity, route_field, route_id) and entity.do_pathfind_action then
 				entity.do_pathfind_action(entity, {type = "door", action = "close", target = door})
 			end
 			if on_arrive then return on_arrive(entity, arrived_target) end
@@ -442,7 +448,8 @@ local function recover_route(self, destination)
 				planner = planner_report,
 			})
 			if start_engine_path(self, target, path,
-				arrival_callback(destination.route_field, recovered.id, target, route.callback, destination.sleep), true) then
+				arrival_callback(destination.route_field, recovered.id, target, route.callback, destination.sleep), true,
+				destination.route_field, recovered.id) then
 				return true
 			end
 		end
@@ -605,7 +612,7 @@ local function install(def)
 		local arrived = arrival_callback(destination.route_field, route.id, candidate, callback_arrived, destination.sleep)
 		local started = original_gopath(self, candidate, arrived, true)
 		if started or self.state == PATHFINDING then return true end
-		if start_engine_path(self, candidate, engine_path, arrived) then
+		if start_engine_path(self, candidate, engine_path, arrived, nil, destination.route_field, route.id) then
 			self[destination.route_field].mode = "engine"
 			return true
 		end
@@ -616,7 +623,8 @@ local function install(def)
 			stair_target, stair_path, planner_failure, _, planner_report = plan_stair_route(self, candidates)
 		end
 		if stair_target and start_engine_path(self, stair_target, stair_path,
-			arrival_callback(destination.route_field, route.id, stair_target, callback_arrived, destination.sleep), true) then
+			arrival_callback(destination.route_field, route.id, stair_target, callback_arrived, destination.sleep), true,
+			destination.route_field, route.id) then
 			self[destination.route_field].target = vector.new(stair_target)
 			self[destination.route_field].mode = "planner"
 			self[destination.route_field].planner = planner_report
