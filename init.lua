@@ -125,12 +125,20 @@ end
 -- entities sharing the same _id. This mod cannot fix that upstream race, but
 -- it can notice the collision here (both bed and jobsite claims already key
 -- off _id, so a collision otherwise silently corrupts both) and drop one.
--- Comparing position strings, rather than simply removing whichever side is
--- doing the noticing, guarantees the same survivor regardless of which of
--- the two copies happens to activate first: each side independently reaches
--- the same conclusion about who stays.
-local function position_key(pos)
-	return string.format("%.3f:%.3f:%.3f", pos.x, pos.y, pos.z)
+-- Comparing keys, rather than simply removing whichever side is doing the
+-- noticing, guarantees the same survivor regardless of which of the two
+-- copies happens to activate first: each side independently reaches the
+-- same conclusion about who stays. Position alone is not a safe key: the
+-- engine can duplicate an entity at its exact position, and a tie there
+-- would send both copies down the "remove the other" branch, so if removal
+-- does not invalidate the object synchronously both could end up removed.
+-- ObjectRef has no get_id()/equivalent stable handle in this API, but two
+-- distinct Lua objects always tostring() to distinct addresses within a
+-- single server run, which is all the tie-break needs: it only has to be
+-- consistent for the two objects being compared right now, not stable
+-- across restarts.
+local function duplicate_key(pos, object)
+	return string.format("%.3f:%.3f:%.3f:%s", pos.x, pos.y, pos.z, tostring(object))
 end
 
 local function find_duplicate(self, pos)
@@ -152,7 +160,7 @@ local function resolve_duplicate(self)
 	if not dup then return false end
 	local dup_pos = dup.object:get_pos()
 	if not dup_pos then return false end
-	if position_key(pos) > position_key(dup_pos) then
+	if duplicate_key(pos, self.object) > duplicate_key(dup_pos, dup.object) then
 		core.log("warning", "[villages] removing duplicate villager " .. tostring(self._id))
 		self.object:remove()
 		return true

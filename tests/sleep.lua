@@ -248,4 +248,24 @@ entity_def.on_activate(dup_d, "", 0)
 assert(dup_c_removed(), "the surviving copy must remove the other duplicate directly")
 assert(not dup_d_removed(), "the surviving copy must not remove itself")
 
+-- Regression test: the engine can duplicate an entity at its exact position,
+-- so position alone is not a safe tie-breaker (both copies would otherwise
+-- take the "remove the other" branch). Exactly one of the two must be
+-- removed, from either activation order, never both and never neither.
+local dup_e, _, _, dup_e_removed = make_villager("erin", false, {x = 3, y = 0, z = 0})
+local dup_f, _, _, dup_f_removed = make_villager("erin", false, {x = 3, y = 0, z = 0})
+
+objects = {dup_e.object, dup_f.object}
+entity_def.on_activate(dup_e, "", 0)
+assert(dup_e_removed() ~= dup_f_removed(),
+	"exactly one same-position duplicate must be removed, not both or neither")
+
+local dup_g, _, _, dup_g_removed = make_villager("fern", false, {x = 3, y = 0, z = 0})
+local dup_h, _, _, dup_h_removed = make_villager("fern", false, {x = 3, y = 0, z = 0})
+
+objects = {dup_g.object, dup_h.object}
+entity_def.on_activate(dup_h, "", 0)
+assert(dup_g_removed() ~= dup_h_removed(),
+	"exactly one same-position duplicate must be removed regardless of activation order")
+
 print("villager sleep tests passed")
