@@ -61,4 +61,29 @@ local alternate_path = planner.find_path({x = 0, y = 4, z = 0},
 assert(alternate_path and #alternate_path == 3)
 assert(alternate_path[2].x == 1 and alternate_path[2].y == 3)
 
+-- A rise must not be taken when the source room's own ceiling blocks the jump,
+-- even though the destination column is fully open (#56).
+local low_roof = {
+	["0:0:0"] = true, ["1:1:0"] = true,
+}
+local roof_blocked = {["0:3:0"] = true}
+local function low_roof_can_stand(pos)
+	return low_roof[pos.x .. ":" .. (pos.y - 1) .. ":" .. pos.z] == true
+end
+local function low_roof_clear(from_pos, to_pos, dy)
+	if dy <= 0 then return true end
+	return not roof_blocked[from_pos.x .. ":" .. (from_pos.y + 2) .. ":" .. from_pos.z]
+end
+local blocked_path, _, blocked_status = planner.find_path({x = 0, y = 1, z = 0}, low_roof_can_stand,
+	function(pos) return pos.x == 1 and pos.y == 2 and pos.z == 0 end,
+	{range = 8, clear = low_roof_clear})
+assert(not blocked_path and blocked_status == "unreachable")
+
+-- The same rise is taken once the source room's ceiling is clear.
+roof_blocked = {}
+local open_path = planner.find_path({x = 0, y = 1, z = 0}, low_roof_can_stand,
+	function(pos) return pos.x == 1 and pos.y == 2 and pos.z == 0 end,
+	{range = 8, clear = low_roof_clear})
+assert(open_path and #open_path == 2)
+
 print("planner.lua: ok")

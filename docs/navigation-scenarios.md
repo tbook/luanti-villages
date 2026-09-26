@@ -82,6 +82,26 @@ Expected result: the villager uses the door and stairs. If the route cannot be
 completed, it enters a bounded retry with a route reason instead of pushing at
 the wall.
 
+## 9. Low roof beside a taller room
+
+Build a two-block-high room with a doorless opening into a neighboring room
+whose floor is one block higher, so its own two-block interior sits entirely
+above the first room's ceiling, and no other connection between the rooms.
+Put the villager's bed in the raised room and the villager in the lower one,
+next to the opening.
+
+Expected result: the villager cannot physically clear that rise (it would
+strike its head on the lower room's own ceiling before reaching the ledge), so
+it must not attempt the jump. With no other route available, the trip enters
+a bounded retry with a route reason instead of repeatedly walking into the
+wall beneath the ledge.
+
+Now add a proper stair connecting the two rooms elsewhere in the layout, still
+leaving the low, doorless opening in place.
+
+Expected result: the villager reaches the bed by the stair. It must not still
+attempt, or get diverted toward, the blocked direct rise.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.

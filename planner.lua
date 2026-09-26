@@ -65,8 +65,11 @@ end
 
 -- `can_stand(pos)` returns true for an open, head-clear walk position with
 -- support beneath. Positions have integral coordinates. `goal(pos)` returns
--- true for an acceptable arrival position. The third return value is `found`,
--- `unreachable`, or `search_limit`.
+-- true for an acceptable arrival position. `options.clear(from_pos, to_pos, dy)`
+-- is an optional extra check on the edge itself, not just its endpoints; the
+-- waypoint mover needs it for a rise, where jumping from `from_pos` swings a
+-- villager's head through `from_pos.y + 2`, a column `can_stand(to_pos)` never
+-- looks at. The third return value is `found`, `unreachable`, or `search_limit`.
 function planner.find_path(start, can_stand, goal, options)
 	options = options or {}
 	local range = options.range or 48
@@ -114,7 +117,8 @@ function planner.find_path(start, can_stand, goal, options)
 					if math.abs(next_pos.x - start.x) <= range
 						and math.abs(next_pos.y - start.y) <= range
 						and math.abs(next_pos.z - start.z) <= range
-						and can_stand(next_pos) then
+						and can_stand(next_pos)
+						and (not options.clear or options.clear(current.pos, next_pos, dy)) then
 						local next_key = key(next_pos)
 						if not closed[next_key] then
 							local g = current.g + 1 + math.abs(dy) * 0.25
