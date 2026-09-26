@@ -271,6 +271,15 @@ local function plan_stair_route(self, candidates)
 	local function can_stand(pos)
 		return is_open(pos, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
 	end
+	-- A rise is a jump: it swings the villager's head through the column one
+	-- above their current head, at `from_pos.y + 2`. `can_stand` never looks
+	-- there since it only checks the arrival column, so a low roof over the
+	-- villager's own side keeps them from jumping even when the taller
+	-- neighboring room is otherwise open (#56).
+	local function clear(from_pos, to_pos, dy)
+		if dy <= 0 then return true end
+		return is_open({x = from_pos.x, y = from_pos.y + 2, z = from_pos.z}, true)
+	end
 	local targets = {}
 	for _, target in ipairs(candidates) do targets[target.x .. ":" .. target.y .. ":" .. target.z] = target end
 	-- Bed approaches share nearly all of their map search. Search them as one
@@ -289,6 +298,7 @@ local function plan_stair_route(self, candidates)
 		range = 48,
 		heuristic = distance_to_target,
 		distance = distance_to_target,
+		clear = clear,
 	})
 	local report = {
 		start = vector.new(start), candidates = {}, status = status, searched = visited,
