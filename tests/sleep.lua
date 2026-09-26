@@ -88,6 +88,7 @@ dofile("init.lua")
 local function make_villager(id, is_child, start_pos)
 	local props = {mesh = "old.b3d", textures = {"old.png"}}
 	local pos = start_pos or {x = 0, y = 0, z = 0}
+	local removed = false
 	local self = {
 		name = "mobs_mc:villager", _id = id, _bed = bed,
 		_profession = "weapon_smith", _max_trade_tier = 2,
@@ -95,7 +96,7 @@ local function make_villager(id, is_child, start_pos)
 	}
 	local velocity, acceleration
 	self.object = {
-		get_pos = function() return pos end,
+		get_pos = function() if removed then return nil end return pos end,
 		set_pos = function(_, value) pos = value end,
 		set_yaw = function() end,
 		set_velocity = function(_, v) velocity = v end,
@@ -105,8 +106,10 @@ local function make_villager(id, is_child, start_pos)
 			for k, v in pairs(values) do props[k] = v end
 		end,
 		get_luaentity = function() return self end,
+		remove = function() removed = true end,
 	}
-	return self, props, function() return velocity, acceleration end
+	return self, props, function() return velocity, acceleration end,
+		function() return removed end
 end
 
 local alice, alice_props, alice_motion = make_villager("alice", false, {x = 1, y = 0, z = 0})
@@ -217,5 +220,52 @@ nodes[key(bed)] = {name = "air", param2 = 0}
 entity_def.do_custom(child, 1)
 assert(not child._villages_sleeping, "removing the bed must wake its occupant")
 assert(child_props.collisionbox[5] == 0.97)
+
+-- Regression test: Luanti can duplicate an entity across a mapblock
+-- save/reload race (see villages/init.lua for the mechanism), leaving two
+-- live villagers sharing the same _id. Both copies must independently agree
+-- on the same survivor, whichever one happens to activate first.
+local dup_a, dup_a_props, _, dup_a_removed =
+	make_villager("carol", false, {x = 5, y = 0, z = 0})
+local dup_b, dup_b_props, _, dup_b_removed =
+	make_villager("carol", false, {x = 2, y = 0, z = 0})
+
+objects = {dup_a.object, dup_b.object}
+entity_def.on_activate(dup_a, "", 0)
+assert(dup_a_removed(), "the duplicate with the larger position key must remove itself")
+assert(not dup_b_removed(), "the surviving duplicate must not be touched")
+
+-- Same pair, but the surviving copy activates first this time: it must
+-- remove the other copy itself, since that copy's own on_activate will
+-- never run again to notice the collision on its own.
+local dup_c, dup_c_props, _, dup_c_removed =
+	make_villager("dana", false, {x = 5, y = 0, z = 0})
+local dup_d, dup_d_props, _, dup_d_removed =
+	make_villager("dana", false, {x = 2, y = 0, z = 0})
+
+objects = {dup_c.object, dup_d.object}
+entity_def.on_activate(dup_d, "", 0)
+assert(dup_c_removed(), "the surviving copy must remove the other duplicate directly")
+assert(not dup_d_removed(), "the surviving copy must not remove itself")
+
+-- Regression test: the engine can duplicate an entity at its exact position,
+-- so position alone is not a safe tie-breaker (both copies would otherwise
+-- take the "remove the other" branch). Exactly one of the two must be
+-- removed, from either activation order, never both and never neither.
+local dup_e, _, _, dup_e_removed = make_villager("erin", false, {x = 3, y = 0, z = 0})
+local dup_f, _, _, dup_f_removed = make_villager("erin", false, {x = 3, y = 0, z = 0})
+
+objects = {dup_e.object, dup_f.object}
+entity_def.on_activate(dup_e, "", 0)
+assert(dup_e_removed() ~= dup_f_removed(),
+	"exactly one same-position duplicate must be removed, not both or neither")
+
+local dup_g, _, _, dup_g_removed = make_villager("fern", false, {x = 3, y = 0, z = 0})
+local dup_h, _, _, dup_h_removed = make_villager("fern", false, {x = 3, y = 0, z = 0})
+
+objects = {dup_g.object, dup_h.object}
+entity_def.on_activate(dup_h, "", 0)
+assert(dup_g_removed() ~= dup_h_removed(),
+	"exactly one same-position duplicate must be removed regardless of activation order")
 
 print("villager sleep tests passed")

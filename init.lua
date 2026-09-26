@@ -116,6 +116,60 @@ local function occupied_by_other(self, bed)
 	return false
 end
 
+-- Luanti/Minetest can duplicate an entity across a mapblock save/reload if
+-- the server stops (or crashes) between the block being written with the
+-- entity still in its static list and the entity's own removal from the
+-- active object set completing. VoxeLibre's villager only assigns _id once,
+-- in on_spawn, and copies it forward through get_staticdata/on_activate like
+-- any other field, so a duplicated mapblock reload produces two live
+-- entities sharing the same _id. This mod cannot fix that upstream race, but
+-- it can notice the collision here (both bed and jobsite claims already key
+-- off _id, so a collision otherwise silently corrupts both) and drop one.
+-- Comparing keys, rather than simply removing whichever side is doing the
+-- noticing, guarantees the same survivor regardless of which of the two
+-- copies happens to activate first: each side independently reaches the
+-- same conclusion about who stays. Position alone is not a safe key: the
+-- engine can duplicate an entity at its exact position, and a tie there
+-- would send both copies down the "remove the other" branch, so if removal
+-- does not invalidate the object synchronously both could end up removed.
+-- ObjectRef has no get_id()/equivalent stable handle in this API, but two
+-- distinct Lua objects always tostring() to distinct addresses within a
+-- single server run, which is all the tie-break needs: it only has to be
+-- consistent for the two objects being compared right now, not stable
+-- across restarts.
+local function duplicate_key(pos, object)
+	return string.format("%.3f:%.3f:%.3f:%s", pos.x, pos.y, pos.z, tostring(object))
+end
+
+local function find_duplicate(self, pos)
+	local id = self._id
+	if not id or not pos then return end
+	for _, object in ipairs(core.get_objects_inside_radius(pos, 64)) do
+		if object ~= self.object then
+			local other = object:get_luaentity()
+			if other and other.name == "mobs_mc:villager" and other._id == id then
+				return other
+			end
+		end
+	end
+end
+
+local function resolve_duplicate(self)
+	local pos = self.object:get_pos()
+	local dup = find_duplicate(self, pos)
+	if not dup then return false end
+	local dup_pos = dup.object:get_pos()
+	if not dup_pos then return false end
+	if duplicate_key(pos, self.object) > duplicate_key(dup_pos, dup.object) then
+		core.log("warning", "[villages] removing duplicate villager " .. tostring(self._id))
+		self.object:remove()
+		return true
+	end
+	core.log("warning", "[villages] removing duplicate villager " .. tostring(dup._id))
+	dup.object:remove()
+	return false
+end
+
 local function sleep_position(bed, node)
 	local dir = core.facedir_to_dir(node.param2)
 	local pos = vector.offset(bed, dir.x * 0.35, 0.06, dir.z * 0.35)
@@ -224,6 +278,7 @@ core.register_on_mods_loaded(function()
 	def.on_activate = function(self, staticdata, dtime)
 		local result = original_activate(self, staticdata, dtime)
 		if not self.object:get_pos() then return result end
+		if resolve_duplicate(self) then return result end
 		self._villages_sleeping = nil
 		self.animation = self.child and table.copy(def._child_animations)
 			or table.copy(def.animation)
