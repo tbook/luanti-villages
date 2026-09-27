@@ -947,6 +947,24 @@ promotion_def.do_custom(channel_entity, 0.1)
 assert(channel_entity._profession == "unemployed", "a one-wide channel must not qualify for promotion")
 clear_pond()
 
+-- The flood fill must not walk outside the search radius: find_nodes_in_area
+-- only bounds the seed positions, so a one-wide channel that reaches the edge
+-- of the radius and connects to a qualifying pond just beyond it must not
+-- borrow that pond's footprint. Only the in-bounds channel tile at x=16 is a
+-- seed; the 3x3 pond at x=17..19 sits entirely outside WATER_SEARCH_RADIUS.
+water_source_nodes[16 .. ":0:0"] = "mcl_core:water_source"
+water_sites = {{x = 16, y = 0, z = 0}}
+for x = 17, 19 do
+	for z = -1, 1 do
+		water_source_nodes[x .. ":0:" .. z] = "mcl_core:water_source"
+	end
+end
+local boundary_entity = new_promotion_entity()
+promotion_def.do_custom(boundary_entity, 0.1)
+assert(boundary_entity._profession == "unemployed",
+	"a pond outside the search radius must not qualify, even reached from an in-bounds seed")
+clear_pond()
+
 -- A reachable, unclaimed workstation suppresses promotion even beside
 -- qualifying water, and the water search is never reached.
 water_scans = 0

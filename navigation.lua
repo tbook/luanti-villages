@@ -403,8 +403,11 @@ end
 -- capped so one villager's promotion check cannot be made arbitrarily
 -- expensive by a large lake. `visited` is shared across every pond checked in
 -- one qualifying_water call so an already-ruled-in-or-out pond is never
--- flooded twice.
-local function flood_fill_pond(start, visited)
+-- flooded twice. `find_nodes_in_area` only bounds the seed positions handed
+-- to this function, not the tiles it walks outward to, so bounds are passed
+-- in and enforced here too -- otherwise a pond that pokes outside the search
+-- radius could still supply the qualifying footprint.
+local function flood_fill_pond(start, minp, maxp, visited)
 	visited[start.x .. ":" .. start.y .. ":" .. start.z] = true
 	local queue, head = {start}, 1
 	local count = 1
@@ -415,7 +418,9 @@ local function flood_fill_pond(start, visited)
 		for _, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
 			local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
 			local key = neighbor.x .. ":" .. neighbor.y .. ":" .. neighbor.z
-			if not visited[key] then
+			local in_bounds = neighbor.x >= minp.x and neighbor.x <= maxp.x
+				and neighbor.z >= minp.z and neighbor.z <= maxp.z
+			if not visited[key] and in_bounds then
 				visited[key] = true
 				if is_surface_water(neighbor) then
 					count = count + 1
@@ -441,7 +446,7 @@ local function qualifying_water(bed)
 	for _, site in ipairs(sites) do
 		local key = site.x .. ":" .. site.y .. ":" .. site.z
 		if not visited[key] and is_surface_water(site) then
-			local count, span_x, span_z = flood_fill_pond(site, visited)
+			local count, span_x, span_z = flood_fill_pond(site, minp, maxp, visited)
 			if count >= WATER_POND_MIN_COUNT and span_x >= WATER_POND_MIN_SPAN and span_z >= WATER_POND_MIN_SPAN then
 				return true
 			end
