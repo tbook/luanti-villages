@@ -16,6 +16,9 @@ local search_sites = {}
 local job_search_scans = 0
 local jobsite_claimed = true
 local globalstep = nil
+local water_sites = {}
+local water_source_nodes = {}
+local water_scans = 0
 
 minetest = {
 	registered_nodes = {
@@ -31,6 +34,8 @@ minetest = {
 		["test:fence"] = {walkable = true},
 		["test:trapdoor"] = {walkable = true},
 		["test:cactus"] = {walkable = true},
+		["mcl_core:water_source"] = {liquidtype = "source"},
+		["mcl_core:water_flowing"] = {liquidtype = "flowing"},
 	},
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
@@ -55,11 +60,17 @@ minetest = {
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
 			return {name = "mcl_doors:wooden_door_b_1"}
 		end
+		local water_node = water_source_nodes[pos.x .. ":" .. pos.y .. ":" .. pos.z]
+		if water_node then return {name = water_node} end
 		if pos.y == -1 and support_available then return {name = support_node} end
 		return {name = "air"}
 	end,
 	find_node_near = function() return nil end,
-	find_nodes_in_area = function()
+	find_nodes_in_area = function(minp, maxp, nodenames)
+		if nodenames[1] == "group:water" then
+			water_scans = water_scans + 1
+			return water_sites
+		end
 		job_search_scans = job_search_scans + 1
 		return search_sites
 	end,
@@ -858,5 +869,145 @@ stalled_def.on_activate(activated_entity)
 assert(activated_entity.state == "stand")
 assert(not activated_entity._target and not activated_entity.current_target and not activated_entity.waypoints)
 assert(not activated_entity.callback_arrived and not activated_entity._villages_bed_route)
+
+-- #71: an unemployed, bedded villager with no reachable workstation and a
+-- qualifying pond near its bed is promoted to fisherman on the work-time
+-- path.
+timeofday = 0.4
+now = 1000
+path_available = true
+support_available = true
+support_node = "stone"
+jobsite_present = false
+search_sites = {}
+engine_paths = nil
+jobsite_claimed = true
+
+local function place_pond(min_x, max_x, min_z, max_z, y)
+	water_sites = {}
+	for x = min_x, max_x do
+		for z = min_z, max_z do
+			local pos = {x = x, y = y, z = z}
+			water_source_nodes[pos.x .. ":" .. pos.y .. ":" .. pos.z] = "mcl_core:water_source"
+			table.insert(water_sites, pos)
+		end
+	end
+end
+
+local function clear_pond()
+	water_sites, water_source_nodes = {}, {}
+end
+
+local promotion_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return true end,
+}
+dofile("navigation.lua")(promotion_def)
+
+local function new_promotion_entity(overrides)
+	local entity = {
+		_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, _profession = "unemployed", state = "stand",
+		object = {
+			get_pos = function() return {x = 0, y = 0, z = 0} end,
+			set_velocity = function() end,
+		},
+	}
+	for key, value in pairs(overrides or {}) do entity[key] = value end
+	return entity
+end
+
+water_scans = 0
+place_pond(5, 7, -1, 1, 0)
+local promoted_entity = new_promotion_entity()
+promotion_def.do_custom(promoted_entity, 0.1)
+assert(promoted_entity._profession == "fisherman", "a 3x3 pond must qualify for promotion")
+assert(promoted_entity._villages_fisherman == true, "promotion must set the fisherman guard flag immediately")
+assert(water_scans == 1)
+
+-- Idempotent, and the cooldown suppresses a rescan on the very next tick.
+promotion_def.do_custom(promoted_entity, 0.1)
+assert(promoted_entity._profession == "fisherman")
+assert(water_scans == 1, "the promotion evaluation must respect its cooldown")
+clear_pond()
+
+-- A 2x2 pool is not bigger than a 2x2 pool, so it does not qualify.
+place_pond(5, 6, -1, 0, 0)
+local small_pool_entity = new_promotion_entity()
+promotion_def.do_custom(small_pool_entity, 0.1)
+assert(small_pool_entity._profession == "unemployed", "a 2x2 pool must not qualify for promotion")
+clear_pond()
+
+-- A one-wide channel can hold more tiles than a 3x3 pond while still being
+-- too narrow to fish from; the span check, not just the tile count, must
+-- reject it.
+place_pond(5, 20, 0, 0, 0)
+local channel_entity = new_promotion_entity()
+promotion_def.do_custom(channel_entity, 0.1)
+assert(channel_entity._profession == "unemployed", "a one-wide channel must not qualify for promotion")
+clear_pond()
+
+-- A reachable, unclaimed workstation suppresses promotion even beside
+-- qualifying water, and the water search is never reached.
+water_scans = 0
+place_pond(5, 7, -1, 1, 0)
+jobsite_claimed = false
+search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
+engine_paths = {
+	["21:0:0"] = path_with_length(5),
+	["31:0:0"] = path_with_length(5),
+}
+local workstation_entity = new_promotion_entity({
+	object = {
+		get_pos = function() return {x = 15, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+})
+promotion_def.do_custom(workstation_entity, 0.1)
+assert(workstation_entity._profession == "unemployed", "a reachable workstation must suppress promotion")
+assert(not workstation_entity._villages_fisherman)
+assert(water_scans == 0, "water must not be searched when a workstation is reachable")
+engine_paths = nil
+search_sites = {}
+jobsite_claimed = true
+clear_pond()
+
+-- A bedless villager is never promoted, and never reaches the water search.
+water_scans = 0
+place_pond(5, 7, -1, 1, 0)
+local bedless_entity = new_promotion_entity()
+bedless_entity._bed = nil
+promotion_def.do_custom(bedless_entity, 0.1)
+assert(bedless_entity._profession == "unemployed", "a bedless villager must never be promoted")
+assert(water_scans == 0, "a bedless villager must never reach the water search")
+clear_pond()
+
+-- Children and nitwits are never promoted, even beside qualifying water.
+place_pond(5, 7, -1, 1, 0)
+local child_entity = new_promotion_entity({child = true})
+promotion_def.do_custom(child_entity, 0.1)
+assert(child_entity._profession == "unemployed", "a child must never be promoted")
+
+local nitwit_entity = new_promotion_entity({_profession = "nitwit"})
+promotion_def.do_custom(nitwit_entity, 0.1)
+assert(nitwit_entity._profession == "nitwit", "a nitwit must never be promoted")
+clear_pond()
+
+-- The flood fill terminates at its cap instead of exploring an entire large
+-- lake; the capped region already exceeds the qualifying span, so promotion
+-- still succeeds.
+place_pond(0, 49, 0, 49, 0)
+local lookup_calls = 0
+local original_lookup = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	lookup_calls = lookup_calls + 1
+	return original_lookup(pos)
+end
+local big_pond_entity = new_promotion_entity()
+promotion_def.do_custom(big_pond_entity, 0.1)
+minetest.get_node_or_nil = original_lookup
+assert(big_pond_entity._profession == "fisherman", "a large lake must still qualify for promotion")
+assert(lookup_calls < 500, "the flood fill must stop at its cap instead of scanning the whole lake")
+clear_pond()
 
 print("navigation.lua: ok")

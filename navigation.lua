@@ -19,6 +19,14 @@ local DOOR_USE_RADIUS = 2.5
 -- Door closes must outlive the villager that scheduled them: an entity can be
 -- unloaded or despawned while another villager is still passing through.
 local deferred_door_closes = {}
+-- Fallback-to-fisherman promotion (#71): how far from the bed to look for
+-- water, and how large a contiguous surface-water pond must be to qualify.
+local WATER_SEARCH_RADIUS = 16
+local WATER_VERTICAL_BAND = 2
+local WATER_POND_MIN_SPAN = 3
+local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
+local WATER_POND_FILL_CAP = 32
+local FISHERMAN_PROMOTION_INTERVAL = 5
 
 local function same_pos(a, b)
 	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
@@ -377,6 +385,96 @@ local function job_search_target(self)
 	return best
 end
 
+local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+
+local function is_water_source(pos)
+	local node = core.get_node_or_nil(pos)
+	local def = node and core.registered_nodes[node.name]
+	return def ~= nil and def.liquidtype == "source"
+end
+
+local function is_surface_water(pos)
+	if not is_water_source(pos) then return false end
+	local above = core.get_node_or_nil({x = pos.x, y = pos.y + 1, z = pos.z})
+	return above ~= nil and above.name == "air"
+end
+
+-- Flood fill outward over contiguous surface water at a single water level,
+-- capped so one villager's promotion check cannot be made arbitrarily
+-- expensive by a large lake. `visited` is shared across every pond checked in
+-- one qualifying_water call so an already-ruled-in-or-out pond is never
+-- flooded twice.
+local function flood_fill_pond(start, visited)
+	visited[start.x .. ":" .. start.y .. ":" .. start.z] = true
+	local queue, head = {start}, 1
+	local count = 1
+	local min_x, max_x, min_z, max_z = start.x, start.x, start.z, start.z
+	while queue[head] and count < WATER_POND_FILL_CAP do
+		local pos = queue[head]
+		head = head + 1
+		for _, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
+			local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
+			local key = neighbor.x .. ":" .. neighbor.y .. ":" .. neighbor.z
+			if not visited[key] then
+				visited[key] = true
+				if is_surface_water(neighbor) then
+					count = count + 1
+					min_x, max_x = math.min(min_x, neighbor.x), math.max(max_x, neighbor.x)
+					min_z, max_z = math.min(min_z, neighbor.z), math.max(max_z, neighbor.z)
+					table.insert(queue, neighbor)
+					if count >= WATER_POND_FILL_CAP then break end
+				end
+			end
+		end
+	end
+	return count, max_x - min_x + 1, max_z - min_z + 1
+end
+
+-- A qualifying body of water is bigger than a 2x2 pool in both horizontal
+-- directions, not merely a long, one-wide channel that happens to satisfy a
+-- raw tile count.
+local function qualifying_water(bed)
+	local minp = {x = bed.x - WATER_SEARCH_RADIUS, y = bed.y - WATER_VERTICAL_BAND, z = bed.z - WATER_SEARCH_RADIUS}
+	local maxp = {x = bed.x + WATER_SEARCH_RADIUS, y = bed.y + WATER_VERTICAL_BAND, z = bed.z + WATER_SEARCH_RADIUS}
+	local sites = core.find_nodes_in_area(minp, maxp, {"group:water"})
+	local visited = {}
+	for _, site in ipairs(sites) do
+		local key = site.x .. ":" .. site.y .. ":" .. site.z
+		if not visited[key] and is_surface_water(site) then
+			local count, span_x, span_z = flood_fill_pond(site, visited)
+			if count >= WATER_POND_MIN_COUNT and span_x >= WATER_POND_MIN_SPAN and span_z >= WATER_POND_MIN_SPAN then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function eligible_for_promotion(self)
+	return not self.child and self._profession == "unemployed" and self._id ~= nil
+end
+
+-- An unemployed villager becomes a fisherman when no workstation is
+-- reachable and enough water is close to its bed, so a village without
+-- workstations is not a village of idlers (#71). Anchored on the bed rather
+-- than the villager's live position so the decision is stable instead of
+-- flip-flopping as the villager wanders; a bedless villager is never
+-- promoted. Cooldown keeps both the reachability search (job_search_target
+-- performs real pathfinding) and the water flood fill off the per-tick path.
+-- Fisherman is for life (#70): this never runs again once promoted, since
+-- _profession no longer reads "unemployed".
+local function evaluate_fisherman_promotion(self)
+	if not eligible_for_promotion(self) then return end
+	local now = core.get_gametime()
+	if now < (self._villages_fisherman_check or 0) then return end
+	self._villages_fisherman_check = now + FISHERMAN_PROMOTION_INTERVAL
+	if not has_claimed_bed(self) then return end
+	if job_search_target(self) then return end
+	if not qualifying_water(self._bed) then return end
+	self._profession = "fisherman"
+	self._villages_fisherman = true
+end
+
 -- gopath occasionally rejects a path that minetest.find_path has returned,
 -- particularly from stair landings. Reuse its waypoint mover directly for that
 -- narrow case, rather than abandoning a known-valid route.
@@ -679,6 +777,7 @@ local function install(def)
 			cancel_route(self, "_villages_farm_route")
 			self._villages_farm_target = nil
 		else
+			evaluate_fisherman_promotion(self)
 			local job_destination = {
 			pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 			claimed = has_claimed_jobsite,
