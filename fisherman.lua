@@ -11,8 +11,21 @@
 --
 -- Fisherman is for life: this guard never demotes one, so nothing here needs
 -- to distinguish a barrel fisherman from a fallback one.
+local core = minetest
+local common = dofile(core.get_modpath("villages") .. "/common.lua")
+
 local function should_flag(self)
 	return not self.child and self._profession == "fisherman"
+end
+
+-- A claim made during the wrapped call already mutated real node meta via
+-- vanilla's own employ() (mobs_mc/villager.lua:1150); release it rather than
+-- leave a node permanently locked to a fisherman who will never work it.
+local function release_stray_claim(self, jobsite)
+	local meta = core.get_meta(jobsite)
+	if meta and meta:get_string("villager") == self._id then
+		meta:set_string("villager", "")
+	end
 end
 
 return function(def)
@@ -36,16 +49,46 @@ return function(def)
 		end
 		local profession, trades, jobsite = self._profession, self._trades, self._jobsite
 		local result = original_custom(self, dtime)
-		-- Restore only what vanilla tore down, not what it legitimately
-		-- changed: a traded fisherman standing beside a freshly placed,
-		-- unclaimed barrel may claim it through vanilla's own proximity
-		-- check inside get_a_job, and that claim already mutated the
-		-- barrel's node meta. Clobbering `_jobsite` back to nil here would
-		-- desync self from that meta and leak the claim, so a fresh,
-		-- non-nil jobsite is left alone.
-		if self._profession == "unemployed" then self._profession = profession end
+
+		-- Fisherman is for life: always restore the profession and its
+		-- trades, whatever vanilla changed them to. An untraded fallback
+		-- fisherman reaches get_a_job() through the same
+		-- `_profession == "unemployed"` branch as any other jobless
+		-- villager -- remove_job sets that before do_activity checks it,
+		-- inside the very call this wraps -- and unlike a traded
+		-- villager's request list (narrowed to its own profession's
+		-- jobsite type), an untraded one's covers every profession's
+		-- jobsite type. A fisherman standing beside so much as a composter
+		-- can be employed straight into "farmer".
+		self._profession = profession
 		if trades ~= nil and self._trades == nil then self._trades = trades end
-		if jobsite and not self._jobsite then self._jobsite = jobsite end
+
+		-- A jobsite that is new (was nil, or a different position, before
+		-- this call) came from that same employ() call. Keep it if it is a
+		-- jobsite this profession would have wanted anyway -- a barrel --
+		-- since that is a harmless, legitimate claim; otherwise release it.
+		if self._jobsite and (not jobsite or not vector.equals(self._jobsite, jobsite)) then
+			local node = core.get_node_or_nil(self._jobsite)
+			local matches_profession = node and common.workstation_profession(node.name) == "fisherman"
+			if not matches_profession then
+				release_stray_claim(self, self._jobsite)
+				self._jobsite = nil
+			end
+		end
+
+		-- Never resurrect a jobsite vanilla invalidated. validate_jobsite
+		-- (mobs_mc/villager.lua:1256) only clears `_jobsite` after the
+		-- node's own meta already failed an ownership check --
+		-- RESETTLE_DISTANCE clears that meta itself first, and every other
+		-- path only reaches remove_job because the check had already
+		-- failed. `retrieve_my_jobsite` never fails for any other reason
+		-- (mobs_mc/villager.lua:1223), so restoring the old position here
+		-- could never make next tick's check pass again; it would only
+		-- recreate a dangling reference to a claim that is already gone,
+		-- or, worse, since the node itself remains genuinely unclaimed,
+		-- one another villager may since have taken. A fisherman with no
+		-- jobsite is already this mod's intended steady state.
+
 		return result
 	end
 end
