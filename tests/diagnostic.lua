@@ -1,5 +1,6 @@
 local shown, original_uses = nil, 0
 local metadata = {}
+local timeofday = 0.4
 -- Populated by place_pond() below, far enough apart (see comment there) that
 -- their 16-node search radii never see each other.
 local water_nodes = {}
@@ -75,7 +76,7 @@ minetest = {
 		local values = metadata[key(pos)] or {}
 		return {get_string = function(_, name) return values[name] or "" end}
 	end,
-	get_timeofday = function() return 0.4 end,
+	get_timeofday = function() return timeofday end,
 	get_gametime = function() return 100 end,
 	get_modpath = function() return "." end,
 	get_day_count = function() return 3 end,
@@ -99,6 +100,12 @@ metadata["4,0,0"] = {villager = "villager-2"}
 -- the other's radius, so neither call sees the other's pond.
 place_pond(13, 15, -1, 1, 0)
 place_pond(40, 41, 0, 0, 0)
+-- A 32-tile, one-node-wide channel and a separate, disconnected 3x3 pond,
+-- both within range of a third bed at (100, 0, 0): the channel is bigger by
+-- tile count but does not qualify (span 32x1), so the qualifying 3x3 pond
+-- must be the one reported.
+place_pond(85, 116, 0, 0, 0)
+place_pond(90, 92, 5, 7, 0)
 
 dofile("diagnostic.lua")({})
 local lookup = minetest.registered_items["doc_identifier:identifier_solid"].on_use
@@ -162,8 +169,9 @@ assert(shown.form:find("Job search route: retry in 20s to (4.0, 0.0, 0.0): no ro
 assert(shown.form:find("Job-search planner: start (10.0, 0.0, 0.0); approaches none; unreachable after 0 nodes", 1, true))
 assert(shown.form:find("Job-search planner trail: none", 1, true))
 assert(shown.form:find("Fisherman flag: yes", 1, true))
+assert(shown.form:find("Fishing status: fishing", 1, true))
 assert(shown.form:find("Fish target: (40.0, 0.0, 0.0)", 1, true))
-assert(shown.form:find("Fish route: arrived", 1, true))
+assert(shown.form:find("Fish route: arrived at (39.0, 0.0, 0.0)", 1, true), shown.form)
 assert(shown.form:find("Fishing session: wait (next phase in 10s)", 1, true))
 assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span (qualifies for promotion)", 1, true))
 assert(shown.form:find(
@@ -212,6 +220,7 @@ local far_worker = {
 lookup("stack", player, {type = "object", ref = far_worker})
 assert(shown.form:find("Work status: travelling to jobsite (6.0 nodes away)", 1, true), shown.form)
 assert(shown.form:find("Fisherman flag: no", 1, true))
+assert(shown.form:find("Fishing status: not a fisherman", 1, true))
 assert(shown.form:find("Fish target: none", 1, true))
 assert(shown.form:find("Fishing session: none", 1, true))
 assert(shown.form:find("Water near bed: no bed", 1, true))
@@ -238,6 +247,35 @@ local barrel_fisherman = {
 }
 lookup("stack", player, {type = "object", ref = barrel_fisherman})
 assert(shown.form:find("Barrel claim (hidden from vanilla by the profession guard): valid claim", 1, true), shown.form)
+assert(shown.form:find("Fishing status: not fishing: no stand chosen yet", 1, true), shown.form)
+
+-- Review fix: a fisherman with no route, target, or session must still say
+-- *why* it is not fishing -- e.g. because it is outside work hours -- not
+-- just leave that ambiguous by reporting the same "none"/"not fishing: no
+-- stand chosen yet" as it would during work hours with no water nearby.
+timeofday = 0.9
+lookup("stack", player, {type = "object", ref = barrel_fisherman})
+assert(shown.form:find("Fishing status: not fishing: waiting for work period", 1, true), shown.form)
+timeofday = 0.4
+
+-- Review fix: a merely bigger pond that does not qualify (a one-wide
+-- channel) must not have its count/span reported alongside another pond's
+-- qualifies=true.
+local channel_fisherman = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-10", _profession = "unemployed",
+			_bed = {x = 100, y = 0, z = 0},
+			object = {
+				get_pos = function() return {x = 100, y = 0, z = 0} end,
+				get_properties = function() return nil end,
+			},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = channel_fisherman})
+assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span (qualifies for promotion)", 1, true),
+	shown.form)
 
 local visitor = {
 	is_player = function() return true end,
