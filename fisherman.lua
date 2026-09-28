@@ -55,26 +55,28 @@ core.register_entity(BOBBER_ENTITY, {
 -- confirmed against a running client (no Minetest/Luanti binary was
 -- available to check this in-game); they mirror witch.lua's own
 -- wand_rotation (a similarly stick-shaped attached item, tilted 45 degrees)
--- rather than a value read off the model. First in-game look (#87 PR
--- review): with the -3 y offset and a small 0.2 visual_size, nothing was
--- visible at all -- rather than guess a second offset blind, the position
--- was pinned to the bone's own origin (no offset) at a deliberately
--- oversized visual_size to find where it actually renders. That confirmed
--- the origin itself (near the shoulder) is a reasonable attach point -- at
--- 1x1 it rendered roughly villager-height, from the head down to the
--- ground -- so this second pass only shrinks visual_size, roughly matching
--- witch.lua's own stick-prop scale (a rod is longer than a stick, so a
--- little larger than its 0.1).
+-- rather than a value read off the model. In-game rounds so far (#87 PR
+-- review): (1) a -3 y offset with a small 0.2 visual_size was invisible; (2)
+-- pinning position to the bone's own origin (no offset) at an oversized 1x1
+-- visual_size rendered roughly villager-height, from the head down to the
+-- ground -- proving the origin itself sits inside the body, not out at the
+-- hand, since only an object that large poked out past the body mesh to be
+-- seen at all; (3) shrinking visual_size back down at that same zero offset
+-- made it disappear again, now fully swallowed by the body mesh instead of
+-- poking out of it. So position, not scale, is the remaining unknown: this
+-- offsets along the bone's local x (untested direction/sign) to try to
+-- clear the torso, at a size midway between the invisible 0.15 and the
+-- room-filling 1 so it stays easy to spot while that's narrowed down.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "evo_arm.right"
-local ROD_POSITION = vector.new(0, 0, 0)
+local ROD_POSITION = vector.new(2, 0, 0)
 local ROD_ROTATION = vector.new(0, 0, 45)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
 		visual = "wielditem",
-		visual_size = {x = 0.15, y = 0.15},
+		visual_size = {x = 0.4, y = 0.4},
 		textures = {FISHING_ROD_ITEM},
 		physical = false,
 		pointable = false,
