@@ -40,6 +40,41 @@ core.register_entity(BOBBER_ENTITY, {
 	},
 })
 
+-- #87: a held rod for the fishing cycle. mcl_mobs has no wielditem support
+-- (see the issue), so this is its own attached entity -- the same pattern
+-- mobs_mc/witch.lua uses for its held potion/wand (a vl_held_item-style
+-- entity with visual = "wielditem" and its textures set to the item's own
+-- itemstring, which the engine renders as that item's in-hand model/image;
+-- unlike a "sprite" visual (the bobber above), this rotates with its parent
+-- instead of always billboarding toward the camera, which a held tool needs).
+-- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach to,
+-- only the whole-arm "evo_arm.right" (confirmed as the standing/idle rig,
+-- not an animation-only one, since only mobs_mc's illusioner ever drives
+-- "magic.arm.*", for its spellcasting pose -- see villager_illusioner.lua).
+-- ROD_POSITION/ROD_ROTATION are therefore an estimate, not something
+-- confirmed against a running client (no Minetest/Luanti binary was
+-- available to check this in-game); they mirror witch.lua's own
+-- wand_rotation (a similarly stick-shaped attached item, tilted 45 degrees)
+-- rather than a value read off the model. Nudge them if the rod clips into
+-- the arm or floats free of it once actually seen.
+local FISHING_ROD_ENTITY = "villages:fishing_rod"
+local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
+local ROD_BONE = "evo_arm.right"
+local ROD_POSITION = vector.new(0, -3, 0)
+local ROD_ROTATION = vector.new(0, 0, 45)
+
+core.register_entity(FISHING_ROD_ENTITY, {
+	initial_properties = {
+		visual = "wielditem",
+		visual_size = {x = 0.2, y = 0.2},
+		textures = {FISHING_ROD_ITEM},
+		physical = false,
+		pointable = false,
+		static_save = false,
+		collisionbox = {0, 0, 0, 0, 0, 0},
+	},
+})
+
 local function should_flag(self)
 	return not self.child and self._profession == "fisherman"
 end
@@ -166,6 +201,31 @@ local function remove_bobber(self)
 	if bobber and bobber:get_pos() then bobber:remove() end
 end
 
+-- Skip attaching entirely when mcl_fishing (an optional dependency) is not
+-- enabled, rather than attaching a wielditem-visual entity for an item that
+-- does not exist -- mirrors how the bobber already just reuses mcl_fishing's
+-- own texture and accepts looking wrong without it, but a missing wielditem
+-- itemstring is a worse failure than a missing texture, so this degrades to
+-- no rod at all instead.
+local function spawn_fishing_rod(self)
+	if not core.registered_items[FISHING_ROD_ITEM] then return nil end
+	local pos = self.object:get_pos()
+	if not pos then return nil end
+	local rod = core.add_entity(pos, FISHING_ROD_ENTITY)
+	if rod then rod:set_attach(self.object, ROD_BONE, ROD_POSITION, ROD_ROTATION) end
+	return rod
+end
+
+-- Mirrors remove_bobber's liveness check and its on_deactivate handling
+-- below: static_save = false means an unloaded rod would not persist either
+-- way, but removing it explicitly avoids relying on engine behavior for
+-- attached entities on their parent's unload.
+local function remove_fishing_rod(self)
+	local rod = self._villages_fish_rod
+	self._villages_fish_rod = nil
+	if rod and rod:get_pos() then rod:remove() end
+end
+
 -- Mirrors mobs_mc/villager.lua's file-local unlock_trades: unlock any locked
 -- trade at or below the villager's current max tier and leave the rest. That
 -- function is only about twenty lines with no engine coupling, so it is
@@ -234,6 +294,7 @@ local function start_fishing_session(self, turn_in_direction)
 		phase = "cast", phase_ends_at = core.get_gametime() + CAST_SECONDS,
 		previous_order = self.order,
 	}
+	self._villages_fish_rod = spawn_fishing_rod(self)
 	hold_still(self, turn_in_direction)
 end
 
@@ -252,6 +313,7 @@ end
 local function end_fishing_session(self)
 	local session = self._villages_fish_session
 	remove_bobber(self)
+	remove_fishing_rod(self)
 	if session and self.order == "stand" then self.order = session.previous_order end
 	self._villages_fish_session = nil
 	self._villages_fish_target = nil
@@ -305,16 +367,22 @@ return function(def)
 		end
 		self._villages_fish_session = nil
 		self._villages_fish_bobber = nil
+		self._villages_fish_rod = nil
 		return result
 	end
 
 	-- The bobber is a separate entity near the water, not necessarily in the
 	-- mapblock that is unloading the fisherman itself; do_custom stops
 	-- running the moment this villager unloads, so nothing else would ever
-	-- remove it (#73).
+	-- remove it (#73). The rod (#87) is attached to the fisherman itself, so
+	-- it would unload alongside it either way, but is cleaned up here too
+	-- rather than relying on that.
 	def.on_deactivate = function(self, removal)
 		if original_deactivate then original_deactivate(self, removal) end
-		if self._villages_fish_session then remove_bobber(self) end
+		if self._villages_fish_session then
+			remove_bobber(self)
+			remove_fishing_rod(self)
+		end
 	end
 
 	def.do_custom = function(self, dtime)

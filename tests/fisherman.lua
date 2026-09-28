@@ -50,6 +50,10 @@ minetest = {
 		["mcl_core:stone"] = {walkable = true},
 		["mcl_core:sand"] = {walkable = true},
 	},
+	-- Present by default so fishing-cycle tests exercise the rod's normal
+	-- (mcl_fishing enabled) path; the dedicated rod test below clears it to
+	-- cover the "optional dependency missing" skip instead.
+	registered_items = {["mcl_fishing:fishing_rod"] = {}},
 	-- Walkable ground below the y levels tests actually stand a candidate
 	-- on, so has_open_approach()'s is_supported() check has something to
 	-- find; everywhere else defaults to open air, matching how the fishing
@@ -90,14 +94,17 @@ minetest = {
 	get_item_group = function() return 0 end,
 	register_entity = function(name, def) registered_entities[name] = def end,
 	add_entity = function(pos, name)
-		local bobber
-		bobber = {
+		local entity
+		entity = {
 			name = name, pos = {x = pos.x, y = pos.y, z = pos.z}, removed = false,
 			get_pos = function(self) return (not self.removed) and self.pos or nil end,
 			remove = function(self) self.removed = true end,
+			set_attach = function(self, parent, bone, position, rotation)
+				self.attach = {parent = parent, bone = bone, position = position, rotation = rotation}
+			end,
 		}
-		table.insert(spawned_bobbers, bobber)
-		return bobber
+		table.insert(spawned_bobbers, entity)
+		return entity
 	end,
 	serialize = serialize,
 	deserialize = function(text)
@@ -106,7 +113,10 @@ minetest = {
 	end,
 }
 vector = {
-	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
+	new = function(x, y, z)
+		if type(x) == "table" then return {x = x.x, y = x.y, z = x.z} end
+		return {x = x, y = y, z = z}
+	end,
 	zero = function() return {x = 0, y = 0, z = 0} end,
 	equals = function(a, b) return a and b and a.x == b.x and a.y == b.y and a.z == b.z end,
 	distance = function(a, b)
@@ -604,6 +614,10 @@ do
 	assert(fisherman._villages_fish_session and fisherman._villages_fish_session.phase == "cast")
 	assert(fisherman._villages_fish_session.phase_ends_at == now + 2)
 	assert(fisherman._yaw, "arrival must face the water via the mob's own set_yaw")
+	assert(fisherman._villages_fish_rod, "arrival must attach a held fishing rod (#87)")
+	assert(fisherman._villages_fish_rod.attach.parent == fisherman.object,
+		"the rod must attach to the fisherman's own object")
+	assert(fisherman._villages_fish_rod.attach.bone == "evo_arm.right")
 	timeofday, water_sites = 0, {}
 end
 
@@ -900,6 +914,91 @@ do
 	def.on_activate(fisherman, "", 0.1)
 	assert(not fisherman._villages_fish_session)
 	assert(not fisherman._villages_fish_bobber)
+end
+
+-- #87: ending a session (here, via the water target no longer qualifying)
+-- removes the attached rod along with the bobber.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1400
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:stone")
+	local rod = minetest.add_entity({x = 4, y = 0, z = 0}, "villages:fishing_rod")
+	local fisherman = {
+		_id = "f23", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = water,
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
+		_villages_fish_rod = rod,
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(rod.removed, "ending a session must remove the attached rod")
+	timeofday = 0
+end
+
+-- #87: unloading mid-session removes the rod too, mirroring the bobber's own
+-- on_deactivate handling.
+do
+	local def = new_def()
+	dofile("fisherman.lua")(def)
+	local rod = minetest.add_entity({x = 5, y = 0, z = 0}, "villages:fishing_rod")
+	local fisherman = {
+		_id = "f24", _villages_fisherman = true,
+		_villages_fish_session = {phase = "wait", phase_ends_at = 9999},
+		_villages_fish_rod = rod,
+	}
+	def.on_deactivate(fisherman, false)
+	assert(rod.removed)
+
+	-- No session in progress: deactivation must not touch an unrelated object.
+	local other_rod = minetest.add_entity({x = 6, y = 0, z = 0}, "villages:fishing_rod")
+	local idle_fisherman = {_id = "f24b", _villages_fisherman = true, _villages_fish_rod = other_rod}
+	def.on_deactivate(idle_fisherman, false)
+	assert(not other_rod.removed)
+end
+
+-- #87: a reload drops a stale rod reference the same way it already drops a
+-- stale bobber one -- the ObjectRef would not survive get_staticdata's copy.
+do
+	local def = new_def()
+	dofile("fisherman.lua")(def)
+	local fisherman = {
+		_profession = "fisherman",
+		_villages_fish_session = {phase = "wait", phase_ends_at = 9999},
+		_villages_fish_rod = {stale = true},
+	}
+	def.on_activate(fisherman, "", 0.1)
+	assert(not fisherman._villages_fish_rod)
+end
+
+-- #87: with mcl_fishing not enabled (its item never registered), arrival
+-- still starts the session normally, just without a rod -- the optional
+-- dependency degrading gracefully instead of attaching a wielditem entity
+-- for an item that does not exist.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1500
+	local water = {x = 5, y = 0, z = 0}
+	minetest.registered_items["mcl_fishing:fishing_rod"] = nil
+	local fisherman = {
+		_id = "f25", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target, callback)
+			self._villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}}
+			return callback(self)
+		end,
+	}
+	water_sites = {water}
+	place(water, "mcl_core:water_source")
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_session and fisherman._villages_fish_session.phase == "cast",
+		"a missing optional mcl_fishing dependency must not block the fishing session itself")
+	assert(not fisherman._villages_fish_rod, "no rod entity must be spawned without mcl_fishing:fishing_rod")
+	minetest.registered_items["mcl_fishing:fishing_rod"] = {}
+	timeofday, water_sites = 0, {}
 end
 
 print("fisherman.lua: ok")
