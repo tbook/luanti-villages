@@ -69,7 +69,19 @@ minetest = {
 	find_nodes_in_area = function(minp, maxp, nodenames)
 		if nodenames[1] == "group:water" then
 			water_scans = water_scans + 1
-			return water_sites
+			-- The real engine bounds the returned sites to minp/maxp; match
+			-- that here so vertical- and horizontal-band tests can rely on
+			-- out-of-range seeds genuinely never being offered, the same way
+			-- flood_fill_pond's own neighbor walk is bounded once a seed is.
+			local bounded = {}
+			for _, site in ipairs(water_sites) do
+				if site.x >= minp.x and site.x <= maxp.x
+					and site.y >= minp.y and site.y <= maxp.y
+					and site.z >= minp.z and site.z <= maxp.z then
+					table.insert(bounded, site)
+				end
+			end
+			return bounded
 		end
 		job_search_scans = job_search_scans + 1
 		return search_sites
@@ -1044,6 +1056,37 @@ local boundary_entity = new_promotion_entity()
 promotion_def.do_custom(boundary_entity, 0.1)
 assert(boundary_entity._profession == "unemployed",
 	"a pond outside the search radius must not qualify, even reached from an in-bounds seed")
+clear_pond()
+
+-- The vertical search is asymmetric: a lake below a bed built on higher
+-- ground is common, water hanging above one is rare, so downward reach is
+-- wider than upward reach.
+water_scans = 0
+place_pond(5, 7, -1, 1, -6)
+local below_entity = new_promotion_entity()
+promotion_def.do_custom(below_entity, 0.1)
+assert(below_entity._profession == "fisherman", "a qualifying pond 6 below the bed must be found")
+clear_pond()
+
+water_scans = 0
+place_pond(5, 7, -1, 1, -7)
+local too_deep_entity = new_promotion_entity()
+promotion_def.do_custom(too_deep_entity, 0.1)
+assert(too_deep_entity._profession == "unemployed", "a pond 7 below the bed must be outside the downward reach")
+clear_pond()
+
+water_scans = 0
+place_pond(5, 7, -1, 1, 2)
+local above_entity = new_promotion_entity()
+promotion_def.do_custom(above_entity, 0.1)
+assert(above_entity._profession == "fisherman", "a qualifying pond 2 above the bed must be found")
+clear_pond()
+
+water_scans = 0
+place_pond(5, 7, -1, 1, 3)
+local too_high_entity = new_promotion_entity()
+promotion_def.do_custom(too_high_entity, 0.1)
+assert(too_high_entity._profession == "unemployed", "a pond 3 above the bed must be outside the narrower upward reach")
 clear_pond()
 
 -- A reachable, unclaimed workstation suppresses promotion even beside

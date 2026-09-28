@@ -21,8 +21,11 @@ local DOOR_USE_RADIUS = 2.5
 local deferred_door_closes = {}
 -- Fallback-to-fisherman promotion (#71): how far from the bed to look for
 -- water, and how large a contiguous surface-water pond must be to qualify.
+-- Asymmetric vertically: a lake below a bed built on higher ground is
+-- common, water hanging above one is rare (overhangs, waterfalls).
 local WATER_SEARCH_RADIUS = 24
-local WATER_VERTICAL_BAND = 2
+local WATER_BELOW_BAND = 6
+local WATER_ABOVE_BAND = 2
 local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
@@ -458,8 +461,8 @@ end
 -- directions, not merely a long, one-wide channel that happens to satisfy a
 -- raw tile count.
 local function qualifying_water(bed)
-	local minp = {x = bed.x - WATER_SEARCH_RADIUS, y = bed.y - WATER_VERTICAL_BAND, z = bed.z - WATER_SEARCH_RADIUS}
-	local maxp = {x = bed.x + WATER_SEARCH_RADIUS, y = bed.y + WATER_VERTICAL_BAND, z = bed.z + WATER_SEARCH_RADIUS}
+	local minp = {x = bed.x - WATER_SEARCH_RADIUS, y = bed.y - WATER_BELOW_BAND, z = bed.z - WATER_SEARCH_RADIUS}
+	local maxp = {x = bed.x + WATER_SEARCH_RADIUS, y = bed.y + WATER_ABOVE_BAND, z = bed.z + WATER_SEARCH_RADIUS}
 	local sites = core.find_nodes_in_area(minp, maxp, {"group:water"})
 	local visited = {}
 	for _, site in ipairs(sites) do
