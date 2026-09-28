@@ -292,4 +292,40 @@ do
 	timeofday, water_sites = 0, {}
 end
 
+-- 13. Review fix: a fish target must survive a failed gopath start so the
+-- route's own retry backoff throttles re-attempts, instead of rescanning and
+-- retrying every tick (a stand-occupied failure is common by design).
+do
+	local gopath_calls = 0
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 600
+	water_sites = {{x = 3, y = 0, z = 0}}
+	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f13", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function(self)
+			gopath_calls = gopath_calls + 1
+			-- Mirrors navigation.lua's fail(): a rejected start always leaves a
+			-- retry route with its own backoff.
+			self._villages_fish_route = {status = "retry", retry_at = now + 30}
+			return false
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(gopath_calls == 1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 3,
+		"a failed route must not drop its target immediately")
+
+	def.do_custom(fisherman, 0.1)
+	assert(gopath_calls == 1, "a pending retry must throttle re-attempts instead of firing every tick")
+
+	now = now + 31
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_target)
+	assert(not fisherman._villages_fish_route)
+	timeofday, water_sites = 0, {}
+end
+
 print("fisherman.lua: ok")

@@ -123,10 +123,13 @@ return function(def)
 			elseif core.get_gametime() >= (self._villages_fish_next or 0) then
 				local water = nearest_water(self)
 				if water then
+					-- Keep the target even if gopath fails to start: navigation.lua
+					-- already recorded a retry route with its own backoff, and the
+					-- branch above throttles on that once it exists. Clearing the
+					-- target here instead would rescan and retry every tick for the
+					-- whole cooldown (a stand-occupied failure is common by design).
 					self._villages_fish_target = vector.new(water)
-					if not self:gopath(water, nil, true) then
-						self._villages_fish_target = nil
-					end
+					self:gopath(water, nil, true)
 				else
 					self._villages_fish_next = core.get_gametime() + FISH_RETRY_INTERVAL
 				end
