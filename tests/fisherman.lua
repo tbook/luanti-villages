@@ -9,12 +9,32 @@ local timeofday = 0
 local now = 0
 local water_sites = {}
 local water_scans = 0
+local registered_entities = {}
+local spawned_bobbers = {}
 
 local function pos_key(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end
 
 local function place(pos, name, owner)
 	nodes[pos_key(pos)] = name
 	meta_store[pos_key(pos)] = owner or ""
+end
+
+-- A real enough round trip for the plain _trades tables the fishing cycle
+-- unlocks: minetest.serialize/deserialize also work through Lua's own table
+-- constructor syntax under the hood.
+local function serialize(value)
+	local t = type(value)
+	if t == "table" then
+		local parts = {}
+		for k, v in pairs(value) do
+			local key = type(k) == "number" and ("[" .. k .. "]") or ("[" .. string.format("%q", k) .. "]")
+			table.insert(parts, key .. "=" .. serialize(v))
+		end
+		return "{" .. table.concat(parts, ",") .. "}"
+	elseif t == "string" then
+		return string.format("%q", value)
+	end
+	return tostring(value)
 end
 
 minetest = {
@@ -45,15 +65,33 @@ minetest = {
 		}
 	end,
 	get_item_group = function() return 0 end,
+	register_entity = function(name, def) registered_entities[name] = def end,
+	add_entity = function(pos, name)
+		local bobber
+		bobber = {
+			name = name, pos = {x = pos.x, y = pos.y, z = pos.z}, removed = false,
+			get_pos = function(self) return (not self.removed) and self.pos or nil end,
+			remove = function(self) self.removed = true end,
+		}
+		table.insert(spawned_bobbers, bobber)
+		return bobber
+	end,
+	serialize = serialize,
+	deserialize = function(text)
+		local chunk = (loadstring or load)("return " .. text)
+		return chunk and chunk()
+	end,
 }
 vector = {
 	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
+	zero = function() return {x = 0, y = 0, z = 0} end,
 	equals = function(a, b) return a and b and a.x == b.x and a.y == b.y and a.z == b.z end,
 	distance = function(a, b)
 		local x, y, z = a.x - b.x, a.y - b.y, a.z - b.z
 		return math.sqrt(x * x + y * y + z * z)
 	end,
 }
+mcl_mobs = {mob_class = {set_yaw = function(self, yaw) self._yaw = yaw end}}
 
 local function new_def(custom, activate)
 	return {
@@ -198,7 +236,7 @@ do
 	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f8", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self, target)
 			gopath_target = target
 			self.state = "gowp"
@@ -222,7 +260,7 @@ do
 	water_sites, water_scans = {}, 0
 	local fisherman = {
 		_id = "f9", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function() gopath_called = true; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -245,7 +283,7 @@ do
 	local fisherman = {
 		_id = "f10", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		_villages_fish_target = {x = 9, y = 0, z = 0},
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function() gopath_called = true; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -264,7 +302,7 @@ do
 		_id = "f11", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		_villages_fish_target = {x = 9, y = 0, z = 0},
 		_villages_fish_route = {status = "retry", retry_at = 300},
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self) self.state = "gowp"; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -283,7 +321,7 @@ do
 	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f12", _villages_fisherman = true, _profession = "fisherman", state = "gowp",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function() gopath_called = true; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -304,7 +342,7 @@ do
 	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f13", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self)
 			gopath_calls = gopath_calls + 1
 			-- Mirrors navigation.lua's fail(): a rejected start always leaves a
@@ -326,6 +364,229 @@ do
 	assert(not fisherman._villages_fish_target)
 	assert(not fisherman._villages_fish_route)
 	timeofday, water_sites = 0, {}
+end
+
+-- #73: arrival at the stand faces the water and starts a fishing session in
+-- its "cast" phase.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 700
+	local water = {x = 5, y = 0, z = 0}
+	local fisherman = {
+		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target, callback) return callback(self, {x = 4, y = 0, z = 0}) end,
+	}
+	-- Go through the travel-trigger branch itself, so the target comes from
+	-- nearest_water() just as it would on a real trip.
+	water_sites = {water}
+	place(water, "mcl_core:water_source")
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_session and fisherman._villages_fish_session.phase == "cast")
+	assert(fisherman._villages_fish_session.phase_ends_at == now + 2)
+	assert(fisherman._yaw, "arrival must face the water via the mob's own set_yaw")
+	timeofday, water_sites = 0, {}
+end
+
+-- #73: a completed cast/wait/reel cycle spawns and removes a bobber once,
+-- and unlocks a locked trade at or below the current tier while leaving a
+-- higher tier alone.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 800
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local trades = {
+		affordable = {tier = 1, locked = true, trade_counter = 5},
+		expensive = {tier = 2, locked = true, trade_counter = 1},
+	}
+	local fisherman = {
+		_id = "f15", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = water, _max_trade_tier = 1,
+		_trades = minetest.serialize(trades),
+		_villages_fish_session = {phase = "cast", phase_ends_at = now + 2},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	spawned_bobbers = {}
+
+	now = now + 2
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_session.phase == "wait")
+	assert(fisherman._villages_fish_bobber, "the cast/wait transition must spawn a bobber")
+	assert(#spawned_bobbers == 1)
+
+	now = fisherman._villages_fish_session.phase_ends_at
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_session.phase == "reel")
+	assert(fisherman._villages_fish_bobber, "the bobber stays out through the reel phase")
+
+	now = fisherman._villages_fish_session.phase_ends_at
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_session.phase == "cast", "a completed cycle returns to casting")
+	assert(not fisherman._villages_fish_bobber, "the bobber is removed once the cycle completes")
+	assert(spawned_bobbers[1].removed)
+
+	local restocked = minetest.deserialize(fisherman._trades)
+	assert(not restocked.affordable.locked, "a trade at or below the current tier must unlock")
+	assert(restocked.affordable.trade_counter == 0)
+	assert(restocked.expensive.locked, "a trade above the current tier must stay locked")
+	timeofday = 0
+end
+
+-- #73 review: nothing but the session re-pinning state each tick stood
+-- between a fisherman and vanilla's do_states_stand, which switches a
+-- standing villager to "walk" once a second unless self.order is "stand",
+-- "sleep", or "work" (movement.lua:685) -- so the villager could wander off
+-- mid-session while the bobber stayed behind at the water.
+do
+	local def = new_def(function(self)
+		-- Mirrors do_states_stand's own order check: only those three orders
+		-- keep a standing villager from being sent walking. This runs before
+		-- this file's own fishing code gets a say, exactly like vanilla's.
+		if self.order ~= "stand" and self.order ~= "sleep" and self.order ~= "work" then
+			self.state = "walk"
+			self.object:set_velocity({x = 1, y = 0, z = 0})
+		end
+	end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1200
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local velocity_calls = {}
+	local fisherman = {
+		_id = "f21", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		order = "wander", -- some pre-existing order, to also check it is restored on exit
+		_villages_fish_target = water,
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8, previous_order = "wander"},
+		object = {
+			get_pos = function() return {x = 4, y = 0, z = 0} end,
+			set_velocity = function(_, v) table.insert(velocity_calls, v) end,
+		},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman.state == "stand", "the session must undo vanilla's own walk switch every tick")
+	assert(fisherman.order == "stand")
+	assert(#velocity_calls >= 1 and velocity_calls[#velocity_calls].x == 0,
+		"a walk started this same tick must be zeroed back out")
+
+	-- Ending the session must restore whatever order the villager held
+	-- before the session pinned it, not leave it stuck on "stand".
+	fisherman.following = true
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(fisherman.order == "wander", "ending a session must restore the villager's prior order")
+	timeofday = 0
+end
+
+-- #73: following ends the session, removes the bobber, and drops the target
+-- and route so a fresh spot is chosen once fishing resumes.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 900
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	spawned_bobbers = {}
+	local bobber = minetest.add_entity(water, "villages:bobber")
+	local fisherman = {
+		_id = "f16", _villages_fisherman = true, _profession = "fisherman", state = "stand", following = true,
+		_villages_fish_target = water, _villages_fish_route = {status = "arrived"},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
+		_villages_fish_bobber = bobber,
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(not fisherman._villages_fish_target)
+	assert(not fisherman._villages_fish_route)
+	assert(bobber.removed)
+	timeofday = 0
+end
+
+-- #73: the session ends when work time ends, which also covers nightfall
+-- and thunder since neither is ever inside an is_work_time() window.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	spawned_bobbers = {}
+	local bobber = minetest.add_entity(water, "villages:bobber")
+	timeofday, now = 0.8, 1000
+	local fisherman = {
+		_id = "f17", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = water,
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
+		_villages_fish_bobber = bobber,
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(bobber.removed)
+	timeofday = 0
+end
+
+-- #73: the session ends when the water it anchored on stops qualifying.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1100
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:stone")
+	spawned_bobbers = {}
+	local bobber = minetest.add_entity(water, "villages:bobber")
+	local fisherman = {
+		_id = "f18", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = water,
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
+		_villages_fish_bobber = bobber,
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(bobber.removed)
+	timeofday = 0
+end
+
+-- #73: unloading mid-session removes the bobber even though do_custom never
+-- runs again for this villager (it may sit in a different, still-loaded
+-- mapblock a couple of nodes out over the water).
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	spawned_bobbers = {}
+	local bobber = minetest.add_entity({x = 5, y = 0, z = 0}, "villages:bobber")
+	local fisherman = {
+		_id = "f19", _villages_fisherman = true,
+		_villages_fish_session = {phase = "wait", phase_ends_at = 9999},
+		_villages_fish_bobber = bobber,
+	}
+	def.on_deactivate(fisherman, false)
+	assert(bobber.removed)
+
+	-- No session in progress: deactivation must not touch an unrelated object.
+	local other_bobber = minetest.add_entity({x = 6, y = 0, z = 0}, "villages:bobber")
+	local idle_fisherman = {_id = "f19b", _villages_fisherman = true, _villages_fish_bobber = other_bobber}
+	def.on_deactivate(idle_fisherman, false)
+	assert(not other_bobber.removed)
+end
+
+-- #73: a reload drops a stale session and bobber reference rather than
+-- resuming a cycle with no visible bobber (the bobber itself, an ObjectRef,
+-- never survives get_staticdata's copy in the first place).
+do
+	local def = new_def()
+	dofile("fisherman.lua")(def)
+	local fisherman = {
+		_profession = "fisherman",
+		_villages_fish_session = {phase = "wait", phase_ends_at = 9999},
+		_villages_fish_bobber = {stale = true},
+	}
+	def.on_activate(fisherman, "", 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(not fisherman._villages_fish_bobber)
 end
 
 print("fisherman.lua: ok")
