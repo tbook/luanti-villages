@@ -19,6 +19,7 @@ local globalstep = nil
 local water_sites = {}
 local water_source_nodes = {}
 local water_scans = 0
+local raised_shore_nodes = {}
 
 minetest = {
 	registered_nodes = {
@@ -62,6 +63,8 @@ minetest = {
 		end
 		local water_node = water_source_nodes[pos.x .. ":" .. pos.y .. ":" .. pos.z]
 		if water_node then return {name = water_node} end
+		local shore_node = raised_shore_nodes[pos.x .. ":" .. pos.y .. ":" .. pos.z]
+		if shore_node then return {name = shore_node} end
 		if pos.y == -1 and support_available then return {name = support_node} end
 		return {name = "air"}
 	end,
@@ -781,6 +784,32 @@ assert(not job_def.gopath(fish_entity, fish_entity._villages_fish_target, nil, t
 assert(fish_entity._villages_fish_route.status == "retry")
 assert(fish_entity._villages_fish_route.reason:find("no safe standing", 1, true))
 nearby_objects = {}
+
+-- #72 review fix: a natural shore commonly sits a block above the water's
+-- own surface (sand or dirt right up to and including the water's own y
+-- level), so the walkable stand is the block on top of that shore, not
+-- beside it at the water's own height. raised_ok must find that stand
+-- instead of reporting "no safe standing space" against an anchor whose
+-- only dry neighbors are solid ground, not open air, at the water's height.
+local raised_fish_site = {x = 60, y = 0, z = 0}
+water_source_nodes[raised_fish_site.x .. ":" .. raised_fish_site.y .. ":" .. raised_fish_site.z] = "mcl_core:water_source"
+for _, offset in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+	local shore = {x = raised_fish_site.x + offset[1], y = raised_fish_site.y, z = raised_fish_site.z + offset[2]}
+	raised_shore_nodes[shore.x .. ":" .. shore.y .. ":" .. shore.z] = "stone"
+end
+local raised_fish_entity = {
+	_id = "villager-1", _villages_fish_target = vector.new(raised_fish_site), state = "stand",
+	object = {
+		get_pos = function() return {x = 65, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(job_def.gopath(raised_fish_entity, raised_fish_entity._villages_fish_target, nil, true),
+	"a raised (sand-at-water-level) shore must still yield a route, not \"no safe standing space\"")
+assert(job_target and job_target.y == 1,
+	"the stand must be one block above the water's own height, on top of the shore")
+water_source_nodes[raised_fish_site.x .. ":" .. raised_fish_site.y .. ":" .. raised_fish_site.z] = nil
+raised_shore_nodes = {}
 
 -- A work-period interruption invalidates a fish route and its target as one
 -- unit, so fisherman.lua can choose a fresh spot next time work begins.

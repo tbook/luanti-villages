@@ -48,6 +48,7 @@ minetest = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
 		["air"] = {liquidtype = "none"},
 		["mcl_core:stone"] = {walkable = true},
+		["mcl_core:sand"] = {walkable = true},
 	},
 	-- Walkable ground below the y levels tests actually stand a candidate
 	-- on, so has_open_approach()'s is_supported() check has something to
@@ -311,8 +312,9 @@ end
 
 -- 8a2: review fix -- a merely non-liquid cardinal neighbor is not enough; a
 -- solid wall right at the water's edge is dry but not open, so a water tile
--- walled in on all four sides must still be skipped for one with an actual
--- approachable (open and supported) neighbor.
+-- boxed in by a two-high wall on all four sides (too tall to stand on top
+-- of, unlike a single-block ledge -- see 8a3) must still be skipped for one
+-- with an actual approachable (open and supported) neighbor.
 do
 	local gopath_target
 	local def = new_def(function() end)
@@ -324,10 +326,10 @@ do
 	local shore = {x = 20, y = 0, z = 0}
 	water_sites = {walled_lake, shore}
 	place(walled_lake, "mcl_core:water_source")
-	place({x = 16, y = 0, z = 0}, "mcl_core:stone")
-	place({x = 14, y = 0, z = 0}, "mcl_core:stone")
-	place({x = 15, y = 0, z = 1}, "mcl_core:stone")
-	place({x = 15, y = 0, z = -1}, "mcl_core:stone")
+	for _, wall in ipairs({{16, 0}, {14, 0}, {15, 1}, {15, -1}}) do
+		place({x = wall[1], y = 0, z = wall[2]}, "mcl_core:stone")
+		place({x = wall[1], y = 1, z = wall[2]}, "mcl_core:stone")
+	end
 	place(shore, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f8a2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
@@ -342,6 +344,47 @@ do
 	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 20,
 		"a water tile walled in by solid (non-liquid but non-open) blocks must be skipped")
 	assert(gopath_target and gopath_target.x == 20)
+	timeofday, water_sites = 0, {}
+end
+
+-- 8a3: review fix -- a natural sandy shore commonly sits a block above the
+-- water's own surface (the beach's walkable ground and the water meet at
+-- the water's own y level, so the stand is on top of that ground, not
+-- beside it): a water tile whose only dry neighbors are like this must
+-- still be picked, not rejected for having nothing open at the water's own
+-- height.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	-- Within FISH_SEARCH_RADIUS (32) of the villager below, and outside
+	-- every other test's placements in this file.
+	local beach_lake = {x = 8, y = 0, z = 0}
+	water_sites = {beach_lake}
+	place(beach_lake, "mcl_core:water_source")
+	-- Sand right at the water's own height on every side: not open (it is
+	-- walkable ground, not air), so only standing on top of it -- one block
+	-- up -- is a valid approach.
+	for _, sand in ipairs({{9, 0}, {7, 0}, {8, 1}, {8, -1}}) do
+		place({x = sand[1], y = 0, z = sand[2]}, "mcl_core:sand")
+	end
+	local fisherman = {
+		_id = "f8a3", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 8,
+		"a water tile with only a raised (sand-at-water-level) shore must still be picked")
+	-- gopath is handed the water anchor itself here; navigation.lua's own
+	-- approaches() (raised_ok, tested in tests/navigation.lua) is what turns
+	-- it into the actual one-block-up stand.
+	assert(gopath_target and gopath_target.x == 8)
 	timeofday, water_sites = 0, {}
 end
 

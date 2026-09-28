@@ -395,9 +395,13 @@ local function fish_is_supported(pos)
 end
 
 local FISH_OFFSET_LABELS = {"+x", "-x", "+z", "-z"}
+-- navigation.lua's raised_ok checks the anchor's own height first, then one
+-- above it: a natural shore commonly meets the water at the water's own
+-- height (its walkable ground, and the stand on it, is the block above).
+local FISH_HEIGHTS = {{dy = 0, label = "water-level"}, {dy = 1, label = "+1"}}
 
-local function describe_fish_offset(anchor, offset, label)
-	local candidate = {x = anchor.x + offset[1], y = anchor.y, z = anchor.z + offset[2]}
+local function describe_fish_height(anchor, offset, dy)
+	local candidate = {x = anchor.x + offset[1], y = anchor.y + dy, z = anchor.z + offset[2]}
 	local above = {x = candidate.x, y = candidate.y + 1, z = candidate.z}
 	local reasons = {}
 	if not fish_is_open(candidate) then
@@ -410,8 +414,18 @@ local function describe_fish_offset(anchor, offset, label)
 		local support = {x = candidate.x, y = candidate.y - 1, z = candidate.z}
 		table.insert(reasons, "not supported (" .. node_name(support) .. ")")
 	end
-	if #reasons == 0 then return label .. ": open approach" end
-	return label .. ": " .. table.concat(reasons, "; ")
+	if #reasons == 0 then return true, "open approach" end
+	return false, table.concat(reasons, "; ")
+end
+
+local function describe_fish_offset(anchor, offset, label)
+	local parts = {}
+	for _, height in ipairs(FISH_HEIGHTS) do
+		local ok, detail = describe_fish_height(anchor, offset, height.dy)
+		table.insert(parts, height.label .. ": " .. detail)
+		if ok then break end
+	end
+	return label .. " (" .. table.concat(parts, "; ") .. ")"
 end
 
 -- The nearest surface-water tile to pos within fisherman.lua's own search
