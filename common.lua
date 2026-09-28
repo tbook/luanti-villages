@@ -58,6 +58,13 @@ return {
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
 	farm_replant_node = function(name) return farm_replant_nodes[name] end,
+	is_surface_water = function(pos)
+		local node = core.get_node_or_nil(pos)
+		local def = node and core.registered_nodes[node.name]
+		if not def or def.liquidtype ~= "source" then return false end
+		local above = core.get_node_or_nil({x = pos.x, y = pos.y + 1, z = pos.z})
+		return above ~= nil and above.name == "air"
+	end,
 	workstation_profession = function(name)
 		return workstation_professions[name]
 			or (core.get_item_group(name, "cauldron") > 0 and "leatherworker")

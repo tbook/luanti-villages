@@ -721,6 +721,71 @@ job_def.do_custom(interrupted_farmer, 0.1)
 assert(not interrupted_farmer._villages_farm_route)
 assert(not interrupted_farmer._villages_farm_target)
 
+-- #72: a fisherman travels to a stand at the water's edge, mirroring the
+-- farm-plot destination but standing beside the water rather than at an
+-- already-claimed node.
+timeofday = 0.4
+local fish_site = {x = 50, y = 0, z = 0}
+water_source_nodes[fish_site.x .. ":" .. fish_site.y .. ":" .. fish_site.z] = "mcl_core:water_source"
+local fish_entity = {
+	_id = "villager-1", _villages_fish_target = vector.new(fish_site), state = "stand",
+	object = {
+		get_pos = function() return {x = 55, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+local fish_arrived_called = false
+assert(job_def.gopath(fish_entity, fish_entity._villages_fish_target, function()
+	fish_arrived_called = true
+end, true))
+assert(job_target and not (job_target.x == fish_site.x and job_target.z == fish_site.z),
+	"the fisherman must stand beside the water, not on it")
+assert(fish_entity._villages_fish_route.status == "travelling")
+job_arrived(fish_entity)
+assert(fish_entity._villages_fish_route.status == "arrived")
+assert(fish_arrived_called)
+
+-- A stand already occupied by another loaded villager is skipped for an
+-- unoccupied one instead of failing the whole route.
+fish_entity._villages_fish_route = nil
+local original_objects_near = minetest.get_objects_inside_radius
+local occupied_stand = {x = fish_site.x + 1, y = 0, z = fish_site.z}
+minetest.get_objects_inside_radius = function(pos)
+	if pos.x == occupied_stand.x and pos.y == occupied_stand.y and pos.z == occupied_stand.z then
+		return {{get_luaentity = function() return {name = "mobs_mc:villager"} end}}
+	end
+	return {}
+end
+assert(job_def.gopath(fish_entity, fish_entity._villages_fish_target, nil, true))
+assert(not (job_target.x == occupied_stand.x and job_target.z == occupied_stand.z),
+	"an occupied stand must be skipped for another candidate")
+minetest.get_objects_inside_radius = original_objects_near
+
+-- Every candidate stand occupied is reported as no safe standing space,
+-- exactly like a bed or jobsite with no free approach.
+fish_entity._villages_fish_route = nil
+nearby_objects = {{get_luaentity = function() return {name = "mobs_mc:villager"} end}}
+assert(not job_def.gopath(fish_entity, fish_entity._villages_fish_target, nil, true))
+assert(fish_entity._villages_fish_route.status == "retry")
+assert(fish_entity._villages_fish_route.reason:find("no safe standing", 1, true))
+nearby_objects = {}
+
+-- A work-period interruption invalidates a fish route and its target as one
+-- unit, so fisherman.lua can choose a fresh spot next time work begins.
+timeofday = 0.5
+local interrupted_fisherman = {
+	_villages_fish_target = {x = 2, y = 0, z = 0},
+	_villages_fish_route = {status = "travelling"},
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+job_def.do_custom(interrupted_fisherman, 0.1)
+assert(not interrupted_fisherman._villages_fish_route)
+assert(not interrupted_fisherman._villages_fish_target)
+water_source_nodes[fish_site.x .. ":" .. fish_site.y .. ":" .. fish_site.z] = nil
+
 -- A close action waits while another villager is actively crossing the same
 -- wooden door, then uses the normal mob close action once the doorway clears.
 wooden_door = true
@@ -869,6 +934,22 @@ stalled_def.on_activate(activated_entity)
 assert(activated_entity.state == "stand")
 assert(not activated_entity._target and not activated_entity.current_target and not activated_entity.waypoints)
 assert(not activated_entity.callback_arrived and not activated_entity._villages_bed_route)
+
+-- The same reload cleanup applies to an in-progress fishing-spot route.
+local activated_fisherman = {
+	state = "gowp", _target = {x = 1}, current_target = {pos = {x = 1}}, waypoints = {},
+	callback_arrived = function() end,
+	_villages_fish_route = {status = "travelling", id = 1}, _villages_fish_target = {x = 1, y = 0, z = 0},
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+stalled_def.on_activate(activated_fisherman)
+assert(activated_fisherman.state == "stand")
+assert(not activated_fisherman._target and not activated_fisherman.current_target and not activated_fisherman.waypoints)
+assert(not activated_fisherman.callback_arrived and not activated_fisherman._villages_fish_route)
+assert(not activated_fisherman._villages_fish_target)
 
 -- #71: an unemployed, bedded villager with no reachable workstation and a
 -- qualifying pond near its bed is promoted to fisherman on the work-time

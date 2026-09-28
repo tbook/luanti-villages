@@ -13,9 +13,29 @@
 -- to distinguish a barrel fisherman from a fallback one.
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local FISH_SEARCH_RADIUS = 16
+local FISH_RETRY_INTERVAL = 5
 
 local function should_flag(self)
 	return not self.child and self._profession == "fisherman"
+end
+
+-- The nearest surface water tile within range is only an anchor: navigation.lua
+-- turns it into an actual stand by finding an open, supported position
+-- cardinally adjacent to it (#72).
+local function nearest_water(self)
+	local pos = self.object:get_pos()
+	if not pos then return nil end
+	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - 2, z = pos.z - FISH_SEARCH_RADIUS}
+	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + 2, z = pos.z + FISH_SEARCH_RADIUS}
+	local best, best_distance
+	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
+		if common.is_surface_water(site) then
+			local distance = vector.distance(pos, site)
+			if not best_distance or distance < best_distance then best, best_distance = site, distance end
+		end
+	end
+	return best
 end
 
 -- A claim made during the wrapped call already mutated real node meta via
@@ -88,6 +108,30 @@ return function(def)
 		-- or, worse, since the node itself remains genuinely unclaimed,
 		-- one another villager may since have taken. A fisherman with no
 		-- jobsite is already this mod's intended steady state.
+
+		-- Send the fisherman to the water's edge whenever it is not already
+		-- headed somewhere and work time allows it. Both a fallback fisherman
+		-- (no jobsite) and a barrel-employed one make this trip; a barrel only
+		-- grants the profession, not an exemption from fishing at the shore.
+		if not self.child and self._id and common.is_work_time() and self.state ~= "gowp" then
+			if self._villages_fish_target then
+				local route = self._villages_fish_route
+				if route and route.status == "retry" and core.get_gametime() >= route.retry_at then
+					self._villages_fish_target = nil
+					self._villages_fish_route = nil
+				end
+			elseif core.get_gametime() >= (self._villages_fish_next or 0) then
+				local water = nearest_water(self)
+				if water then
+					self._villages_fish_target = vector.new(water)
+					if not self:gopath(water, nil, true) then
+						self._villages_fish_target = nil
+					end
+				else
+					self._villages_fish_next = core.get_gametime() + FISH_RETRY_INTERVAL
+				end
+			end
+		end
 
 		return result
 	end
