@@ -48,9 +48,7 @@ local function skin(self)
 	-- _profession only after vanilla's own do_custom (which this file's
 	-- do_custom wraps innermost, calling tick_visual right after it) has
 	-- already reset it to "unemployed" for that tick. Reading _profession
-	-- straight would occasionally paint the plain, no-profession skin for
-	-- one visual-refresh cycle every time that reset and the 0.5s refresh
-	-- throttle happen to land on the same tick.
+	-- straight would paint the plain, no-profession skin for that tick.
 	local profession = self._villages_fisherman and "fisherman" or self._profession
 	local overlay = profession_overlay[profession]
 	if overlay then
@@ -91,12 +89,18 @@ local function refresh_visual(self)
 	self.base_size = {x = 1, y = 1}
 end
 
-local function tick_visual(self, dtime)
-	self._villages_visual_timer = (self._villages_visual_timer or 0) + dtime
-	if self._villages_visual_timer >= 0.5 then
-		self._villages_visual_timer = 0
-		refresh_visual(self)
-	end
+-- Vanilla's own set_textures (mobs_mc/villager.lua:734, called directly from
+-- remove_job/employ on every ~5s activity poll, not throttled or gated by
+-- this mod at all) overwrites the object's textures with VoxeLibre's own
+-- profession skin outright, bypassing refresh_visual entirely. A throttled
+-- correction here used to leave that visible for up to its own interval
+-- after every one of those calls -- a general flicker back to the plain
+-- villager look, not specific to any one profession. refresh_visual already
+-- compares before it ever calls set_properties, so checking every tick
+-- costs a few field reads in the common case, not a property set; do that
+-- instead of waiting out a timer.
+local function tick_visual(self)
+	refresh_visual(self)
 end
 
 local function normal_box(self, original_box)
@@ -332,7 +336,7 @@ core.register_on_mods_loaded(function()
 				-- position/velocity/yaw every tick instead, since the earlier
 				-- physics/motion steps in on_step run before do_custom either
 				-- way and can still nudge the villager.
-				tick_visual(self, dtime)
+				tick_visual(self)
 				local pos, yaw = sleep_position(bed, node)
 				self.object:set_pos(pos)
 				self.object:set_velocity(vector.zero())
@@ -345,7 +349,7 @@ core.register_on_mods_loaded(function()
 
 		local result = original_custom(self, dtime)
 		if result == false then return false end
-		tick_visual(self, dtime)
+		tick_visual(self)
 
 		local bed, node = claimed_bed(self)
 		if self.order == "sleep" and is_sleep_time() and bed

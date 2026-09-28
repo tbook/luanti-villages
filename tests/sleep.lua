@@ -287,4 +287,20 @@ entity_def.do_custom(gwen, 0.6)
 assert(gwen_props.textures[1]:find("profession_fisherman", 1, true),
 	"a transiently-unemployed fisherman must still render its fisherman skin")
 
+-- Regression test: vanilla's own set_textures (mobs_mc/villager.lua:734,
+-- called directly from remove_job/employ, not throttled or gated by this
+-- mod) overwrites the object's textures outright, bypassing refresh_visual
+-- entirely. A throttled correction here used to leave that visible for up
+-- to its own interval after every such call; refresh_visual must now run
+-- (and correct a mismatch) on every tick, including a single small dtime
+-- far under the old 0.5s threshold, not just once enough dtime has
+-- accumulated.
+local hank, hank_props = make_villager("hank", false, {x = 51, y = 0, z = 0})
+objects = {}
+entity_def.on_activate(hank, "", 0)
+hank_props.textures = {"old.png"} -- simulates vanilla's set_textures firing
+entity_def.do_custom(hank, 0.05)
+assert(hank_props.textures[1]:find("profession_weaponsmith", 1, true), hank_props.textures[1])
+assert(hank_props.textures[1]:find("badge_iron", 1, true))
+
 print("villager sleep tests passed")
