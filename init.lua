@@ -3,6 +3,15 @@
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
+-- core.register_entity requires the loading mod's own name-prefix context
+-- (register.lua's check_modname_prefix reads core.get_current_modname()),
+-- which is only valid during a mod's own normal load -- not from inside the
+-- core.register_on_mods_loaded callback below, where every mod has already
+-- finished loading and get_current_modname() no longer resolves to
+-- "villages". fisherman.lua's own villages:bobber registration must
+-- therefore run from here, at ordinary top-level load time, rather than
+-- from a dofile inside that callback like the other behavior modules.
+local install_fisherman = dofile(core.get_modpath("villages") .. "/fisherman.lua")
 local MODEL = "villages_villager.b3d"
 local BASE = "villages_villager_base.png^villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
@@ -342,6 +351,6 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("villages") .. "/births.lua")(def)
 	dofile(core.get_modpath("villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
-	dofile(core.get_modpath("villages") .. "/fisherman.lua")(def)
+	install_fisherman(def)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
 end)
