@@ -15,7 +15,7 @@ local LAST_BIRTH = "villages_last_birth"
 -- navigation.lua exposes no public surface beyond its def-installer, and
 -- this file must stay read-only, so this is its own small copy rather than
 -- a shared call into it.
-local WATER_SEARCH_RADIUS = 16
+local WATER_SEARCH_RADIUS = 24
 local WATER_VERTICAL_BAND = 2
 local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN

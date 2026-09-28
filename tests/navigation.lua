@@ -1031,11 +1031,11 @@ clear_pond()
 -- The flood fill must not walk outside the search radius: find_nodes_in_area
 -- only bounds the seed positions, so a one-wide channel that reaches the edge
 -- of the radius and connects to a qualifying pond just beyond it must not
--- borrow that pond's footprint. Only the in-bounds channel tile at x=16 is a
--- seed; the 3x3 pond at x=17..19 sits entirely outside WATER_SEARCH_RADIUS.
-water_source_nodes[16 .. ":0:0"] = "mcl_core:water_source"
-water_sites = {{x = 16, y = 0, z = 0}}
-for x = 17, 19 do
+-- borrow that pond's footprint. Only the in-bounds channel tile at x=24 is a
+-- seed; the 3x3 pond at x=25..27 sits entirely outside WATER_SEARCH_RADIUS.
+water_source_nodes[24 .. ":0:0"] = "mcl_core:water_source"
+water_sites = {{x = 24, y = 0, z = 0}}
+for x = 25, 27 do
 	for z = -1, 1 do
 		water_source_nodes[x .. ":0:" .. z] = "mcl_core:water_source"
 	end
