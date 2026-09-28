@@ -45,6 +45,32 @@ local function should_flag(self)
 	return not self.child and self._profession == "fisherman"
 end
 
+local SHORE_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+
+local function is_liquid(pos)
+	local node = core.get_node_or_nil(pos)
+	local def = node and core.registered_nodes[node.name]
+	return def ~= nil and def.liquidtype and def.liquidtype ~= "none"
+end
+
+-- navigation.lua's approaches() only checks a fishing spot's own four
+-- cardinal neighbors (cardinal_only), at the anchor tile's own height, for
+-- an open+supported stand -- not the shore in general. A tile picked purely
+-- by straight-line distance can land a tile or two into open water, or at a
+-- lake corner whose only nearby dry ground is diagonal, and every one of
+-- its neighbors would then be water too: navigation.lua would find zero
+-- candidates and retry that same doomed tile forever, even with an
+-- obviously fishable shore nearby (#72 follow-up). Requiring at least one
+-- non-liquid cardinal neighbor here is a cheap proxy for the same shape of
+-- check, so a tile without one is skipped before it ever reaches gopath.
+local function has_dry_neighbor(pos)
+	for _, offset in ipairs(SHORE_NEIGHBOR_OFFSETS) do
+		local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
+		if not is_liquid(neighbor) then return true end
+	end
+	return false
+end
+
 -- The nearest surface water tile within range is only an anchor: navigation.lua
 -- turns it into an actual stand by finding an open, supported position
 -- cardinally adjacent to it (#72).
@@ -55,7 +81,7 @@ local function nearest_water(self)
 	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
 	local best, best_distance
 	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
-		if common.is_surface_water(site) then
+		if common.is_surface_water(site) and has_dry_neighbor(site) then
 			local distance = vector.distance(pos, site)
 			if not best_distance or distance < best_distance then best, best_distance = site, distance end
 		end

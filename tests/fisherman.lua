@@ -261,6 +261,43 @@ do
 	timeofday, water_sites = 0, {}
 end
 
+-- 8a: review fix -- a water tile fully surrounded by more water (no possible
+-- cardinal approach) is skipped in favor of a farther tile that actually has
+-- a shore, instead of being picked by straight-line distance alone and then
+-- retrying "no safe standing space" against the same doomed tile forever.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	-- Coordinates well outside every other test's placements in this file
+	-- (place() writes into a shared, never-cleared node table), but still
+	-- within FISH_SEARCH_RADIUS (32) of the villager's position below.
+	local mid_lake = {x = 25, y = 0, z = 0}
+	local shore = {x = 30, y = 0, z = 0}
+	water_sites = {mid_lake, shore}
+	place(mid_lake, "mcl_core:water_source")
+	place({x = 26, y = 0, z = 0}, "mcl_core:water_source")
+	place({x = 24, y = 0, z = 0}, "mcl_core:water_source")
+	place({x = 25, y = 0, z = 1}, "mcl_core:water_source")
+	place({x = 25, y = 0, z = -1}, "mcl_core:water_source")
+	place(shore, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f8a", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 30,
+		"a tile with no dry cardinal neighbor must be skipped for one that has one")
+	assert(gopath_target and gopath_target.x == 30)
+	timeofday, water_sites = 0, {}
+end
+
 -- 8b: the vertical search is asymmetric, matching navigation.lua's
 -- promotion search: a lake below the villager's own standing height is
 -- common, water above is rare, so downward reach (6) is wider than upward
