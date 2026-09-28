@@ -43,7 +43,16 @@ local animation = {
 
 local function skin(self)
 	local texture = BASE
-	local overlay = profession_overlay[self._profession]
+	-- _villages_fisherman is never transiently cleared, unlike _profession:
+	-- fisherman.lua's guard (#70) restores a jobsite-less fisherman's
+	-- _profession only after vanilla's own do_custom (which this file's
+	-- do_custom wraps innermost, calling tick_visual right after it) has
+	-- already reset it to "unemployed" for that tick. Reading _profession
+	-- straight would occasionally paint the plain, no-profession skin for
+	-- one visual-refresh cycle every time that reset and the 0.5s refresh
+	-- throttle happen to land on the same tick.
+	local profession = self._villages_fisherman and "fisherman" or self._profession
+	local overlay = profession_overlay[profession]
 	if overlay then
 		texture = texture .. "^villages_villager_profession_" .. overlay .. ".png"
 		if overlay ~= "nitwit" then
