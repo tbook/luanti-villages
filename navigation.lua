@@ -21,7 +21,7 @@ local DOOR_USE_RADIUS = 2.5
 local deferred_door_closes = {}
 -- Fallback-to-fisherman promotion (#71): how far from the bed to look for
 -- water, and how large a contiguous surface-water pond must be to qualify.
-local WATER_SEARCH_RADIUS = 16
+local WATER_SEARCH_RADIUS = 24
 local WATER_VERTICAL_BAND = 2
 local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN

@@ -14,7 +14,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
-local FISH_SEARCH_RADIUS = 16
+local FISH_SEARCH_RADIUS = 32
 local FISH_RETRY_INTERVAL = 5
 -- Fishing cycle (#73): cast, then wait for a bite, then reel in. Trades
 -- restock once per completed cycle, so its length is also the restock rate.
