@@ -64,6 +64,7 @@ minetest = {
 	get_objects_inside_radius = function() return objects end,
 	facedir_to_dir = function() return {x = 0, y = 0, z = 1} end,
 	log = function() end,
+	register_entity = function() end,
 }
 mcl_beds = {get_bed_top = function() return top end}
 mcl_mobs = {mob_class = {
