@@ -55,18 +55,22 @@ core.register_entity(BOBBER_ENTITY, {
 -- confirmed against a running client (no Minetest/Luanti binary was
 -- available to check this in-game); they mirror witch.lua's own
 -- wand_rotation (a similarly stick-shaped attached item, tilted 45 degrees)
--- rather than a value read off the model. Nudge them if the rod clips into
--- the arm or floats free of it once actually seen.
+-- rather than a value read off the model. First in-game look (#87 PR
+-- review): with the -3 y offset and a small 0.2 visual_size, nothing was
+-- visible at all -- rather than guess a second offset blind, this pins the
+-- rod to the bone's own origin (no offset) at a deliberately oversized
+-- visual_size, so wherever it turns up is easy to spot; once that's seen,
+-- dial both back down to something that actually looks held.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "evo_arm.right"
-local ROD_POSITION = vector.new(0, -3, 0)
+local ROD_POSITION = vector.new(0, 0, 0)
 local ROD_ROTATION = vector.new(0, 0, 45)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
 		visual = "wielditem",
-		visual_size = {x = 0.2, y = 0.2},
+		visual_size = {x = 1, y = 1},
 		textures = {FISHING_ROD_ITEM},
 		physical = false,
 		pointable = false,
