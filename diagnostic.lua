@@ -10,6 +10,17 @@ local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
 local LAST_BIRTH = "villages_last_birth"
+-- Mirror navigation.lua's own promotion-pond thresholds (#71) so this
+-- reports the same pond a fisherman's promotion check would have seen.
+-- navigation.lua exposes no public surface beyond its def-installer, and
+-- this file must stay read-only, so this is its own small copy rather than
+-- a shared call into it.
+local WATER_SEARCH_RADIUS = 16
+local WATER_VERTICAL_BAND = 2
+local WATER_POND_MIN_SPAN = 3
+local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
+local WATER_POND_FILL_CAP = 32
+local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 
 local function pos_string(pos)
 	if not pos then return "none" end
@@ -135,6 +146,9 @@ local function route_status(route)
 		local target = route.target and " to " .. pos_string(route.target) or ""
 		return string.format("retry in %.0fs%s: %s", remaining, target, route.reason or "unknown failure") .. suffix
 	end
+	if route.status == "arrived" and route.target then
+		return "arrived at " .. pos_string(route.target) .. suffix
+	end
 	return route.status .. suffix
 end
 
@@ -210,6 +224,122 @@ local function birth_status(villager, pos)
 	return checked .. "; no local birth cooldown"
 end
 
+-- Flood fill outward over contiguous surface water at a single water level,
+-- capped the same way navigation.lua's own promotion check is. `visited` is
+-- shared across every pond considered by one measure_water call.
+local function flood_fill_pond(start, minp, maxp, visited)
+	visited[start.x .. ":" .. start.y .. ":" .. start.z] = true
+	local queue, head = {start}, 1
+	local count = 1
+	local min_x, max_x, min_z, max_z = start.x, start.x, start.z, start.z
+	while queue[head] and count < WATER_POND_FILL_CAP do
+		local pos = queue[head]
+		head = head + 1
+		for _, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
+			local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
+			local key = neighbor.x .. ":" .. neighbor.y .. ":" .. neighbor.z
+			local in_bounds = neighbor.x >= minp.x and neighbor.x <= maxp.x
+				and neighbor.z >= minp.z and neighbor.z <= maxp.z
+			if not visited[key] and in_bounds then
+				visited[key] = true
+				if common.is_surface_water(neighbor) then
+					count = count + 1
+					min_x, max_x = math.min(min_x, neighbor.x), math.max(max_x, neighbor.x)
+					min_z, max_z = math.min(min_z, neighbor.z), math.max(max_z, neighbor.z)
+					table.insert(queue, neighbor)
+					if count >= WATER_POND_FILL_CAP then break end
+				end
+			end
+		end
+	end
+	return count, max_x - min_x + 1, max_z - min_z + 1
+end
+
+-- Reports one pond within range rather than navigation.lua's own
+-- short-circuit on the first qualifying one, since a single representative
+-- pond is more informative for a diagnostic report. Prefers a qualifying
+-- pond (the largest one, if more than one qualifies) over a merely bigger
+-- non-qualifying one -- e.g. a 32-tile, one-node-wide channel -- since the
+-- qualifying pond is what actually explains a promotion outcome; the
+-- reported span/count and the qualifies flag always describe the same pond.
+local function measure_water(anchor)
+	if not anchor or not core.find_nodes_in_area then return nil end
+	local minp = {x = anchor.x - WATER_SEARCH_RADIUS, y = anchor.y - WATER_VERTICAL_BAND, z = anchor.z - WATER_SEARCH_RADIUS}
+	local maxp = {x = anchor.x + WATER_SEARCH_RADIUS, y = anchor.y + WATER_VERTICAL_BAND, z = anchor.z + WATER_SEARCH_RADIUS}
+	local sites = core.find_nodes_in_area(minp, maxp, {"group:water"})
+	local visited = {}
+	local best
+	for _, site in ipairs(sites) do
+		local site_key = site.x .. ":" .. site.y .. ":" .. site.z
+		if not visited[site_key] and common.is_surface_water(site) then
+			local count, span_x, span_z = flood_fill_pond(site, minp, maxp, visited)
+			local qualifies = count >= WATER_POND_MIN_COUNT and span_x >= WATER_POND_MIN_SPAN
+				and span_z >= WATER_POND_MIN_SPAN
+			if not best or (qualifies and not best.qualifies)
+				or (qualifies == best.qualifies and count > best.count) then
+				best = {count = count, span_x = span_x, span_z = span_z, qualifies = qualifies}
+			end
+		end
+	end
+	if not best then return 0, 0, 0, false end
+	return best.count, best.span_x, best.span_z, best.qualifies
+end
+
+local function water_status(anchor, label)
+	if not anchor then return "no " .. label end
+	local count, span_x, span_z, qualifies = measure_water(anchor)
+	if not count then return "unavailable" end
+	if count == 0 then return "no surface water found near " .. label end
+	return string.format("largest pond near %s: %d tile%s, %dx%d span (%s)",
+		label, count, count == 1 and "" or "s", span_x, span_z,
+		qualifies and "qualifies for promotion" or "too small to qualify")
+end
+
+local function fish_session_status(villager)
+	local session = villager._villages_fish_session
+	if not session then return "none" end
+	local remaining = math.max((session.phase_ends_at or core.get_gametime()) - core.get_gametime(), 0)
+	return string.format("%s (next phase in %.0fs)", session.phase or "unknown", remaining)
+end
+
+-- fisherman.lua eliminates these in the same order every tick (session,
+-- then following/work-time/water, then route, then target, then the
+-- no-water retry cooldown), so this retraces that order to explain why a
+-- fisherman is or is not fishing right now -- the other Fisherman lines
+-- report the same underlying fields, but none of them says which one is
+-- the actual reason.
+local function fisherman_status(villager)
+	if not villager._villages_fisherman then return "not a fisherman" end
+	if villager._villages_fish_session then return "fishing" end
+	if villager.following then return "not fishing: following a player" end
+	if not is_work_time() then return "not fishing: waiting for work period" end
+	local route = villager._villages_fish_route
+	if route and route.status == "travelling" then return "travelling to stand" end
+	if route and route.status == "retry" then
+		local remaining = math.max((route.retry_at or core.get_gametime()) - core.get_gametime(), 0)
+		return string.format("not fishing: waiting %.0fs to retry (%s)", remaining, route.reason or "unknown failure")
+	end
+	if villager._villages_fish_target then return "not fishing: has a stand but no active session" end
+	if villager._villages_fish_next and core.get_gametime() < villager._villages_fish_next then
+		return "not fishing: no reachable water found nearby, retrying soon"
+	end
+	return "not fishing: no stand chosen yet"
+end
+
+-- The profession guard (#70) keeps a fisherman's profession/trades intact
+-- even after vanilla's own validate_jobsite invalidates its barrel claim, so
+-- vanilla's own reporting never surfaces a problem here. Report the claim's
+-- real status directly instead.
+local function barrel_status(villager)
+	if not villager._villages_fisherman then return "n/a (not a fisherman)" end
+	if not villager._jobsite then return "none assigned" end
+	local node = core.get_node_or_nil(villager._jobsite)
+	if node and node.name ~= "mcl_barrels:barrel_closed" then
+		return "assigned node is not a barrel (" .. node.name .. ")"
+	end
+	return status_of_claim(villager._jobsite, villager._id, "jobsite")
+end
+
 local function inspectable_node(pos)
 	local node = core.get_node_or_nil(pos)
 	if not node then return nil end
@@ -282,6 +412,18 @@ local function show(player, villager)
 		"Job search route: " .. route_status(villager._villages_job_search_route),
 		"Job-search planner: " .. planner_status(villager._villages_job_search_route),
 		"Job-search planner trail: " .. planner_trail(villager._villages_job_search_route),
+		"",
+		"Fisherman flag: " .. (villager._villages_fisherman and "yes" or "no"),
+		"Fishing status: " .. fisherman_status(villager),
+		"Fish target: " .. pos_string(villager._villages_fish_target),
+		"Fish route: " .. route_status(villager._villages_fish_route),
+		"Fish planner: " .. planner_status(villager._villages_fish_route),
+		"Fish planner trail: " .. planner_trail(villager._villages_fish_route),
+		"Fishing session: " .. fish_session_status(villager),
+		"Water near bed: " .. water_status(villager._bed, "bed"),
+		"Water at fish target: " .. water_status(villager._villages_fish_target, "fish target"),
+		"Barrel claim (hidden from vanilla by the profession guard): " .. barrel_status(villager),
+		"",
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}
