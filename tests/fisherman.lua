@@ -653,6 +653,67 @@ do
 	timeofday = 0
 end
 
+-- #73 review: mcl_mobs/api.lua only calls do_states() -- whose
+-- do_states_stand unconditionally turns a standing villager toward a nearby
+-- player or a random direction, not gated by order the way its walk roll is
+-- -- when do_custom does not return false (api.lua:403-404), the same way
+-- the sleep pose already suppresses it. do_custom must return false while a
+-- session continues, or hold_still's own facing/state pin is undone again
+-- before the tick ever renders.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 900
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f_suppress", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = water,
+		_villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	assert(def.do_custom(fisherman, 0.1) == false,
+		"do_custom must return false while a session continues, to suppress do_states")
+	timeofday = 0
+end
+
+-- #73 review: ending a session must not stomp a bed/follow action
+-- navigation's own do_custom (already run this tick, above) just started
+-- the moment the ending condition itself flipped -- e.g. work time ending
+-- starts a bed trip in the very same tick the fishing session notices work
+-- has ended.
+do
+	local def = new_def(function(self)
+		-- Mirrors navigation.lua starting a bed trip the instant work ends:
+		-- state/order change before this file's own code gets a say.
+		self.state = "gowp"
+		self.order = "sleep"
+		self._villages_bed_route = {status = "travelling"}
+	end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.9, 1000 -- outside every is_work_time() window
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f_no_stomp", _villages_fisherman = true, _profession = "fisherman",
+		state = "stand", order = "wander",
+		_villages_fish_target = water,
+		_villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8, previous_order = "wander"},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman.state == "gowp",
+		"ending a session must not reset a state navigation's own do_custom just set this tick")
+	assert(fisherman.order == "sleep",
+		"ending a session must not restore a stale prior order over one just set this tick")
+	assert(fisherman._villages_bed_route.status == "travelling",
+		"a bed route just started this tick must not be left orphaned")
+	assert(not fisherman._villages_fish_session)
+	timeofday = 0
+end
+
 -- #73 review: nothing but the session re-pinning state each tick stood
 -- between a fisherman and vanilla's do_states_stand, which switches a
 -- standing villager to "walk" once a second unless self.order is "stand",
@@ -722,7 +783,11 @@ do
 		object = {get_pos = function() return stand end, set_velocity = function() end},
 	}
 	def.do_custom(fisherman, 0.1)
-	local expected_yaw = -math.atan(1, 0) -- water is due +x of the stand (dx = 1, dz = 0)
+	-- atan2(1, 0) is exactly pi/2; avoid math.atan(1, 0) here, since Lua 5.1
+	-- silently ignores atan's second argument and would compute atan(1)
+	-- (pi/4) instead, unlike the mock above which prefers math.atan2 when
+	-- available, matching production's own compatibility fallback.
+	local expected_yaw = -(math.pi / 2) -- water is due +x of the stand (dx = 1, dz = 0)
 	assert(math.abs(fisherman._yaw - expected_yaw) < 1e-9,
 		"a turn started this same tick must be corrected back to face the water")
 	timeofday = 0

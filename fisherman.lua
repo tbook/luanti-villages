@@ -243,11 +243,16 @@ end
 -- target is nil, and an "arrived" route never satisfies the retry check that
 -- clears an existing one. Restore whatever order the villager held before
 -- the session pinned it to "stand", so ending a session does not strand a
--- villager that, say, arrived here mid work-order.
+-- villager that, say, arrived here mid work-order -- but only if order is
+-- still that "stand" pin: navigation's own do_custom (already run this
+-- tick, above, before this file's own code sees the session-ending
+-- condition at all) may have just started a fresh, more urgent order of its
+-- own this very tick -- e.g. "sleep" for a bed trip the instant work ends
+-- -- which must not be clobbered by restoring a now-stale prior one.
 local function end_fishing_session(self)
 	local session = self._villages_fish_session
 	remove_bobber(self)
-	if session then self.order = session.previous_order end
+	if session and self.order == "stand" then self.order = session.previous_order end
 	self._villages_fish_session = nil
 	self._villages_fish_target = nil
 	self._villages_fish_route = nil
@@ -365,20 +370,31 @@ return function(def)
 		-- grants the profession, not an exemption from fishing at the shore.
 		if not self.child and self._id then
 			if self._villages_fish_session then
-				-- Re-pin every tick, even one about to end the session below:
-				-- vanilla's own do_custom (already run this tick, above) may
-				-- have nudged the villager toward walking before this code
-				-- gets a say.
-				hold_still(self, turn_in_direction)
-				-- A session ends the moment any of its three conditions stops
-				-- holding (following, work time, or the water it anchored on).
-				-- Work time already covers both nightfall and thunder, since
-				-- neither is ever inside an is_work_time() window.
+				-- A session ends the moment any of its three conditions
+				-- stops holding (following, work time, or the water it
+				-- anchored on). Work time already covers both nightfall and
+				-- thunder, since neither is ever inside an is_work_time()
+				-- window. Check these before touching anything: navigation's
+				-- own do_custom (already run this tick, above) may have just
+				-- started a bed/follow action of its own the moment one of
+				-- these flipped, and that action must be left alone, not
+				-- immediately stomped by hold_still and then orphaned by
+				-- end_fishing_session restoring a now-stale prior order.
 				if self.following or not common.is_work_time()
 					or not (self._villages_fish_target and common.is_surface_water(self._villages_fish_target)) then
 					end_fishing_session(self)
 				else
+					hold_still(self, turn_in_direction)
 					advance_fishing_session(self)
+					-- mcl_mobs/api.lua only calls do_states() -- whose
+					-- do_states_stand unconditionally turns a standing
+					-- villager toward a nearby player or a random direction,
+					-- unlike its walk roll, not gated by order at all --
+					-- when do_custom does not return false, the same way
+					-- the sleep pose (init.lua) already suppresses it while
+					-- active. Without this, hold_still's facing/state pin
+					-- above is undone again before this tick ever renders.
+					return false
 				end
 			elseif common.is_work_time() and self.state ~= "gowp" then
 				if self._villages_fish_target then
