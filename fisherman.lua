@@ -15,6 +15,10 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local FISH_SEARCH_RADIUS = 32
+-- Asymmetric vertically, matching navigation.lua's promotion search: a lake
+-- below the villager's own standing height is common, water above is rare.
+local FISH_BELOW_BAND = 6
+local FISH_ABOVE_BAND = 2
 local FISH_RETRY_INTERVAL = 5
 -- Fishing cycle (#73): cast, then wait for a bite, then reel in. Trades
 -- restock once per completed cycle, so its length is also the restock rate.
@@ -47,8 +51,8 @@ end
 local function nearest_water(self)
 	local pos = self.object:get_pos()
 	if not pos then return nil end
-	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - 2, z = pos.z - FISH_SEARCH_RADIUS}
-	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + 2, z = pos.z + FISH_SEARCH_RADIUS}
+	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - FISH_BELOW_BAND, z = pos.z - FISH_SEARCH_RADIUS}
+	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
 	local best, best_distance
 	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
 		if common.is_surface_water(site) then

@@ -16,7 +16,8 @@ local LAST_BIRTH = "villages_last_birth"
 -- this file must stay read-only, so this is its own small copy rather than
 -- a shared call into it.
 local WATER_SEARCH_RADIUS = 24
-local WATER_VERTICAL_BAND = 2
+local WATER_BELOW_BAND = 6
+local WATER_ABOVE_BAND = 2
 local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
@@ -264,8 +265,8 @@ end
 -- reported span/count and the qualifies flag always describe the same pond.
 local function measure_water(anchor)
 	if not anchor or not core.find_nodes_in_area then return nil end
-	local minp = {x = anchor.x - WATER_SEARCH_RADIUS, y = anchor.y - WATER_VERTICAL_BAND, z = anchor.z - WATER_SEARCH_RADIUS}
-	local maxp = {x = anchor.x + WATER_SEARCH_RADIUS, y = anchor.y + WATER_VERTICAL_BAND, z = anchor.z + WATER_SEARCH_RADIUS}
+	local minp = {x = anchor.x - WATER_SEARCH_RADIUS, y = anchor.y - WATER_BELOW_BAND, z = anchor.z - WATER_SEARCH_RADIUS}
+	local maxp = {x = anchor.x + WATER_SEARCH_RADIUS, y = anchor.y + WATER_ABOVE_BAND, z = anchor.z + WATER_SEARCH_RADIUS}
 	local sites = core.find_nodes_in_area(minp, maxp, {"group:water"})
 	local visited = {}
 	local best

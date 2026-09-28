@@ -49,9 +49,20 @@ minetest = {
 		local name = nodes[pos_key(pos)]
 		return {name = name or "air"}
 	end,
-	find_nodes_in_area = function()
+	find_nodes_in_area = function(minp, maxp)
 		water_scans = water_scans + 1
-		return water_sites
+		-- The real engine bounds the returned sites to minp/maxp; match that
+		-- here so the vertical-band tests can rely on an out-of-range site
+		-- genuinely never being offered.
+		local bounded = {}
+		for _, site in ipairs(water_sites) do
+			if site.x >= minp.x and site.x <= maxp.x
+				and site.y >= minp.y and site.y <= maxp.y
+				and site.z >= minp.z and site.z <= maxp.z then
+				table.insert(bounded, site)
+			end
+		end
+		return bounded
 	end,
 	get_meta = function(pos)
 		local k = pos_key(pos)
@@ -247,6 +258,67 @@ do
 	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 3,
 		"the nearest qualifying water tile must be chosen")
 	assert(gopath_target and gopath_target.x == 3)
+	timeofday, water_sites = 0, {}
+end
+
+-- 8b: the vertical search is asymmetric, matching navigation.lua's
+-- promotion search: a lake below the villager's own standing height is
+-- common, water above is rare, so downward reach (6) is wider than upward
+-- reach (2).
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	local below = {x = 3, y = -6, z = 0}
+	water_sites = {below}
+	place(below, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f8b", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target) gopath_target = target; self.state = "gowp"; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.y == -6,
+		"a qualifying tile 6 below must be found")
+	assert(gopath_target and gopath_target.y == -6)
+	water_sites = {}
+
+	local too_deep = {x = 3, y = -7, z = 0}
+	water_sites = {too_deep}
+	place(too_deep, "mcl_core:water_source")
+	local deep_fisherman = {
+		_id = "f8c", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function() error("must not travel: no water within the downward reach") end,
+	}
+	def.do_custom(deep_fisherman, 0.1)
+	assert(not deep_fisherman._villages_fish_target, "a tile 7 below must be outside the downward reach")
+	water_sites = {}
+
+	local above = {x = 3, y = 2, z = 0}
+	water_sites = {above}
+	place(above, "mcl_core:water_source")
+	local above_fisherman = {
+		_id = "f8d", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target) gopath_target = target; self.state = "gowp"; return true end,
+	}
+	def.do_custom(above_fisherman, 0.1)
+	assert(above_fisherman._villages_fish_target and above_fisherman._villages_fish_target.y == 2,
+		"a qualifying tile 2 above must be found")
+	water_sites = {}
+
+	local too_high = {x = 3, y = 3, z = 0}
+	water_sites = {too_high}
+	place(too_high, "mcl_core:water_source")
+	local high_fisherman = {
+		_id = "f8e", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function() error("must not travel: no water within the narrower upward reach") end,
+	}
+	def.do_custom(high_fisherman, 0.1)
+	assert(not high_fisherman._villages_fish_target, "a tile 3 above must be outside the narrower upward reach")
 	timeofday, water_sites = 0, {}
 end
 
