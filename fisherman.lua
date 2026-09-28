@@ -57,10 +57,14 @@ core.register_entity(BOBBER_ENTITY, {
 -- wand_rotation (a similarly stick-shaped attached item, tilted 45 degrees)
 -- rather than a value read off the model. First in-game look (#87 PR
 -- review): with the -3 y offset and a small 0.2 visual_size, nothing was
--- visible at all -- rather than guess a second offset blind, this pins the
--- rod to the bone's own origin (no offset) at a deliberately oversized
--- visual_size, so wherever it turns up is easy to spot; once that's seen,
--- dial both back down to something that actually looks held.
+-- visible at all -- rather than guess a second offset blind, the position
+-- was pinned to the bone's own origin (no offset) at a deliberately
+-- oversized visual_size to find where it actually renders. That confirmed
+-- the origin itself (near the shoulder) is a reasonable attach point -- at
+-- 1x1 it rendered roughly villager-height, from the head down to the
+-- ground -- so this second pass only shrinks visual_size, roughly matching
+-- witch.lua's own stick-prop scale (a rod is longer than a stick, so a
+-- little larger than its 0.1).
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "evo_arm.right"
@@ -70,7 +74,7 @@ local ROD_ROTATION = vector.new(0, 0, 45)
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
 		visual = "wielditem",
-		visual_size = {x = 1, y = 1},
+		visual_size = {x = 0.15, y = 0.15},
 		textures = {FISHING_ROD_ITEM},
 		physical = false,
 		pointable = false,
