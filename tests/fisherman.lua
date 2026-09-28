@@ -11,6 +11,9 @@ local water_sites = {}
 local water_scans = 0
 local registered_entities = {}
 local spawned_bobbers = {}
+-- y levels that report walkable ground; -1 covers every y=0 water placement
+-- in this file by default. The vertical-band tests add their own levels.
+local ground_levels = {[-1] = true}
 
 local function pos_key(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end
 
@@ -44,10 +47,18 @@ minetest = {
 	registered_nodes = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
 		["air"] = {liquidtype = "none"},
+		["mcl_core:stone"] = {walkable = true},
 	},
+	-- Walkable ground below the y levels tests actually stand a candidate
+	-- on, so has_open_approach()'s is_supported() check has something to
+	-- find; everywhere else defaults to open air, matching how the fishing
+	-- (rather than terrain/stair) tests in this file only care about a flat
+	-- approachable shoreline.
 	get_node_or_nil = function(pos)
 		local name = nodes[pos_key(pos)]
-		return {name = name or "air"}
+		if name then return {name = name} end
+		if ground_levels[pos.y] then return {name = "mcl_core:stone"} end
+		return {name = "air"}
 	end,
 	find_nodes_in_area = function(minp, maxp)
 		water_scans = water_scans + 1
@@ -298,6 +309,42 @@ do
 	timeofday, water_sites = 0, {}
 end
 
+-- 8a2: review fix -- a merely non-liquid cardinal neighbor is not enough; a
+-- solid wall right at the water's edge is dry but not open, so a water tile
+-- walled in on all four sides must still be skipped for one with an actual
+-- approachable (open and supported) neighbor.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	-- Within FISH_SEARCH_RADIUS (32) of the villager below, and outside
+	-- every other test's placements in this file.
+	local walled_lake = {x = 15, y = 0, z = 0}
+	local shore = {x = 20, y = 0, z = 0}
+	water_sites = {walled_lake, shore}
+	place(walled_lake, "mcl_core:water_source")
+	place({x = 16, y = 0, z = 0}, "mcl_core:stone")
+	place({x = 14, y = 0, z = 0}, "mcl_core:stone")
+	place({x = 15, y = 0, z = 1}, "mcl_core:stone")
+	place({x = 15, y = 0, z = -1}, "mcl_core:stone")
+	place(shore, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f8a2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 20,
+		"a water tile walled in by solid (non-liquid but non-open) blocks must be skipped")
+	assert(gopath_target and gopath_target.x == 20)
+	timeofday, water_sites = 0, {}
+end
+
 -- 8b: the vertical search is asymmetric, matching navigation.lua's
 -- promotion search: a lake below the villager's own standing height is
 -- common, water above is rare, so downward reach (6) is wider than upward
@@ -310,6 +357,7 @@ do
 	local below = {x = 3, y = -6, z = 0}
 	water_sites = {below}
 	place(below, "mcl_core:water_source")
+	ground_levels[-7] = true
 	local fisherman = {
 		_id = "f8b", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -336,6 +384,7 @@ do
 	local above = {x = 3, y = 2, z = 0}
 	water_sites = {above}
 	place(above, "mcl_core:water_source")
+	ground_levels[1] = true
 	local above_fisherman = {
 		_id = "f8d", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -356,6 +405,10 @@ do
 	}
 	def.do_custom(high_fisherman, 0.1)
 	assert(not high_fisherman._villages_fish_target, "a tile 3 above must be outside the narrower upward reach")
+	-- ground_levels is keyed only by y, applying to every (x, z) column, so
+	-- these must not leak into later tests' own "is there air above this
+	-- water" checks at y=1/-7 elsewhere.
+	ground_levels[-7], ground_levels[1] = nil, nil
 	timeofday, water_sites = 0, {}
 end
 

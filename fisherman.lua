@@ -47,26 +47,68 @@ end
 
 local SHORE_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 
-local function is_liquid(pos)
-	local node = core.get_node_or_nil(pos)
-	local def = node and core.registered_nodes[node.name]
-	return def ~= nil and def.liquidtype and def.liquidtype ~= "none"
-end
-
 -- navigation.lua's approaches() only checks a fishing spot's own four
 -- cardinal neighbors (cardinal_only), at the anchor tile's own height, for
 -- an open+supported stand -- not the shore in general. A tile picked purely
--- by straight-line distance can land a tile or two into open water, or at a
--- lake corner whose only nearby dry ground is diagonal, and every one of
--- its neighbors would then be water too: navigation.lua would find zero
--- candidates and retry that same doomed tile forever, even with an
--- obviously fishable shore nearby (#72 follow-up). Requiring at least one
--- non-liquid cardinal neighbor here is a cheap proxy for the same shape of
--- check, so a tile without one is skipped before it ever reaches gopath.
-local function has_dry_neighbor(pos)
+-- by straight-line distance can land a tile or two into open water, at a
+-- lake corner whose only nearby dry ground is diagonal, or against a steep
+-- bank with no standable ground at the water's own height: navigation.lua
+-- would then find zero candidates and retry that same doomed tile forever,
+-- even with an obviously fishable shore nearby (#72 follow-up). A merely
+-- non-liquid neighbor is not enough to rule that out -- a wall or a cliff
+-- face is non-liquid too -- so this replicates navigation.lua's own
+-- is_open/is_supported exactly (that file exposes no public surface beyond
+-- its def-installer) rather than a weaker proxy, and skips a tile without
+-- at least one cardinal candidate before it ever reaches gopath.
+local function node_def(pos)
+	local node = core.get_node_or_nil(pos)
+	return node and core.registered_nodes[node.name]
+end
+
+local function collision_box_top(def)
+	local box = def and def.collision_box
+	if not box or box.type ~= "fixed" then return 0.5 end
+	local fixed = box.fixed
+	if type(fixed) ~= "table" then return -0.5 end
+	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
+	local top = -0.5
+	for _, part in ipairs(fixed) do
+		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
+	end
+	return top
+end
+
+local function is_open(pos)
+	local node = core.get_node_or_nil(pos)
+	if not node then return false end
+	if core.get_item_group(node.name, "door") > 0 then return false end
+	local def = node_def(pos)
+	return def and not def.walkable and (not def.collision_box or def.collision_box.type == "none")
+		and (def.liquidtype == nil or def.liquidtype == "none")
+end
+
+local function is_supported(pos)
+	local support = {x = pos.x, y = pos.y - 1, z = pos.z}
+	local node = core.get_node_or_nil(support)
+	local def = node and core.registered_nodes[node.name]
+	if not def or not def.walkable then return false end
+	if collision_box_top(def) < 0.49 then return false end
+	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
+		return false
+	end
+	if (def.damage_per_second or 0) > 0 then return false end
+	return core.get_item_group(node.name, "fire") == 0
+		and core.get_item_group(node.name, "cactus") == 0
+		and core.get_item_group(node.name, "dangerous") == 0
+end
+
+local function has_open_approach(pos)
 	for _, offset in ipairs(SHORE_NEIGHBOR_OFFSETS) do
-		local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
-		if not is_liquid(neighbor) then return true end
+		local candidate = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
+		if is_open(candidate) and is_open({x = candidate.x, y = candidate.y + 1, z = candidate.z})
+			and is_supported(candidate) then
+			return true
+		end
 	end
 	return false
 end
@@ -81,7 +123,7 @@ local function nearest_water(self)
 	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
 	local best, best_distance
 	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
-		if common.is_surface_water(site) and has_dry_neighbor(site) then
+		if common.is_surface_water(site) and has_open_approach(site) then
 			local distance = vector.distance(pos, site)
 			if not best_distance or distance < best_distance then best, best_distance = site, distance end
 		end
