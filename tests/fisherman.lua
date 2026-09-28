@@ -11,6 +11,9 @@ local water_sites = {}
 local water_scans = 0
 local registered_entities = {}
 local spawned_bobbers = {}
+-- y levels that report walkable ground; -1 covers every y=0 water placement
+-- in this file by default. The vertical-band tests add their own levels.
+local ground_levels = {[-1] = true}
 
 local function pos_key(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end
 
@@ -44,10 +47,19 @@ minetest = {
 	registered_nodes = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
 		["air"] = {liquidtype = "none"},
+		["mcl_core:stone"] = {walkable = true},
+		["mcl_core:sand"] = {walkable = true},
 	},
+	-- Walkable ground below the y levels tests actually stand a candidate
+	-- on, so has_open_approach()'s is_supported() check has something to
+	-- find; everywhere else defaults to open air, matching how the fishing
+	-- (rather than terrain/stair) tests in this file only care about a flat
+	-- approachable shoreline.
 	get_node_or_nil = function(pos)
 		local name = nodes[pos_key(pos)]
-		return {name = name or "air"}
+		if name then return {name = name} end
+		if ground_levels[pos.y] then return {name = "mcl_core:stone"} end
+		return {name = "air"}
 	end,
 	find_nodes_in_area = function(minp, maxp)
 		water_scans = water_scans + 1
@@ -102,7 +114,15 @@ vector = {
 		return math.sqrt(x * x + y * y + z * z)
 	end,
 }
-mcl_mobs = {mob_class = {set_yaw = function(self, yaw) self._yaw = yaw end}}
+mcl_mobs = {mob_class = {
+	set_yaw = function(self, yaw) self._yaw = yaw end,
+	-- Mirrors mcl_mobs/movement.lua's real turn_in_direction (self.rotate is
+	-- unset for villagers, so it is 0 here too).
+	turn_in_direction = function(self, dx, dz)
+		local atan2 = math.atan2 or math.atan
+		self._yaw = -atan2(dx, dz)
+	end,
+}}
 
 local function new_def(custom, activate)
 	return {
@@ -261,6 +281,121 @@ do
 	timeofday, water_sites = 0, {}
 end
 
+-- 8a: review fix -- a water tile fully surrounded by more water (no possible
+-- cardinal approach) is skipped in favor of a farther tile that actually has
+-- a shore, instead of being picked by straight-line distance alone and then
+-- retrying "no safe standing space" against the same doomed tile forever.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	-- Coordinates well outside every other test's placements in this file
+	-- (place() writes into a shared, never-cleared node table), but still
+	-- within FISH_SEARCH_RADIUS (32) of the villager's position below.
+	local mid_lake = {x = 25, y = 0, z = 0}
+	local shore = {x = 30, y = 0, z = 0}
+	water_sites = {mid_lake, shore}
+	place(mid_lake, "mcl_core:water_source")
+	place({x = 26, y = 0, z = 0}, "mcl_core:water_source")
+	place({x = 24, y = 0, z = 0}, "mcl_core:water_source")
+	place({x = 25, y = 0, z = 1}, "mcl_core:water_source")
+	place({x = 25, y = 0, z = -1}, "mcl_core:water_source")
+	place(shore, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f8a", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 30,
+		"a tile with no dry cardinal neighbor must be skipped for one that has one")
+	assert(gopath_target and gopath_target.x == 30)
+	timeofday, water_sites = 0, {}
+end
+
+-- 8a2: review fix -- a merely non-liquid cardinal neighbor is not enough; a
+-- solid wall right at the water's edge is dry but not open, so a water tile
+-- boxed in by a two-high wall on all four sides (too tall to stand on top
+-- of, unlike a single-block ledge -- see 8a3) must still be skipped for one
+-- with an actual approachable (open and supported) neighbor.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	-- Within FISH_SEARCH_RADIUS (32) of the villager below, and outside
+	-- every other test's placements in this file.
+	local walled_lake = {x = 15, y = 0, z = 0}
+	local shore = {x = 20, y = 0, z = 0}
+	water_sites = {walled_lake, shore}
+	place(walled_lake, "mcl_core:water_source")
+	for _, wall in ipairs({{16, 0}, {14, 0}, {15, 1}, {15, -1}}) do
+		place({x = wall[1], y = 0, z = wall[2]}, "mcl_core:stone")
+		place({x = wall[1], y = 1, z = wall[2]}, "mcl_core:stone")
+	end
+	place(shore, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f8a2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 20,
+		"a water tile walled in by solid (non-liquid but non-open) blocks must be skipped")
+	assert(gopath_target and gopath_target.x == 20)
+	timeofday, water_sites = 0, {}
+end
+
+-- 8a3: review fix -- a natural sandy shore commonly sits a block above the
+-- water's own surface (the beach's walkable ground and the water meet at
+-- the water's own y level, so the stand is on top of that ground, not
+-- beside it): a water tile whose only dry neighbors are like this must
+-- still be picked, not rejected for having nothing open at the water's own
+-- height.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	-- Within FISH_SEARCH_RADIUS (32) of the villager below, and outside
+	-- every other test's placements in this file.
+	local beach_lake = {x = 8, y = 0, z = 0}
+	water_sites = {beach_lake}
+	place(beach_lake, "mcl_core:water_source")
+	-- Sand right at the water's own height on every side: not open (it is
+	-- walkable ground, not air), so only standing on top of it -- one block
+	-- up -- is a valid approach.
+	for _, sand in ipairs({{9, 0}, {7, 0}, {8, 1}, {8, -1}}) do
+		place({x = sand[1], y = 0, z = sand[2]}, "mcl_core:sand")
+	end
+	local fisherman = {
+		_id = "f8a3", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 8,
+		"a water tile with only a raised (sand-at-water-level) shore must still be picked")
+	-- gopath is handed the water anchor itself here; navigation.lua's own
+	-- approaches() (raised_ok, tested in tests/navigation.lua) is what turns
+	-- it into the actual one-block-up stand.
+	assert(gopath_target and gopath_target.x == 8)
+	timeofday, water_sites = 0, {}
+end
+
 -- 8b: the vertical search is asymmetric, matching navigation.lua's
 -- promotion search: a lake below the villager's own standing height is
 -- common, water above is rare, so downward reach (6) is wider than upward
@@ -273,6 +408,7 @@ do
 	local below = {x = 3, y = -6, z = 0}
 	water_sites = {below}
 	place(below, "mcl_core:water_source")
+	ground_levels[-7] = true
 	local fisherman = {
 		_id = "f8b", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -299,6 +435,7 @@ do
 	local above = {x = 3, y = 2, z = 0}
 	water_sites = {above}
 	place(above, "mcl_core:water_source")
+	ground_levels[1] = true
 	local above_fisherman = {
 		_id = "f8d", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -319,6 +456,10 @@ do
 	}
 	def.do_custom(high_fisherman, 0.1)
 	assert(not high_fisherman._villages_fish_target, "a tile 3 above must be outside the narrower upward reach")
+	-- ground_levels is keyed only by y, applying to every (x, z) column, so
+	-- these must not leak into later tests' own "is there air above this
+	-- water" checks at y=1/-7 elsewhere.
+	ground_levels[-7], ground_levels[1] = nil, nil
 	timeofday, water_sites = 0, {}
 end
 
@@ -448,7 +589,12 @@ do
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
-		gopath = function(self, target, callback) return callback(self, {x = 4, y = 0, z = 0}) end,
+		gopath = function(self, target, callback)
+			-- Mirrors navigation.lua's arrival_callback: the route's target
+			-- (the stand) is recorded before the callback runs.
+			self._villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}}
+			return callback(self)
+		end,
 	}
 	-- Go through the travel-trigger branch itself, so the target comes from
 	-- nearest_water() just as it would on a real trip.
@@ -507,6 +653,67 @@ do
 	timeofday = 0
 end
 
+-- #73 review: mcl_mobs/api.lua only calls do_states() -- whose
+-- do_states_stand unconditionally turns a standing villager toward a nearby
+-- player or a random direction, not gated by order the way its walk roll is
+-- -- when do_custom does not return false (api.lua:403-404), the same way
+-- the sleep pose already suppresses it. do_custom must return false while a
+-- session continues, or hold_still's own facing/state pin is undone again
+-- before the tick ever renders.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 900
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f_suppress", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = water,
+		_villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	assert(def.do_custom(fisherman, 0.1) == false,
+		"do_custom must return false while a session continues, to suppress do_states")
+	timeofday = 0
+end
+
+-- #73 review: ending a session must not stomp a bed/follow action
+-- navigation's own do_custom (already run this tick, above) just started
+-- the moment the ending condition itself flipped -- e.g. work time ending
+-- starts a bed trip in the very same tick the fishing session notices work
+-- has ended.
+do
+	local def = new_def(function(self)
+		-- Mirrors navigation.lua starting a bed trip the instant work ends:
+		-- state/order change before this file's own code gets a say.
+		self.state = "gowp"
+		self.order = "sleep"
+		self._villages_bed_route = {status = "travelling"}
+	end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.9, 1000 -- outside every is_work_time() window
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f_no_stomp", _villages_fisherman = true, _profession = "fisherman",
+		state = "stand", order = "wander",
+		_villages_fish_target = water,
+		_villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8, previous_order = "wander"},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman.state == "gowp",
+		"ending a session must not reset a state navigation's own do_custom just set this tick")
+	assert(fisherman.order == "sleep",
+		"ending a session must not restore a stale prior order over one just set this tick")
+	assert(fisherman._villages_bed_route.status == "travelling",
+		"a bed route just started this tick must not be left orphaned")
+	assert(not fisherman._villages_fish_session)
+	timeofday = 0
+end
+
 -- #73 review: nothing but the session re-pinning state each tick stood
 -- between a fisherman and vanilla's do_states_stand, which switches a
 -- standing villager to "walk" once a second unless self.order is "stand",
@@ -549,6 +756,40 @@ do
 	def.do_custom(fisherman, 0.1)
 	assert(not fisherman._villages_fish_session)
 	assert(fisherman.order == "wander", "ending a session must restore the villager's prior order")
+	timeofday = 0
+end
+
+-- Review fix: do_states_stand's "look at a nearby player, or turn randomly"
+-- is not gated by order at all (only the walk roll is), so a fisherman
+-- could be turned away from the water on any tick even with the walk fix
+-- above in place. Facing must be re-derived from the route's own recorded
+-- stand every tick, not just once on arrival.
+do
+	local def = new_def(function(self)
+		-- Mirrors do_states_stand's unconditional turn: it runs regardless
+		-- of self.order, unlike the walk roll.
+		self._yaw = -1
+	end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1300
+	local water = {x = 5, y = 0, z = 0}
+	local stand = {x = 4, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f22", _villages_fisherman = true, _profession = "fisherman", state = "stand", order = "stand",
+		_villages_fish_target = water,
+		_villages_fish_route = {status = "arrived", target = stand},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8, previous_order = nil},
+		object = {get_pos = function() return stand end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	-- atan2(1, 0) is exactly pi/2; avoid math.atan(1, 0) here, since Lua 5.1
+	-- silently ignores atan's second argument and would compute atan(1)
+	-- (pi/4) instead, unlike the mock above which prefers math.atan2 when
+	-- available, matching production's own compatibility fallback.
+	local expected_yaw = -(math.pi / 2) -- water is due +x of the stand (dx = 1, dz = 0)
+	assert(math.abs(fisherman._yaw - expected_yaw) < 1e-9,
+		"a turn started this same tick must be corrected back to face the water")
 	timeofday = 0
 end
 

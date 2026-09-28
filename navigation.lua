@@ -138,18 +138,28 @@ local function legacy_path_start(pos)
 	return core.find_node_near(start, 1, {"air"})
 end
 
-local function approaches(node_pos, cardinal_only)
+-- raised_ok additionally checks node_pos.y + 1 at each offset: a fishing
+-- spot's water tile itself is at the water's surface height, but a natural
+-- shore commonly sits a block above that (sand or dirt right up to and
+-- including the water's own y level, so the walkable ground -- and the
+-- stand on it -- is the block above, not beside). Bed/jobsite/farm-plot
+-- anchors are player-placed at their surrounding floor's own height, so
+-- they have no use for this and leave it off.
+local function approaches(node_pos, cardinal_only, raised_ok)
 	local result = {}
 	local offsets = {
 		{x = 1, z = 0}, {x = -1, z = 0}, {x = 0, z = 1}, {x = 0, z = -1},
 		{x = 1, z = 1}, {x = 1, z = -1}, {x = -1, z = 1}, {x = -1, z = -1},
 	}
+	local heights = raised_ok and {0, 1} or {0}
 	for index, offset in ipairs(offsets) do
 		if cardinal_only and index > 4 then break end
-		local pos = {x = node_pos.x + offset.x, y = node_pos.y, z = node_pos.z + offset.z}
-		if is_open(pos) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
-			and is_supported(pos) then
-			table.insert(result, pos)
+		for _, dy in ipairs(heights) do
+			local pos = {x = node_pos.x + offset.x, y = node_pos.y + dy, z = node_pos.z + offset.z}
+			if is_open(pos) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
+				and is_supported(pos) then
+				table.insert(result, pos)
+			end
 		end
 	end
 	return result
@@ -564,7 +574,7 @@ local function recover_route(self, destination)
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
 		local target, path
-		local candidates = approaches(destination.pos, destination.cardinal_only)
+		local candidates = approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
 		target, path, planner_failure, _, planner_report = plan_stair_route(self, candidates)
 		if target and path then
@@ -684,7 +694,7 @@ local function install(def)
 			and is_work_time() and has_fish_target(self) then
 			destination = {
 				pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
-				cardinal_only = true, candidate_filter = unoccupied_candidates,
+				cardinal_only = true, raised_ok = true, candidate_filter = unoccupied_candidates,
 			}
 		elseif not self._jobsite and not is_sleep_time() then
 			local node = core.get_node_or_nil(target)
@@ -732,7 +742,7 @@ local function install(def)
 			return false
 		end
 
-		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only)
+		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
 		local candidate, engine_path = destination.target, destination.engine_path
 		if not candidate then candidate, engine_path = choose_approach(self, candidates) end
@@ -834,7 +844,7 @@ local function install(def)
 		if working and (recover_stalled_route(self, farm_destination) or recover_route(self, farm_destination)) then return result end
 		local fish_destination = {
 			pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
-			cardinal_only = true, candidate_filter = unoccupied_candidates,
+			cardinal_only = true, raised_ok = true, candidate_filter = unoccupied_candidates,
 			claimed = has_fish_target,
 		}
 		if working and (recover_stalled_route(self, fish_destination) or recover_route(self, fish_destination)) then return result end

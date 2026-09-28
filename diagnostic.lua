@@ -22,6 +22,13 @@ local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+-- Mirror fisherman.lua's own day-to-day search radius and its real
+-- is_open/is_supported logic (again its own small copy, for the same
+-- reason as the promotion thresholds above), so "why won't this fisherman
+-- go fishing" can be diagnosed candidate by candidate instead of guessed at.
+local FISH_SEARCH_RADIUS = 32
+local FISH_BELOW_BAND = 6
+local FISH_ABOVE_BAND = 2
 
 local function pos_string(pos)
 	if not pos then return "none" end
@@ -341,6 +348,110 @@ local function barrel_status(villager)
 	return status_of_claim(villager._jobsite, villager._id, "jobsite")
 end
 
+-- Verbatim copies of navigation.lua's own is_open/is_supported (that file
+-- exposes no public surface beyond its def-installer), used only to explain
+-- per-candidate why a fishing anchor near a fisherman was, or was not,
+-- accepted -- not to alter anything.
+local function fish_node_def(pos)
+	local node = core.get_node_or_nil(pos)
+	return node and core.registered_nodes[node.name]
+end
+
+local function fish_collision_box_top(def)
+	local box = def and def.collision_box
+	if not box or box.type ~= "fixed" then return 0.5 end
+	local fixed = box.fixed
+	if type(fixed) ~= "table" then return -0.5 end
+	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
+	local top = -0.5
+	for _, part in ipairs(fixed) do
+		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
+	end
+	return top
+end
+
+local function fish_is_open(pos)
+	local node = core.get_node_or_nil(pos)
+	if not node then return false end
+	if core.get_item_group(node.name, "door") > 0 then return false end
+	local def = fish_node_def(pos)
+	return def and not def.walkable and (not def.collision_box or def.collision_box.type == "none")
+		and (def.liquidtype == nil or def.liquidtype == "none")
+end
+
+local function fish_is_supported(pos)
+	local support = {x = pos.x, y = pos.y - 1, z = pos.z}
+	local node = core.get_node_or_nil(support)
+	local def = node and core.registered_nodes[node.name]
+	if not def or not def.walkable then return false end
+	if fish_collision_box_top(def) < 0.49 then return false end
+	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
+		return false
+	end
+	if (def.damage_per_second or 0) > 0 then return false end
+	return core.get_item_group(node.name, "fire") == 0
+		and core.get_item_group(node.name, "cactus") == 0
+		and core.get_item_group(node.name, "dangerous") == 0
+end
+
+local FISH_OFFSET_LABELS = {"+x", "-x", "+z", "-z"}
+-- navigation.lua's raised_ok checks the anchor's own height first, then one
+-- above it: a natural shore commonly meets the water at the water's own
+-- height (its walkable ground, and the stand on it, is the block above).
+local FISH_HEIGHTS = {{dy = 0, label = "water-level"}, {dy = 1, label = "+1"}}
+
+local function describe_fish_height(anchor, offset, dy)
+	local candidate = {x = anchor.x + offset[1], y = anchor.y + dy, z = anchor.z + offset[2]}
+	local above = {x = candidate.x, y = candidate.y + 1, z = candidate.z}
+	local reasons = {}
+	if not fish_is_open(candidate) then
+		table.insert(reasons, "not open (" .. node_name(candidate) .. ")")
+	end
+	if not fish_is_open(above) then
+		table.insert(reasons, "blocked above (" .. node_name(above) .. ")")
+	end
+	if not fish_is_supported(candidate) then
+		local support = {x = candidate.x, y = candidate.y - 1, z = candidate.z}
+		table.insert(reasons, "not supported (" .. node_name(support) .. ")")
+	end
+	if #reasons == 0 then return true, "open approach" end
+	return false, table.concat(reasons, "; ")
+end
+
+local function describe_fish_offset(anchor, offset, label)
+	local parts = {}
+	for _, height in ipairs(FISH_HEIGHTS) do
+		local ok, detail = describe_fish_height(anchor, offset, height.dy)
+		table.insert(parts, height.label .. ": " .. detail)
+		if ok then break end
+	end
+	return label .. " (" .. table.concat(parts, "; ") .. ")"
+end
+
+-- The nearest surface-water tile to pos within fisherman.lua's own search
+-- box, broken down candidate by candidate, so a persistent "no reachable
+-- water found nearby" can be diagnosed instead of guessed at.
+local function nearest_fish_candidate(pos)
+	if not pos or not core.find_nodes_in_area then return "unavailable" end
+	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - FISH_BELOW_BAND, z = pos.z - FISH_SEARCH_RADIUS}
+	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
+	local best, best_distance, total = nil, nil, 0
+	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
+		if common.is_surface_water(site) then
+			total = total + 1
+			local d = distance(pos, site)
+			if not best_distance or d < best_distance then best, best_distance = site, d end
+		end
+	end
+	if not best then return "no surface water found in range (0 candidates)" end
+	local lines = {}
+	for i, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
+		table.insert(lines, describe_fish_offset(best, offset, FISH_OFFSET_LABELS[i]))
+	end
+	return string.format("%s [%d surface-water tile%s in range] %s",
+		pos_string(best), total, total == 1 and "" or "s", table.concat(lines, " | "))
+end
+
 local function inspectable_node(pos)
 	local node = core.get_node_or_nil(pos)
 	if not node then return nil end
@@ -423,6 +534,8 @@ local function show(player, villager)
 		"Fishing session: " .. fish_session_status(villager),
 		"Water near bed: " .. water_status(villager._bed, "bed"),
 		"Water at fish target: " .. water_status(villager._villages_fish_target, "fish target"),
+		"Nearest fish candidate: "
+			.. (villager._villages_fisherman and nearest_fish_candidate(pos) or "n/a (not a fisherman)"),
 		"Barrel claim (hidden from vanilla by the profession guard): " .. barrel_status(villager),
 		"",
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,

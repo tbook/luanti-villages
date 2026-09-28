@@ -277,6 +277,27 @@ lookup("stack", player, {type = "object", ref = channel_fisherman})
 assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span (qualifies for promotion)", 1, true),
 	shown.form)
 
+-- "Nearest fish candidate" breaks a persistent "no reachable water found
+-- nearby" down candidate by candidate, since none of the other lines say
+-- *why* every candidate near a fisherman was rejected.
+local isolated_water = {x = 60, y = 0, z = 0}
+place_pond(60, 60, 0, 0, 0)
+local unsupported_fisherman = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-11", _profession = "fisherman",
+			_villages_fisherman = true,
+			object = {
+				get_pos = function() return {x = 60, y = 0, z = 0} end,
+				get_properties = function() return nil end,
+			},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = unsupported_fisherman})
+assert(shown.form:find("Nearest fish candidate: (60.0, 0.0, 0.0) [", 1, true), shown.form)
+assert(shown.form:find("not supported (air)", 1, true), shown.form)
+
 local visitor = {
 	is_player = function() return true end,
 	get_player_name = function() return "visitor" end,
