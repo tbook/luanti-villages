@@ -2,6 +2,13 @@
 -- mapping, so this fakes a minimal claimable-node "world" alongside the
 -- villager-field fakes tests/farmer.lua already uses.
 local nodes, meta_store = {}, {}
+-- Outside every is_work_time() window by default, so the shoreline-trip
+-- trigger stays inert for the profession-guard tests above, which do not set
+-- it themselves.
+local timeofday = 0
+local now = 0
+local water_sites = {}
+local water_scans = 0
 
 local function pos_key(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end
 
@@ -12,9 +19,19 @@ end
 
 minetest = {
 	get_modpath = function() return "." end,
+	get_timeofday = function() return timeofday end,
+	get_gametime = function() return now end,
+	registered_nodes = {
+		["mcl_core:water_source"] = {liquidtype = "source"},
+		["air"] = {liquidtype = "none"},
+	},
 	get_node_or_nil = function(pos)
 		local name = nodes[pos_key(pos)]
-		return name and {name = name} or nil
+		return {name = name or "air"}
+	end,
+	find_nodes_in_area = function()
+		water_scans = water_scans + 1
+		return water_sites
 	end,
 	get_meta = function(pos)
 		local k = pos_key(pos)
@@ -166,6 +183,149 @@ do
 	local nitwit = {_profession = "nitwit"}
 	def.on_activate(nitwit, "", 0.1)
 	assert(not nitwit._villages_fisherman)
+end
+
+-- 8. #72: a working fisherman with no route in progress and qualifying water
+-- nearby is sent toward the nearest surface-water tile; navigation.lua turns
+-- that anchor into an actual shoreline stand.
+do
+	local gopath_target
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	water_sites = {{x = 12, y = 0, z = 0}, {x = 3, y = 0, z = 0}}
+	place({x = 12, y = 0, z = 0}, "mcl_core:water_source")
+	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f8", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function(self, target)
+			gopath_target = target
+			self.state = "gowp"
+			return true
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 3,
+		"the nearest qualifying water tile must be chosen")
+	assert(gopath_target and gopath_target.x == 3)
+	timeofday, water_sites = 0, {}
+end
+
+-- 9. No qualifying water in range sets a retry cooldown instead of a target,
+-- and the cooldown suppresses an immediate rescan.
+do
+	local gopath_called = false
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 200
+	water_sites, water_scans = {}, 0
+	local fisherman = {
+		_id = "f9", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function() gopath_called = true; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_target)
+	assert(not gopath_called)
+	assert(water_scans == 1)
+	assert(fisherman._villages_fish_next and fisherman._villages_fish_next > now)
+	def.do_custom(fisherman, 0.1)
+	assert(water_scans == 1, "the retry cooldown must suppress an immediate rescan")
+	timeofday = 0
+end
+
+-- 10. An already-selected fish target is left alone while its route is
+-- still in progress.
+do
+	local gopath_called = false
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 300
+	local fisherman = {
+		_id = "f10", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = {x = 9, y = 0, z = 0},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function() gopath_called = true; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman._villages_fish_target.x == 9)
+	assert(not gopath_called)
+	timeofday = 0
+end
+
+-- 11. A fish route that failed and is past its retry time clears the stale
+-- target so a fresh stand can be chosen on a later tick.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 400
+	local fisherman = {
+		_id = "f11", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		_villages_fish_target = {x = 9, y = 0, z = 0},
+		_villages_fish_route = {status = "retry", retry_at = 300},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function(self) self.state = "gowp"; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_target)
+	assert(not fisherman._villages_fish_route)
+	timeofday = 0
+end
+
+-- 12. A villager already mid-route is not redirected to a fish target.
+do
+	local gopath_called = false
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 500
+	water_sites = {{x = 3, y = 0, z = 0}}
+	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f12", _villages_fisherman = true, _profession = "fisherman", state = "gowp",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function() gopath_called = true; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_target)
+	assert(not gopath_called)
+	timeofday, water_sites = 0, {}
+end
+
+-- 13. Review fix: a fish target must survive a failed gopath start so the
+-- route's own retry backoff throttles re-attempts, instead of rescanning and
+-- retrying every tick (a stand-occupied failure is common by design).
+do
+	local gopath_calls = 0
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 600
+	water_sites = {{x = 3, y = 0, z = 0}}
+	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f13", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		gopath = function(self)
+			gopath_calls = gopath_calls + 1
+			-- Mirrors navigation.lua's fail(): a rejected start always leaves a
+			-- retry route with its own backoff.
+			self._villages_fish_route = {status = "retry", retry_at = now + 30}
+			return false
+		end,
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(gopath_calls == 1)
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 3,
+		"a failed route must not drop its target immediately")
+
+	def.do_custom(fisherman, 0.1)
+	assert(gopath_calls == 1, "a pending retry must throttle re-attempts instead of firing every tick")
+
+	now = now + 31
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_target)
+	assert(not fisherman._villages_fish_route)
+	timeofday, water_sites = 0, {}
 end
 
 print("fisherman.lua: ok")

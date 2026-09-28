@@ -27,6 +27,10 @@ local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
 local FISHERMAN_PROMOTION_INTERVAL = 5
+-- Shoreline stand routing (#72): how close another villager must be to a
+-- candidate stand to count as already occupying it. Matches the bed
+-- occupancy radius in init.lua's occupied_by_other.
+local STAND_OCCUPANCY_RADIUS = 0.6
 
 local function same_pos(a, b)
 	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
@@ -148,6 +152,28 @@ local function approaches(node_pos, cardinal_only)
 	return result
 end
 
+-- Water cannot hold node meta reliably (#72), so stand spacing is checked
+-- live against other loaded villagers instead of through a claim registry.
+-- That makes stale claims impossible; the cost is that two fishermen can
+-- briefly race for the same stand.
+local function stand_occupied(self, pos)
+	for _, object in ipairs(core.get_objects_inside_radius(pos, STAND_OCCUPANCY_RADIUS)) do
+		if object ~= self.object then
+			local entity = object:get_luaentity()
+			if entity and entity.name == "mobs_mc:villager" then return true end
+		end
+	end
+	return false
+end
+
+local function unoccupied_candidates(self, candidates)
+	local result = {}
+	for _, candidate in ipairs(candidates) do
+		if not stand_occupied(self, candidate) then table.insert(result, candidate) end
+	end
+	return result
+end
+
 local function has_claimed_bed(self)
 	if not self._bed or not self._id then return false end
 	local node = core.get_node_or_nil(self._bed)
@@ -170,6 +196,10 @@ end
 local function has_farm_target(self)
 	local node = self._villages_farm_target and core.get_node_or_nil(self._villages_farm_target)
 	return node and common.farm_replant_node(node.name)
+end
+
+local function has_fish_target(self)
+	return self._villages_fish_target ~= nil and common.is_surface_water(self._villages_fish_target)
 end
 
 local function stop(self)
@@ -386,18 +416,7 @@ local function job_search_target(self)
 end
 
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
-
-local function is_water_source(pos)
-	local node = core.get_node_or_nil(pos)
-	local def = node and core.registered_nodes[node.name]
-	return def ~= nil and def.liquidtype == "source"
-end
-
-local function is_surface_water(pos)
-	if not is_water_source(pos) then return false end
-	local above = core.get_node_or_nil({x = pos.x, y = pos.y + 1, z = pos.z})
-	return above ~= nil and above.name == "air"
-end
+local is_surface_water = common.is_surface_water
 
 -- Flood fill outward over contiguous surface water at a single water level,
 -- capped so one villager's promotion check cannot be made arbitrarily
@@ -542,7 +561,9 @@ local function recover_route(self, destination)
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
 		local target, path
-		target, path, planner_failure, _, planner_report = plan_stair_route(self, approaches(destination.pos, destination.cardinal_only))
+		local candidates = approaches(destination.pos, destination.cardinal_only)
+		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
+		target, path, planner_failure, _, planner_report = plan_stair_route(self, candidates)
 		if target and path then
 			local recovered = set_route(self, destination.route_field, {
 				status = "travelling", mode = "planner", target = vector.new(target),
@@ -601,11 +622,14 @@ local function install(def)
 		local had_managed_route = (self._villages_bed_route and self._villages_bed_route.status == "travelling")
 			or (self._villages_job_route and self._villages_job_route.status == "travelling")
 			or (self._villages_farm_route and self._villages_farm_route.status == "travelling")
+			or (self._villages_fish_route and self._villages_fish_route.status == "travelling")
 			or (self._villages_job_search_route and self._villages_job_search_route.status == "travelling")
 		self._villages_bed_route = nil
 		self._villages_job_route = nil
 		self._villages_farm_route = nil
 		self._villages_farm_target = nil
+		self._villages_fish_route = nil
+		self._villages_fish_target = nil
 		self._villages_job_search_route = nil
 		if had_managed_route then stop(self) end
 		return result
@@ -652,6 +676,12 @@ local function install(def)
 			and is_work_time() and has_farm_target(self) then
 			destination = {
 				pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
+			}
+		elseif self._villages_fish_target and same_pos(target, self._villages_fish_target)
+			and is_work_time() and has_fish_target(self) then
+			destination = {
+				pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
+				cardinal_only = true, candidate_filter = unoccupied_candidates,
 			}
 		elseif not self._jobsite and not is_sleep_time() then
 			local node = core.get_node_or_nil(target)
@@ -700,6 +730,7 @@ local function install(def)
 		end
 
 		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only)
+		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
 		local candidate, engine_path = destination.target, destination.engine_path
 		if not candidate then candidate, engine_path = choose_approach(self, candidates) end
 		if not candidate then
@@ -748,8 +779,10 @@ local function install(def)
 			cancel_route(self, "_villages_bed_route")
 			cancel_route(self, "_villages_job_route")
 			cancel_route(self, "_villages_farm_route")
+			cancel_route(self, "_villages_fish_route")
 			cancel_route(self, "_villages_job_search_route")
 			self._villages_farm_target = nil
+			self._villages_fish_target = nil
 			return result
 		end
 		if not is_sleep_time() then
@@ -780,7 +813,9 @@ local function install(def)
 		if not working then
 			cancel_route(self, "_villages_job_route")
 			cancel_route(self, "_villages_farm_route")
+			cancel_route(self, "_villages_fish_route")
 			self._villages_farm_target = nil
+			self._villages_fish_target = nil
 		else
 			evaluate_fisherman_promotion(self)
 			local job_destination = {
@@ -794,6 +829,12 @@ local function install(def)
 			claimed = has_farm_target,
 		}
 		if working and (recover_stalled_route(self, farm_destination) or recover_route(self, farm_destination)) then return result end
+		local fish_destination = {
+			pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
+			cardinal_only = true, candidate_filter = unoccupied_candidates,
+			claimed = has_fish_target,
+		}
+		if working and (recover_stalled_route(self, fish_destination) or recover_route(self, fish_destination)) then return result end
 		if self._jobsite or is_sleep_time() then
 			cancel_route(self, "_villages_job_search_route")
 		else
