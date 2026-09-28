@@ -112,6 +112,44 @@ Expected result: the villager opens the door, walks in, and reaches the bed.
 The door closes behind it instead of being left standing open, even though
 the bed is the very next node after the doorway.
 
+## 11. Lakeside village with no workstations
+
+Build a small village of bedded, unemployed villagers next to a lake at
+least 3x3 in open span, with no workstation anywhere reachable. Wait through
+a full day/night cycle.
+
+Expected result: each unemployed, bedded villager promotes to fisherman
+(the Lookup Tool's `Fisherman flag` turns `yes`) once its own promotion
+check runs, and during the next work period each walks to its own stand at
+the water's edge and starts a fishing session. Promotion is for life: the
+`Fisherman flag` and profession must stay set even after the lake is later
+drained or built over.
+
+## 12. A lake filled in or frozen while a fisherman is using it
+
+Send a fisherman to its stand and let it start a session (`Fishing session`
+shows a phase other than `none`). While it is fishing, replace the water it
+anchored on with a solid block, or otherwise make it stop reporting as
+surface water (for example `mcl_weather`'s freeze, if installed).
+
+Expected result: the session ends on the next tick (`Fishing session: none`,
+`Fish target: none`), any bobber is removed, and the villager keeps its
+fisherman profession. Once work time allows it again, the villager searches
+for a new qualifying spot rather than retrying the invalidated one.
+
+## 13. Two fishermen on one shoreline
+
+Place two fishermen with beds close enough that their nearest qualifying
+water is the same lake, close enough that they are likely to select
+adjacent stands. Trigger a work period for both at once.
+
+Expected result: each fisherman gets its own stand; a stand already occupied
+by a loaded villager is skipped for another one rather than both villagers
+converging on the same node. Two fishermen briefly milling about near the
+shore while their stands settle is expected, not a bug. Neither should ever
+report a route failure that names the other fisherman as an obstruction it
+cannot route around.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.

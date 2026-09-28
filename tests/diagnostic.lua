@@ -1,8 +1,24 @@
 local shown, original_uses = nil, 0
 local metadata = {}
+-- Populated by place_pond() below, far enough apart (see comment there) that
+-- their 16-node search radii never see each other.
+local water_nodes = {}
+local water_sites = {}
 
 local function key(pos)
 	return string.format("%d,%d,%d", pos.x, pos.y, pos.z)
+end
+
+local function pos_key3(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end
+
+local function place_pond(min_x, max_x, min_z, max_z, y)
+	for x = min_x, max_x do
+		for z = min_z, max_z do
+			local pos = {x = x, y = y, z = z}
+			water_nodes[pos_key3(pos)] = true
+			table.insert(water_sites, pos)
+		end
+	end
 end
 
 minetest = {
@@ -20,12 +36,18 @@ minetest = {
 	check_player_privs = function(name, wanted)
 		return name == "admin" and (wanted.server or wanted.debug)
 	end,
+	registered_nodes = {
+		["mcl_core:water_source"] = {liquidtype = "source"},
+		["air"] = {liquidtype = "none"},
+	},
 	get_node_or_nil = function(pos)
-		if pos.x == 1 then return {name = "mcl_beds:bed_red_bottom"} end
-		if pos.x == 2 then return {name = "mcl_beds:bed_red_top"} end
-		if pos.x == 4 then return {name = "mcl_composters:composter"} end
-		if pos.x == 5 then return {name = "mcl_beds:bed_red_bottom"} end
-		return {name = "mcl_core:stone"}
+		if pos.x == 1 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
+		if pos.x == 2 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_top"} end
+		if pos.x == 4 and pos.y == 0 and pos.z == 0 then return {name = "mcl_composters:composter"} end
+		if pos.x == 5 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
+		if pos.x == 6 and pos.y == 0 and pos.z == 0 then return {name = "mcl_barrels:barrel_closed"} end
+		if water_nodes[pos_key3(pos)] then return {name = "mcl_core:water_source"} end
+		return {name = "air"}
 	end,
 	get_item_group = function(name, group)
 		if group == "bed" and name:find("bed", 1, true) then
@@ -57,7 +79,10 @@ minetest = {
 	get_gametime = function() return 100 end,
 	get_modpath = function() return "." end,
 	get_day_count = function() return 3 end,
-	find_nodes_in_area = function() return {{x = 1, y = 0, z = 0}} end,
+	find_nodes_in_area = function(minp, maxp, nodenames)
+		if nodenames[1] == "group:water" then return water_sites end
+		return {{x = 1, y = 0, z = 0}}
+	end,
 	formspec_escape = function(value) return value end,
 	show_formspec = function(name, formname, form)
 		shown = {name = name, formname = formname, form = form}
@@ -68,6 +93,12 @@ mcl_beds = {get_bed_top = function() return {x = 2, y = 0, z = 0} end}
 metadata["1,0,0"] = {villager = "villager-1", villages_last_birth = "2"}
 metadata["2,0,0"] = {}
 metadata["4,0,0"] = {villager = "villager-2"}
+
+-- A qualifying 3x3 pond well within the bed's 16-node search radius, and a
+-- too-small 2-tile pond well within the fish target's -- but each outside
+-- the other's radius, so neither call sees the other's pond.
+place_pond(13, 15, -1, 1, 0)
+place_pond(40, 41, 0, 0, 0)
 
 dofile("diagnostic.lua")({})
 local lookup = minetest.registered_items["doc_identifier:identifier_solid"].on_use
@@ -94,6 +125,10 @@ local object = {
 					trail = {{x = 10, y = 0, z = 0}, {x = 4, y = 0, z = 0}}}},
 			_villages_job_search_route = {status = "retry", target = {x = 4, y = 0, z = 0}, retry_at = 120, reason = "no route",
 				planner = {start = {x = 10, y = 0, z = 0}, candidates = {}, status = "unreachable", searched = 0, trail = {}}},
+			_villages_fisherman = true,
+			_villages_fish_target = {x = 40, y = 0, z = 0},
+			_villages_fish_route = {status = "arrived", target = {x = 39, y = 0, z = 0}},
+			_villages_fish_session = {phase = "wait", phase_ends_at = 110},
 			object = {
 				get_pos = function() return {x = 10, y = 0, z = 0} end,
 				get_properties = function()
@@ -126,6 +161,16 @@ assert(shown.form:find("Jobsite planner trail: (10.0, 0.0, 0.0) -> (4.0, 0.0, 0.
 assert(shown.form:find("Job search route: retry in 20s to (4.0, 0.0, 0.0): no route", 1, true))
 assert(shown.form:find("Job-search planner: start (10.0, 0.0, 0.0); approaches none; unreachable after 0 nodes", 1, true))
 assert(shown.form:find("Job-search planner trail: none", 1, true))
+assert(shown.form:find("Fisherman flag: yes", 1, true))
+assert(shown.form:find("Fish target: (40.0, 0.0, 0.0)", 1, true))
+assert(shown.form:find("Fish route: arrived", 1, true))
+assert(shown.form:find("Fishing session: wait (next phase in 10s)", 1, true))
+assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span (qualifies for promotion)", 1, true))
+assert(shown.form:find(
+	"Water at fish target: largest pond near fish target: 2 tiles, 2x1 span (too small to qualify)", 1, true))
+assert(shown.form:find(
+	"Barrel claim (hidden from vanilla by the profession guard): assigned node is not a barrel (mcl_composters:composter)",
+	1, true))
 assert(shown.form:find("Births: checked today; local cooldown until day 4", 1, true))
 assert(original_uses == 0)
 
@@ -166,6 +211,33 @@ local far_worker = {
 }
 lookup("stack", player, {type = "object", ref = far_worker})
 assert(shown.form:find("Work status: travelling to jobsite (6.0 nodes away)", 1, true), shown.form)
+assert(shown.form:find("Fisherman flag: no", 1, true))
+assert(shown.form:find("Fish target: none", 1, true))
+assert(shown.form:find("Fishing session: none", 1, true))
+assert(shown.form:find("Water near bed: no bed", 1, true))
+assert(shown.form:find("Water at fish target: no fish target", 1, true))
+assert(shown.form:find("Barrel claim (hidden from vanilla by the profession guard): n/a (not a fisherman)", 1, true))
+
+-- A barrel-employed fisherman's claim is reported directly, since the
+-- profession guard (#70) hides an invalid one from vanilla's own checks.
+metadata["6,0,0"] = {villager = "villager-9"}
+local barrel_fisherman = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-9", _profession = "fisherman",
+			_villages_fisherman = true, _jobsite = {x = 6, y = 0, z = 0},
+			order = "work", state = "stand",
+			object = {
+				get_pos = function() return {x = 10, y = 0, z = 0} end,
+				get_properties = function()
+					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+				end,
+			},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = barrel_fisherman})
+assert(shown.form:find("Barrel claim (hidden from vanilla by the profession guard): valid claim", 1, true), shown.form)
 
 local visitor = {
 	is_player = function() return true end,
