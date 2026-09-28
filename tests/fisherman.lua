@@ -84,6 +84,7 @@ minetest = {
 }
 vector = {
 	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
+	zero = function() return {x = 0, y = 0, z = 0} end,
 	equals = function(a, b) return a and b and a.x == b.x and a.y == b.y and a.z == b.z end,
 	distance = function(a, b)
 		local x, y, z = a.x - b.x, a.y - b.y, a.z - b.z
@@ -235,7 +236,7 @@ do
 	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f8", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self, target)
 			gopath_target = target
 			self.state = "gowp"
@@ -259,7 +260,7 @@ do
 	water_sites, water_scans = {}, 0
 	local fisherman = {
 		_id = "f9", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function() gopath_called = true; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -282,7 +283,7 @@ do
 	local fisherman = {
 		_id = "f10", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		_villages_fish_target = {x = 9, y = 0, z = 0},
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function() gopath_called = true; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -301,7 +302,7 @@ do
 		_id = "f11", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		_villages_fish_target = {x = 9, y = 0, z = 0},
 		_villages_fish_route = {status = "retry", retry_at = 300},
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self) self.state = "gowp"; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -320,7 +321,7 @@ do
 	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f12", _villages_fisherman = true, _profession = "fisherman", state = "gowp",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function() gopath_called = true; return true end,
 	}
 	def.do_custom(fisherman, 0.1)
@@ -341,7 +342,7 @@ do
 	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
 	local fisherman = {
 		_id = "f13", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self)
 			gopath_calls = gopath_calls + 1
 			-- Mirrors navigation.lua's fail(): a rejected start always leaves a
@@ -374,7 +375,7 @@ do
 	local water = {x = 5, y = 0, z = 0}
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self, target, callback) return callback(self, {x = 4, y = 0, z = 0}) end,
 	}
 	-- Go through the travel-trigger branch itself, so the target comes from
@@ -406,7 +407,7 @@ do
 		_villages_fish_target = water, _max_trade_tier = 1,
 		_trades = minetest.serialize(trades),
 		_villages_fish_session = {phase = "cast", phase_ends_at = now + 2},
-		object = {get_pos = function() return {x = 4, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
 	}
 	spawned_bobbers = {}
 
@@ -434,6 +435,51 @@ do
 	timeofday = 0
 end
 
+-- #73 review: nothing but the session re-pinning state each tick stood
+-- between a fisherman and vanilla's do_states_stand, which switches a
+-- standing villager to "walk" once a second unless self.order is "stand",
+-- "sleep", or "work" (movement.lua:685) -- so the villager could wander off
+-- mid-session while the bobber stayed behind at the water.
+do
+	local def = new_def(function(self)
+		-- Mirrors do_states_stand's own order check: only those three orders
+		-- keep a standing villager from being sent walking. This runs before
+		-- this file's own fishing code gets a say, exactly like vanilla's.
+		if self.order ~= "stand" and self.order ~= "sleep" and self.order ~= "work" then
+			self.state = "walk"
+			self.object:set_velocity({x = 1, y = 0, z = 0})
+		end
+	end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1200
+	local water = {x = 5, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local velocity_calls = {}
+	local fisherman = {
+		_id = "f21", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		order = "wander", -- some pre-existing order, to also check it is restored on exit
+		_villages_fish_target = water,
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8, previous_order = "wander"},
+		object = {
+			get_pos = function() return {x = 4, y = 0, z = 0} end,
+			set_velocity = function(_, v) table.insert(velocity_calls, v) end,
+		},
+	}
+	def.do_custom(fisherman, 0.1)
+	assert(fisherman.state == "stand", "the session must undo vanilla's own walk switch every tick")
+	assert(fisherman.order == "stand")
+	assert(#velocity_calls >= 1 and velocity_calls[#velocity_calls].x == 0,
+		"a walk started this same tick must be zeroed back out")
+
+	-- Ending the session must restore whatever order the villager held
+	-- before the session pinned it, not leave it stuck on "stand".
+	fisherman.following = true
+	def.do_custom(fisherman, 0.1)
+	assert(not fisherman._villages_fish_session)
+	assert(fisherman.order == "wander", "ending a session must restore the villager's prior order")
+	timeofday = 0
+end
+
 -- #73: following ends the session, removes the bobber, and drops the target
 -- and route so a fresh spot is chosen once fishing resumes.
 do
@@ -449,7 +495,7 @@ do
 		_villages_fish_target = water, _villages_fish_route = {status = "arrived"},
 		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
 		_villages_fish_bobber = bobber,
-		object = {get_pos = function() return {x = 4, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
 	}
 	def.do_custom(fisherman, 0.1)
 	assert(not fisherman._villages_fish_session)
@@ -474,7 +520,7 @@ do
 		_villages_fish_target = water,
 		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
 		_villages_fish_bobber = bobber,
-		object = {get_pos = function() return {x = 4, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
 	}
 	def.do_custom(fisherman, 0.1)
 	assert(not fisherman._villages_fish_session)
@@ -496,7 +542,7 @@ do
 		_villages_fish_target = water,
 		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8},
 		_villages_fish_bobber = bobber,
-		object = {get_pos = function() return {x = 4, y = 0, z = 0} end},
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
 	}
 	def.do_custom(fisherman, 0.1)
 	assert(not fisherman._villages_fish_session)

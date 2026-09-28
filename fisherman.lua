@@ -123,18 +123,42 @@ local function face_water(self, mob_set_yaw, stand_pos)
 	mob_set_yaw(self, atan2(dz, dx) + math.pi / 2)
 end
 
+-- mobs_mc/villager.lua's do_states_stand (run from inside vanilla's own
+-- do_custom, called as original_custom before this file's own code) rolls a
+-- chance to switch a standing villager to "walk" every second, and only
+-- skips that roll while self.order is "stand", "sleep", or "work" --
+-- otherwise a periodic player scan there can even reset walk_chance back up
+-- from under a session that never touched it. Nothing else here held the
+-- villager in place, so the fisherman could wander off mid-session while the
+-- bobber stayed behind at the water. Re-pin every tick a session is active,
+-- the same way init.lua's sleep pose re-pins position/velocity/yaw each
+-- tick against that file's own periodic overrides.
+local function hold_still(self)
+	self.state = "stand"
+	self.order = "stand"
+	self.object:set_velocity(vector.zero())
+end
+
 local function start_fishing_session(self, mob_set_yaw, stand_pos)
 	face_water(self, mob_set_yaw, stand_pos)
-	self._villages_fish_session = {phase = "cast", phase_ends_at = core.get_gametime() + CAST_SECONDS}
+	self._villages_fish_session = {
+		phase = "cast", phase_ends_at = core.get_gametime() + CAST_SECONDS,
+		previous_order = self.order,
+	}
+	hold_still(self)
 end
 
 -- Drop the target and its (by now "arrived", never "travelling" again)
 -- route along with the session. Otherwise the fisherman would be stuck once
 -- work resumes: the travel trigger below only calls gopath again when the
 -- target is nil, and an "arrived" route never satisfies the retry check that
--- clears an existing one.
+-- clears an existing one. Restore whatever order the villager held before
+-- the session pinned it to "stand", so ending a session does not strand a
+-- villager that, say, arrived here mid work-order.
 local function end_fishing_session(self)
+	local session = self._villages_fish_session
 	remove_bobber(self)
+	if session then self.order = session.previous_order end
 	self._villages_fish_session = nil
 	self._villages_fish_target = nil
 	self._villages_fish_route = nil
@@ -252,6 +276,11 @@ return function(def)
 		-- grants the profession, not an exemption from fishing at the shore.
 		if not self.child and self._id then
 			if self._villages_fish_session then
+				-- Re-pin every tick, even one about to end the session below:
+				-- vanilla's own do_custom (already run this tick, above) may
+				-- have nudged the villager toward walking before this code
+				-- gets a say.
+				hold_still(self)
 				-- A session ends the moment any of its three conditions stops
 				-- holding (following, work time, or the water it anchored on).
 				-- Work time already covers both nightfall and thunder, since
