@@ -189,10 +189,10 @@ local function restock_trades(self)
 	if unlocked then self._trades = core.serialize(trades) end
 end
 
--- Face the water once, on arrival, the same way init.lua's sleep_position
--- turns a facedir into a yaw: atan2 the direction, then rotate a quarter turn
--- since the model's forward axis is offset from the raw direction vector.
--- Routed through the mob's own set_yaw (init.lua:196's note) rather than
+-- Face the water, the same way init.lua's sleep_position turns a facedir
+-- into a yaw: atan2 the direction, then rotate a quarter turn since the
+-- model's forward axis is offset from the raw direction vector. Routed
+-- through the mob's own set_yaw (init.lua:196's note) rather than
 -- object:set_yaw, so it does not fight check_smooth_rotation every tick.
 local function face_water(self, mob_set_yaw, stand_pos)
 	local water = self._villages_fish_target
@@ -212,19 +212,26 @@ end
 -- bobber stayed behind at the water. Re-pin every tick a session is active,
 -- the same way init.lua's sleep pose re-pins position/velocity/yaw each
 -- tick against that file's own periodic overrides.
-local function hold_still(self)
+--
+-- do_states_stand's "look at a nearby player, or turn randomly" behavior is
+-- not gated by order at all (only the walk roll is), so it can turn the
+-- villager away from the water on any tick even though the walk fix above
+-- already holds it in place; re-derive facing from the route's own
+-- recorded stand every tick too, not just once on arrival.
+local function hold_still(self, mob_set_yaw)
 	self.state = "stand"
 	self.order = "stand"
 	self.object:set_velocity(vector.zero())
+	local route = self._villages_fish_route
+	face_water(self, mob_set_yaw, route and route.target)
 end
 
-local function start_fishing_session(self, mob_set_yaw, stand_pos)
-	face_water(self, mob_set_yaw, stand_pos)
+local function start_fishing_session(self, mob_set_yaw)
 	self._villages_fish_session = {
 		phase = "cast", phase_ends_at = core.get_gametime() + CAST_SECONDS,
 		previous_order = self.order,
 	}
-	hold_still(self)
+	hold_still(self, mob_set_yaw)
 end
 
 -- Drop the target and its (by now "arrived", never "travelling" again)
@@ -359,7 +366,7 @@ return function(def)
 				-- vanilla's own do_custom (already run this tick, above) may
 				-- have nudged the villager toward walking before this code
 				-- gets a say.
-				hold_still(self)
+				hold_still(self, mob_set_yaw)
 				-- A session ends the moment any of its three conditions stops
 				-- holding (following, work time, or the water it anchored on).
 				-- Work time already covers both nightfall and thunder, since
@@ -386,8 +393,8 @@ return function(def)
 						-- target here instead would rescan and retry every tick for the
 						-- whole cooldown (a stand-occupied failure is common by design).
 						self._villages_fish_target = vector.new(water)
-						self:gopath(water, function(entity, stand_pos)
-							start_fishing_session(entity, mob_set_yaw, stand_pos)
+						self:gopath(water, function(entity)
+							start_fishing_session(entity, mob_set_yaw)
 						end, true)
 					else
 						self._villages_fish_next = core.get_gametime() + FISH_RETRY_INTERVAL

@@ -581,7 +581,12 @@ do
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
-		gopath = function(self, target, callback) return callback(self, {x = 4, y = 0, z = 0}) end,
+		gopath = function(self, target, callback)
+			-- Mirrors navigation.lua's arrival_callback: the route's target
+			-- (the stand) is recorded before the callback runs.
+			self._villages_fish_route = {status = "arrived", target = {x = 4, y = 0, z = 0}}
+			return callback(self)
+		end,
 	}
 	-- Go through the travel-trigger branch itself, so the target comes from
 	-- nearest_water() just as it would on a real trip.
@@ -682,6 +687,36 @@ do
 	def.do_custom(fisherman, 0.1)
 	assert(not fisherman._villages_fish_session)
 	assert(fisherman.order == "wander", "ending a session must restore the villager's prior order")
+	timeofday = 0
+end
+
+-- Review fix: do_states_stand's "look at a nearby player, or turn randomly"
+-- is not gated by order at all (only the walk roll is), so a fisherman
+-- could be turned away from the water on any tick even with the walk fix
+-- above in place. Facing must be re-derived from the route's own recorded
+-- stand every tick, not just once on arrival.
+do
+	local def = new_def(function(self)
+		-- Mirrors do_states_stand's unconditional turn: it runs regardless
+		-- of self.order, unlike the walk roll.
+		self._yaw = -1
+	end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 1300
+	local water = {x = 5, y = 0, z = 0}
+	local stand = {x = 4, y = 0, z = 0}
+	place(water, "mcl_core:water_source")
+	local fisherman = {
+		_id = "f22", _villages_fisherman = true, _profession = "fisherman", state = "stand", order = "stand",
+		_villages_fish_target = water,
+		_villages_fish_route = {status = "arrived", target = stand},
+		_villages_fish_session = {phase = "wait", phase_ends_at = now + 8, previous_order = nil},
+		object = {get_pos = function() return stand end, set_velocity = function() end},
+	}
+	def.do_custom(fisherman, 0.1)
+	local expected_yaw = math.atan(0, 1) + math.pi / 2 -- water is due +x of the stand
+	assert(math.abs(fisherman._yaw - expected_yaw) < 1e-9,
+		"a turn started this same tick must be corrected back to face the water")
 	timeofday = 0
 end
 
