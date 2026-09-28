@@ -13,7 +13,6 @@
 -- to distinguish a barrel fisherman from a fallback one.
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
-local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local FISH_SEARCH_RADIUS = 32
 -- Asymmetric vertically, matching navigation.lua's promotion search: a lake
 -- below the villager's own standing height is common, water above is rare.
@@ -189,17 +188,21 @@ local function restock_trades(self)
 	if unlocked then self._trades = core.serialize(trades) end
 end
 
--- Face the water, the same way init.lua's sleep_position turns a facedir
--- into a yaw: atan2 the direction, then rotate a quarter turn since the
--- model's forward axis is offset from the raw direction vector. Routed
--- through the mob's own set_yaw (init.lua:196's note) rather than
--- object:set_yaw, so it does not fight check_smooth_rotation every tick.
-local function face_water(self, mob_set_yaw, stand_pos)
+-- Face the water using mob_class:turn_in_direction (mcl_mobs/movement.lua),
+-- the same method do_states_stand itself uses to turn a standing villager
+-- toward a nearby player -- already the proven-correct yaw convention for
+-- this model in its standing pose, rather than the quarter-turn correction
+-- init.lua's sleep_position needs for the (different) sleeping pose, which
+-- an earlier version of this function wrongly copied and got backwards for
+-- some directions (facing away, or sideways, depending on which way the
+-- water actually was). turn_in_direction itself routes through set_yaw, so
+-- it does not fight check_smooth_rotation every tick either.
+local function face_water(self, turn_in_direction, stand_pos)
 	local water = self._villages_fish_target
 	if not water or not stand_pos then return end
 	local dx, dz = water.x - stand_pos.x, water.z - stand_pos.z
 	if dx == 0 and dz == 0 then return end
-	mob_set_yaw(self, atan2(dz, dx) + math.pi / 2)
+	turn_in_direction(self, dx, dz)
 end
 
 -- mobs_mc/villager.lua's do_states_stand (run from inside vanilla's own
@@ -218,20 +221,20 @@ end
 -- villager away from the water on any tick even though the walk fix above
 -- already holds it in place; re-derive facing from the route's own
 -- recorded stand every tick too, not just once on arrival.
-local function hold_still(self, mob_set_yaw)
+local function hold_still(self, turn_in_direction)
 	self.state = "stand"
 	self.order = "stand"
 	self.object:set_velocity(vector.zero())
 	local route = self._villages_fish_route
-	face_water(self, mob_set_yaw, route and route.target)
+	face_water(self, turn_in_direction, route and route.target)
 end
 
-local function start_fishing_session(self, mob_set_yaw)
+local function start_fishing_session(self, turn_in_direction)
 	self._villages_fish_session = {
 		phase = "cast", phase_ends_at = core.get_gametime() + CAST_SECONDS,
 		previous_order = self.order,
 	}
-	hold_still(self, mob_set_yaw)
+	hold_still(self, turn_in_direction)
 end
 
 -- Drop the target and its (by now "arrived", never "travelling" again)
@@ -280,7 +283,7 @@ return function(def)
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
 	local original_deactivate = def.on_deactivate
-	local mob_set_yaw = def.set_yaw or mcl_mobs.mob_class.set_yaw
+	local turn_in_direction = def.turn_in_direction or mcl_mobs.mob_class.turn_in_direction
 
 	-- A villager already employed as a fisherman when its mapblock loads
 	-- (existing barrel fishermen, or one #71 promoted before a save) needs
@@ -366,7 +369,7 @@ return function(def)
 				-- vanilla's own do_custom (already run this tick, above) may
 				-- have nudged the villager toward walking before this code
 				-- gets a say.
-				hold_still(self, mob_set_yaw)
+				hold_still(self, turn_in_direction)
 				-- A session ends the moment any of its three conditions stops
 				-- holding (following, work time, or the water it anchored on).
 				-- Work time already covers both nightfall and thunder, since
@@ -394,7 +397,7 @@ return function(def)
 						-- whole cooldown (a stand-occupied failure is common by design).
 						self._villages_fish_target = vector.new(water)
 						self:gopath(water, function(entity)
-							start_fishing_session(entity, mob_set_yaw)
+							start_fishing_session(entity, turn_in_direction)
 						end, true)
 					else
 						self._villages_fish_next = core.get_gametime() + FISH_RETRY_INTERVAL

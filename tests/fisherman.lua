@@ -114,7 +114,15 @@ vector = {
 		return math.sqrt(x * x + y * y + z * z)
 	end,
 }
-mcl_mobs = {mob_class = {set_yaw = function(self, yaw) self._yaw = yaw end}}
+mcl_mobs = {mob_class = {
+	set_yaw = function(self, yaw) self._yaw = yaw end,
+	-- Mirrors mcl_mobs/movement.lua's real turn_in_direction (self.rotate is
+	-- unset for villagers, so it is 0 here too).
+	turn_in_direction = function(self, dx, dz)
+		local atan2 = math.atan2 or math.atan
+		self._yaw = -atan2(dx, dz)
+	end,
+}}
 
 local function new_def(custom, activate)
 	return {
@@ -714,7 +722,7 @@ do
 		object = {get_pos = function() return stand end, set_velocity = function() end},
 	}
 	def.do_custom(fisherman, 0.1)
-	local expected_yaw = math.atan(0, 1) + math.pi / 2 -- water is due +x of the stand
+	local expected_yaw = -math.atan(1, 0) -- water is due +x of the stand (dx = 1, dz = 0)
 	assert(math.abs(fisherman._yaw - expected_yaw) < 1e-9,
 		"a turn started this same tick must be corrected back to face the water")
 	timeofday = 0
