@@ -223,7 +223,17 @@ local function spawn_fishing_rod(self)
 	local pos = self.object:get_pos()
 	if not pos then return nil end
 	local rod = core.add_entity(pos, FISHING_ROD_ENTITY)
-	if rod then rod:set_attach(self.object, ROD_BONE, ROD_POSITION, ROD_ROTATION) end
+	if rod then
+		rod:set_attach(self.object, ROD_BONE, ROD_POSITION, ROD_ROTATION)
+		-- TEMPORARY (#87 PR review): get_bone_position gives the bone's actual
+		-- transform directly, instead of guessing an offset from screenshots.
+		-- Remove this block once ROD_POSITION/ROD_ROTATION are confirmed good.
+		local bone_pos, bone_rot = self.object:get_bone_position(ROD_BONE)
+		core.log("action", "[villages] fishing rod debug: bone_pos=" .. core.pos_to_string(bone_pos or vector.zero())
+			.. " bone_rot=" .. core.pos_to_string(bone_rot or vector.zero())
+			.. " fisherman_pos=" .. core.pos_to_string(self.object:get_pos() or vector.zero())
+			.. " rod_pos=" .. core.pos_to_string(rod:get_pos() or vector.zero()))
+	end
 	return rod
 end
 

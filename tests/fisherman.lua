@@ -44,6 +44,8 @@ minetest = {
 	get_modpath = function() return "." end,
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
+	log = function() end,
+	pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 	registered_nodes = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
 		["air"] = {liquidtype = "none"},
@@ -598,7 +600,10 @@ do
 	local water = {x = 5, y = 0, z = 0}
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		object = {
+			get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end,
+			get_bone_position = function() return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0} end,
+		},
 		gopath = function(self, target, callback)
 			-- Mirrors navigation.lua's arrival_callback: the route's target
 			-- (the stand) is recorded before the callback runs.
