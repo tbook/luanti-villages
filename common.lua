@@ -56,6 +56,8 @@ end
 -- mobs_mc/villager.lua's collisionbox: {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}.
 local HALF_WIDTH = 0.3
 local HEIGHT_NODES = 2
+-- mcl_mobs/physics.lua: feet_pos = pos + (-collisionbox[2]) + 0.25.
+local FEET_OFFSET = 0.01 + 0.25
 
 local function round(value)
 	return math.floor(value + 0.5)
@@ -144,7 +146,13 @@ return {
 	-- the villager really is dying rather than merely standing somewhere odd:
 	-- a bed, a carpet or tall grass all fail this, a wall does not.
 	is_suffocating = function(pos)
-		local node = core.get_node_or_nil({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
+		-- Sample the node mcl_mobs itself samples: physics.lua takes the feet at
+		-- the collision box's own base plus a quarter node, not the entity
+		-- position, so rounding pos directly disagrees with it over part of
+		-- every node and would report the wrong node near a boundary.
+		local node = core.get_node_or_nil({
+			x = round(pos.x), y = round(pos.y + FEET_OFFSET), z = round(pos.z),
+		})
 		local def = node and core.registered_nodes[node.name]
 		if not def then return false end
 		if def.walkable == false then return false end

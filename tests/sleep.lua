@@ -110,6 +110,7 @@ mcl_mobs = {mob_class = {
 			_villages_sleeping = self._villages_sleeping,
 			_villages_bed_exit = self._villages_bed_exit,
 			_villages_bed_exit_bed = self._villages_bed_exit_bed,
+			_villages_activated_at = self._villages_activated_at,
 		}
 	end,
 	-- mob_class:set_yaw only records target_yaw/delay; a separate, always-on
@@ -169,6 +170,8 @@ assert(not saved._villages_sleeping)
 -- it suffocates within seconds. The exit must never reach the save.
 assert(not saved._villages_bed_exit and not saved._villages_bed_exit_bed,
 	"a bed exit must not be written into the villager's staticdata")
+assert(not saved._villages_activated_at,
+	"where a villager loaded is this session's business only")
 assert(alice._villages_bed_exit,
 	"the live villager must keep its bed exit across a save")
 assert(alice._villages_sleeping and alice.collisionbox[5] == 0.3)
@@ -476,7 +479,9 @@ end
 -- A villager leaves no corpse and drops nothing, so a death is indistinguishable
 -- from a disappearance in game (#84). Record the cause, and keep chaining to
 -- VoxeLibre's own on_die, which is what releases the dead villager's claims.
-local liam = make_villager("liam", false, {x = 2, y = 0, z = 0})
+local liam = make_villager("liam", false, {x = 2, y = 6, z = 0})
+objects = {liam.object}
+entity_def.on_activate(liam, "", 0)
 liam.standing_in = "mcl_core:stone"
 logged = {}
 entity_def.on_die(liam, {x = 2, y = 0, z = 0}, {type = "environment", node = "mcl_core:stone"})
@@ -488,5 +493,10 @@ end
 assert(death_log, "a villager's death must be logged")
 assert(death_log:find("environment", 1, true) and death_log:find("mcl_core:stone", 1, true),
 	"the death log must name the cause and the node it happened in: " .. tostring(death_log))
+-- A villager that dies well below where it loaded fell there; one that dies
+-- where it loaded arrived that way. The death has to carry that distance,
+-- since nothing else in the game reports it.
+assert(death_log:find("6.0 below", 1, true),
+	"the death log must say how far the villager was from where it loaded: " .. death_log)
 
 print("villager sleep tests passed")

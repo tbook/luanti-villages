@@ -365,9 +365,11 @@ core.register_on_mods_loaded(function()
 		local anim, child_anim = self.animation, self._child_animations
 		local swivel, bone = self.head_swivel, self.head_bone_position
 		local exit, exit_bed = self._villages_bed_exit, self._villages_bed_exit_bed
+		local activated_at = self._villages_activated_at
 		self._villages_sleeping = nil
 		self._villages_bed_exit = nil
 		self._villages_bed_exit_bed = nil
+		self._villages_activated_at = nil
 		self.collisionbox = normal_box(self, original_box)
 		self.animation = original_anim
 		self._child_animations = original_child_anim
@@ -376,6 +378,7 @@ core.register_on_mods_loaded(function()
 		local saved = original_staticdata(self)
 		self._villages_sleeping, self.collisionbox = sleeping, box
 		self._villages_bed_exit, self._villages_bed_exit_bed = exit, exit_bed
+		self._villages_activated_at = activated_at
 		self.animation, self._child_animations = anim, child_anim
 		self.head_swivel, self.head_bone_position = swivel, bone
 		return saved
@@ -397,11 +400,18 @@ core.register_on_mods_loaded(function()
 			detail = detail .. " by " .. (puncher.is_player and puncher:is_player()
 				and puncher:get_player_name() or entity and tostring(entity.name) or "?")
 		end
+		local died_at = pos or self.object:get_pos()
+		local loaded = self._villages_activated_at
+		local since_load = ""
+		if loaded and died_at then
+			since_load = string.format(", activated at %s (%.1f below)",
+				pos_string(loaded), loaded.y - died_at.y)
+		end
 		core.log("action", string.format(
-			"[villages] villager %s died at %s: %s%s (standing in %s, order %s%s)",
-			tostring(self._id), pos_string(pos or self.object:get_pos()), tostring(cause),
+			"[villages] villager %s died at %s: %s%s (standing in %s, order %s%s%s)",
+			tostring(self._id), pos_string(died_at), tostring(cause),
 			detail, tostring(self.standing_in), tostring(self.order),
-			self._villages_sleeping and ", asleep" or ""))
+			self._villages_sleeping and ", asleep" or "", since_load))
 		if original_die then return original_die(self, pos, cmi_cause) end
 	end
 
@@ -422,7 +432,15 @@ core.register_on_mods_loaded(function()
 		-- happens now. Say so at the moment it loads, so its death can be told
 		-- apart from one that starts here, among the living (#84). No rescue:
 		-- a villager buried by the world dying is the world working.
-		local suffocating, node_name = is_suffocating(self.object:get_pos())
+		-- Where a villager loaded, kept only in memory. A villager that dies
+		-- well below where it activated fell there; one that dies where it
+		-- loaded was already there. Nothing else in the game reports that
+		-- difference, and it is the difference between this mod burying a
+		-- villager and the world handing one over already buried (#84).
+		local activated_at = self.object:get_pos()
+		self._villages_activated_at =
+			{x = activated_at.x, y = activated_at.y, z = activated_at.z}
+		local suffocating, node_name = is_suffocating(activated_at)
 		if suffocating then
 			core.log("warning", string.format(
 				"[villages] villager %s activated already buried in %s at %s; it will suffocate",
