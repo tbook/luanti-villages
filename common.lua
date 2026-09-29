@@ -40,6 +40,43 @@ local workstation_professions = {
 local workstation_search_node_names = {"group:cauldron"}
 for name in pairs(workstation_nodes) do table.insert(workstation_search_node_names, name) end
 
+local function collision_box_top(def)
+	local box = def and def.collision_box
+	if not box or box.type ~= "fixed" then return 0.5 end
+	local fixed = box.fixed
+	if type(fixed) ~= "table" then return -0.5 end
+	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
+	local top = -0.5
+	for _, part in ipairs(fixed) do
+		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
+	end
+	return top
+end
+
+local function is_open(pos)
+	local node = core.get_node_or_nil(pos)
+	local def = node and core.registered_nodes[node.name]
+	if not def then return false end
+	return not def.walkable and (not def.collision_box or def.collision_box.type == "none")
+		and (def.liquidtype == nil or def.liquidtype == "none")
+end
+
+local function is_supported(pos)
+	local node = core.get_node_or_nil({x = pos.x, y = pos.y - 1, z = pos.z})
+	local def = node and core.registered_nodes[node.name]
+	if not def or not def.walkable then return false end
+	-- A villager's feet rest on the top of the supporting node. Low slabs do not
+	-- reach that height; fences and trapdoors are not walkable floor surfaces.
+	if collision_box_top(def) < 0.49 then return false end
+	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
+		return false
+	end
+	if (def.damage_per_second or 0) > 0 then return false end
+	return core.get_item_group(node.name, "fire") == 0
+		and core.get_item_group(node.name, "cactus") == 0
+		and core.get_item_group(node.name, "dangerous") == 0
+end
+
 return {
 	is_sleep_time = function()
 		local tod = core.get_timeofday() * 24000
@@ -58,6 +95,15 @@ return {
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
 	farm_replant_node = function(name) return farm_replant_nodes[name] end,
+	-- Whether a villager's full standing box fits at pos: two open nodes over a
+	-- solid, non-hazardous floor. Checked before returning a villager to a
+	-- position recorded earlier, since the world can change in between and a
+	-- villager left inside an opaque node suffocates to death within seconds
+	-- (mcl_mobs/physics.lua's do_env_damage).
+	is_standing_space = function(pos)
+		return is_open(pos) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
+			and is_supported(pos)
+	end,
 	is_surface_water = function(pos)
 		local node = core.get_node_or_nil(pos)
 		local def = node and core.registered_nodes[node.name]

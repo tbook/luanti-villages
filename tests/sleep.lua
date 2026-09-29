@@ -6,6 +6,8 @@ table.copy = table.copy or function(value)
 end
 
 local time = 0.9
+local died = {}
+local logged = {}
 local nodes = {}
 local metadata = {}
 local objects = {}
@@ -17,6 +19,24 @@ local top = {x = 0, y = 0, z = 1}
 nodes[key(bed)] = {name = "mcl_beds:bed_red_bottom", param2 = 0}
 metadata[key(bed)] = {villager = "alice", player = ""}
 metadata[key(top)] = {player = ""}
+
+-- A villager may only be returned to a square it can stand in, so the room
+-- around the bed needs a floor and open air above it.
+local registered_nodes = {
+	air = {walkable = false},
+	["mcl_core:dirt"] = {walkable = true},
+	["mcl_core:stone"] = {walkable = true},
+	["mcl_beds:bed_red_bottom"] = {walkable = true},
+}
+local function build_floor(x, z)
+	nodes[key({x = x, y = -1, z = z})] = {name = "mcl_core:dirt", param2 = 0}
+	nodes[key({x = x, y = 0, z = z})] = nodes[key({x = x, y = 0, z = z})]
+		or {name = "air", param2 = 0}
+	nodes[key({x = x, y = 1, z = z})] = {name = "air", param2 = 0}
+end
+for x = -1, 2 do
+	for z = -1, 2 do build_floor(x, z) end
+end
 
 vector = {
 	new = function(x, y, z) return {x = x, y = y, z = z} end,
@@ -44,9 +64,11 @@ local entity_def = {
 		self._original_custom_calls = (self._original_custom_calls or 0) + 1
 	end,
 	on_activate = function() end,
+	on_die = function(self) table.insert(died, self._id) end,
 }
 minetest = {
 	registered_entities = {["mobs_mc:villager"] = entity_def},
+	registered_nodes = registered_nodes,
 	register_on_mods_loaded = function(callback) callback() end,
 	get_modpath = function() return "." end,
 	get_day_count = function() return 0 end,
@@ -57,13 +79,19 @@ minetest = {
 		return group == "bed" and name:find("_bottom", 1, true) and 1 or 0
 	end,
 	get_meta = function(pos)
-		return {get_string = function(_, field)
-			return (metadata[key(pos)] or {})[field] or ""
-		end}
+		return {
+			get_string = function(_, field)
+				return (metadata[key(pos)] or {})[field] or ""
+			end,
+			set_string = function(_, field, value)
+				metadata[key(pos)] = metadata[key(pos)] or {}
+				metadata[key(pos)][field] = value
+			end,
+		}
 	end,
 	get_objects_inside_radius = function() return objects end,
 	facedir_to_dir = function() return {x = 0, y = 0, z = 1} end,
-	log = function() end,
+	log = function(level, message) table.insert(logged, {level = level, message = message}) end,
 	register_entity = function() end,
 }
 mcl_beds = {get_bed_top = function() return top end}
@@ -75,6 +103,8 @@ mcl_mobs = {mob_class = {
 			animation = self.animation,
 			head_swivel = self.head_swivel,
 			_villages_sleeping = self._villages_sleeping,
+			_villages_bed_exit = self._villages_bed_exit,
+			_villages_bed_exit_bed = self._villages_bed_exit_bed,
 		}
 	end,
 	-- mob_class:set_yaw only records target_yaw/delay; a separate, always-on
@@ -127,6 +157,15 @@ assert(saved.collisionbox[5] == 1.94)
 assert(saved.animation.stand_start == 1)
 assert(saved.head_swivel == "head.control")
 assert(not saved._villages_sleeping)
+-- Regression test (#84): mcl_mobs saves every field of self, so a bed exit
+-- left in the save outlives the night it belongs to. The villager that
+-- reloads may claim a different bed, and waking would then teleport it back
+-- to the previous bed's exit -- across the village, often into a wall, where
+-- it suffocates within seconds. The exit must never reach the save.
+assert(not saved._villages_bed_exit and not saved._villages_bed_exit_bed,
+	"a bed exit must not be written into the villager's staticdata")
+assert(alice._villages_bed_exit,
+	"the live villager must keep its bed exit across a save")
 assert(alice._villages_sleeping and alice.collisionbox[5] == 0.3)
 alice._max_trade_tier = 3
 alice_props.textures = {"old.png"} -- VoxeLibre refreshes this after a trade.
@@ -302,5 +341,79 @@ hank_props.textures = {"old.png"} -- simulates vanilla's set_textures firing
 entity_def.do_custom(hank, 0.05)
 assert(hank_props.textures[1]:find("profession_weaponsmith", 1, true), hank_props.textures[1])
 assert(hank_props.textures[1]:find("badge_iron", 1, true))
+
+-- Regression test (#84): an exit recorded beside one bed must never be used to
+-- leave another. A villager can claim a different bed between two nights, and
+-- teleporting it back to the old bed's exit throws it across the village,
+-- frequently into solid nodes, where it suffocates and appears to vanish.
+time = 0.9
+nodes[key(bed)] = {name = "mcl_beds:bed_red_bottom", param2 = 0} -- restored after the bed-removal test above
+local ivy = make_villager("alice", false, {x = 1, y = 0, z = 0})
+objects = {ivy.object}
+entity_def.on_activate(ivy, "", 0)
+assert(ivy._villages_sleeping)
+assert(vector.equals(ivy._villages_bed_exit_bed, bed),
+	"the exit must be recorded against the bed it was taken beside")
+ivy._villages_bed_exit_bed = {x = 40, y = 0, z = 40} -- as if recorded at another bed
+local ivy_sleep_pos = ivy.object:get_pos()
+time = 0.5
+entity_def.do_custom(ivy, 1)
+assert(not ivy._villages_sleeping)
+assert(vector.equals(ivy.object:get_pos(), ivy_sleep_pos),
+	"an exit belonging to another bed must not be teleported to")
+
+-- Regression test (#84): the world can change while a villager sleeps. An exit
+-- the player has since built over is no longer a standing space, and setting a
+-- villager down inside an opaque node kills it by suffocation within seconds.
+time = 0.9
+local jack = make_villager("alice", false, {x = 1, y = 0, z = 0})
+objects = {jack.object}
+entity_def.on_activate(jack, "", 0)
+assert(jack._villages_sleeping)
+local jack_sleep_pos = jack.object:get_pos()
+nodes[key({x = 1, y = 0, z = 0})] = {name = "mcl_core:stone", param2 = 0}
+time = 0.5
+entity_def.do_custom(jack, 1)
+assert(not jack._villages_sleeping)
+assert(vector.equals(jack.object:get_pos(), jack_sleep_pos),
+	"an exit that is no longer a standing space must not be teleported to")
+nodes[key({x = 1, y = 0, z = 0})] = {name = "air", param2 = 0}
+
+-- Regression test (#84): object:remove() skips on_die, so VoxeLibre never
+-- clears a removed duplicate's claims and the bed stays owned by an _id with
+-- no villager near it. The survivor's own claims must survive, though: both
+-- copies carry the same _id, so a shared bed would otherwise be freed out
+-- from under the villager still sleeping in it.
+time = 0.9
+local other_bed = {x = 6, y = 0, z = 0}
+metadata[key(other_bed)] = {villager = "kim", player = ""}
+metadata[key(bed)].villager = "kim"
+local kim_a, _, _, kim_a_removed = make_villager("kim", false, {x = 5, y = 0, z = 0})
+local kim_b, _, _, kim_b_removed = make_villager("kim", false, {x = 2, y = 0, z = 0})
+kim_a._bed, kim_b._bed = other_bed, bed
+objects = {kim_a.object, kim_b.object}
+entity_def.on_activate(kim_a, "", 0)
+assert(kim_a_removed() and not kim_b_removed())
+assert(metadata[key(other_bed)].villager == "",
+	"the removed duplicate's bed claim must be released")
+assert(metadata[key(bed)].villager == "kim",
+	"the surviving villager's own bed claim must be left alone")
+metadata[key(bed)].villager = "alice"
+
+-- A villager leaves no corpse and drops nothing, so a death is indistinguishable
+-- from a disappearance in game (#84). Record the cause, and keep chaining to
+-- VoxeLibre's own on_die, which is what releases the dead villager's claims.
+local liam = make_villager("liam", false, {x = 2, y = 0, z = 0})
+liam.standing_in = "mcl_core:stone"
+logged = {}
+entity_def.on_die(liam, {x = 2, y = 0, z = 0}, {type = "environment", node = "mcl_core:stone"})
+assert(died[1] == "liam", "the villager's own on_die must still run")
+local death_log
+for _, entry in ipairs(logged) do
+	if entry.message:find("died at", 1, true) then death_log = entry.message end
+end
+assert(death_log, "a villager's death must be logged")
+assert(death_log:find("environment", 1, true) and death_log:find("mcl_core:stone", 1, true),
+	"the death log must name the cause and the node it happened in: " .. tostring(death_log))
 
 print("villager sleep tests passed")

@@ -150,6 +150,26 @@ shore while their stands settle is expected, not a bug. Neither should ever
 report a route failure that names the other fisherman as an obstruction it
 cannot route around.
 
+## 14. Waking after a reload, a bed change, or a rebuilt bedside
+
+Three variants, each checking where a villager stands up (#84). In every one,
+watch it through the following morning rather than only checking that it is
+still alive at dawn.
+
+1. Let a villager fall asleep, leave the area until its mapblock unloads, and
+   return before morning.
+2. Let a villager sleep in one bed, then break that bed during the day so it
+   claims a different one well across the village, and let it sleep again.
+3. Let a villager fall asleep, then fill in the square it stepped into the bed
+   from with a solid block before morning.
+
+Expected result: the villager stands up beside the bed it actually slept in. It
+must never be moved toward another bed's surroundings, and never end up inside
+a solid node. In variants 1 and 3 it may simply stand up in the bed itself and
+walk out; the debug log records `woke with no usable bed exit` for that case.
+A villager that disappears here is a regression: check the log for a
+`[villages] villager ... died` line, which names the cause.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.
