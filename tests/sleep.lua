@@ -27,6 +27,9 @@ local registered_nodes = {
 	["mcl_core:dirt"] = {walkable = true},
 	["mcl_core:stone"] = {walkable = true},
 	["mcl_beds:bed_red_bottom"] = {walkable = true},
+	-- Fire fits a villager perfectly well: not walkable, no collision box, not
+	-- a liquid. Only its group marks it as somewhere a villager must not be put.
+	["mcl_fire:fire"] = {walkable = false},
 }
 local function build_floor(x, z)
 	nodes[key({x = x, y = -1, z = z})] = {name = "mcl_core:dirt", param2 = 0}
@@ -76,6 +79,7 @@ minetest = {
 	get_timeofday = function() return time end,
 	get_node_or_nil = function(pos) return nodes[key(pos)] end,
 	get_item_group = function(name, group)
+		if group == "fire" then return name:find("fire", 1, true) and 1 or 0 end
 		return group == "bed" and name:find("_bottom", 1, true) and 1 or 0
 	end,
 	get_meta = function(pos)
@@ -399,6 +403,44 @@ assert(metadata[key(other_bed)].villager == "",
 assert(metadata[key(bed)].villager == "kim",
 	"the surviving villager's own bed claim must be left alone")
 metadata[key(bed)].villager = "alice"
+
+-- An exit only has to be somewhere a villager fits for it to be reachable, but
+-- fitting is not the same as surviving: fire is not walkable, has no collision
+-- box and is not a liquid, so a villager can be dropped straight into one.
+time = 0.9
+local mae = make_villager("alice", false, {x = 1, y = 0, z = 0})
+objects = {mae.object}
+entity_def.on_activate(mae, "", 0)
+assert(mae._villages_sleeping)
+local mae_sleep_pos = mae.object:get_pos()
+nodes[key({x = 1, y = 0, z = 0})] = {name = "mcl_fire:fire", param2 = 0}
+time = 0.5
+entity_def.do_custom(mae, 1)
+assert(not mae._villages_sleeping)
+assert(vector.equals(mae.object:get_pos(), mae_sleep_pos),
+	"an exit that has caught fire must not be teleported to")
+nodes[key({x = 1, y = 0, z = 0})] = {name = "air", param2 = 0}
+
+-- A recorded exit is a continuous position, not a node center, and a villager
+-- is 0.6 nodes across. Checking only the column the position falls in misses a
+-- wall that the standing box overlaps but the center of the box does not.
+time = 0.9
+local nils = make_villager("alice", false, {x = 1.4, y = 0, z = 0})
+objects = {nils.object}
+entity_def.on_activate(nils, "", 0)
+assert(nils._villages_sleeping)
+assert(nils._villages_bed_exit.x == 1.4, "the exit is recorded where the villager stood")
+local nils_sleep_pos = nils.object:get_pos()
+-- Spans x 1.5 to 2.5; the villager's box at x = 1.4 reaches x = 1.7.
+nodes[key({x = 2, y = 0, z = 0})] = {name = "mcl_core:stone", param2 = 0}
+nodes[key({x = 2, y = 1, z = 0})] = {name = "mcl_core:stone", param2 = 0}
+time = 0.5
+entity_def.do_custom(nils, 1)
+assert(not nils._villages_sleeping)
+assert(vector.equals(nils.object:get_pos(), nils_sleep_pos),
+	"an exit whose standing box now overlaps a wall must not be teleported to")
+nodes[key({x = 2, y = 0, z = 0})] = {name = "air", param2 = 0}
+nodes[key({x = 2, y = 1, z = 0})] = {name = "air", param2 = 0}
 
 -- A villager leaves no corpse and drops nothing, so a death is indistinguishable
 -- from a disappearance in game (#84). Record the cause, and keep chaining to

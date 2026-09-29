@@ -53,12 +53,32 @@ local function collision_box_top(def)
 	return top
 end
 
-local function is_open(pos)
+-- mobs_mc/villager.lua's collisionbox: {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}.
+local HALF_WIDTH = 0.3
+local HEIGHT_NODES = 2
+
+local function round(value)
+	return math.floor(value + 0.5)
+end
+
+local function is_hazard(name, def)
+	if (def.damage_per_second or 0) > 0 then return true end
+	return core.get_item_group(name, "fire") > 0
+		or core.get_item_group(name, "cactus") > 0
+		or core.get_item_group(name, "dangerous") > 0
+end
+
+-- A node the villager's body may pass through: not something it collides with,
+-- and not something that hurts it. Openness alone is not enough -- fire is not
+-- walkable, carries no collision box and is not a liquid, so a check that only
+-- asks whether a villager fits would happily place one in a fire.
+local function is_clear(pos)
 	local node = core.get_node_or_nil(pos)
 	local def = node and core.registered_nodes[node.name]
 	if not def then return false end
-	return not def.walkable and (not def.collision_box or def.collision_box.type == "none")
-		and (def.liquidtype == nil or def.liquidtype == "none")
+	if def.walkable or (def.collision_box and def.collision_box.type ~= "none") then return false end
+	if def.liquidtype and def.liquidtype ~= "none" then return false end
+	return not is_hazard(node.name, def)
 end
 
 local function is_supported(pos)
@@ -71,10 +91,7 @@ local function is_supported(pos)
 	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
 		return false
 	end
-	if (def.damage_per_second or 0) > 0 then return false end
-	return core.get_item_group(node.name, "fire") == 0
-		and core.get_item_group(node.name, "cactus") == 0
-		and core.get_item_group(node.name, "dangerous") == 0
+	return not is_hazard(node.name, def)
 end
 
 return {
@@ -95,14 +112,31 @@ return {
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
 	farm_replant_node = function(name) return farm_replant_nodes[name] end,
-	-- Whether a villager's full standing box fits at pos: two open nodes over a
-	-- solid, non-hazardous floor. Checked before returning a villager to a
+	-- Whether a villager's full standing box fits at pos, clear of obstructions
+	-- and hazards, over a solid floor. Checked before returning a villager to a
 	-- position recorded earlier, since the world can change in between and a
 	-- villager left inside an opaque node suffocates to death within seconds
 	-- (mcl_mobs/physics.lua's do_env_damage).
+	--
+	-- Every node the box touches is tested, not just the column pos falls in.
+	-- A recorded exit is a continuous position rather than a node center, and
+	-- the box is 0.6 nodes across (mobs_mc/villager.lua's collisionbox), so a
+	-- villager standing at x = 0.4 reaches to x = 0.7 -- into a wall whose node
+	-- begins at x = 0.5, while the column at x = 0 still reads as open. The
+	-- floor is only required under the center column, since standing with part
+	-- of the box over an edge is ordinary.
 	is_standing_space = function(pos)
-		return is_open(pos) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
-			and is_supported(pos)
+		local min_x, max_x = round(pos.x - HALF_WIDTH), round(pos.x + HALF_WIDTH)
+		local min_z, max_z = round(pos.z - HALF_WIDTH), round(pos.z + HALF_WIDTH)
+		local feet = round(pos.y)
+		for x = min_x, max_x do
+			for z = min_z, max_z do
+				for y = feet, feet + HEIGHT_NODES - 1 do
+					if not is_clear({x = x, y = y, z = z}) then return false end
+				end
+			end
+		end
+		return is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
 	end,
 	is_surface_water = function(pos)
 		local node = core.get_node_or_nil(pos)
