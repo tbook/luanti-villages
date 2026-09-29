@@ -3,9 +3,10 @@
 Adds a visible sleeping pose and slow, bed-limited births to VoxeLibre
 villagers while leaving VoxeLibre's trading, professions, and bed ownership
 format in place. Install the repository as a directory named `villages` in
-Luanti's mods directory (or a world's `worldmods` directory). Removing the mod
-restores the game's default villager behavior; existing child villagers and bed
-claims remain in the world.
+Luanti's mods directory (or a world's `worldmods` directory). The `mcl_decor`
+mod is required for tavern furniture. Removing the mod restores the game's
+default villager behavior; existing child villagers, bed claims, and placed
+furniture remain in the world.
 
 A village can produce a child when a valid bed is unclaimed, provided two
 nearby adults own beds and no nearby adult is bedless.
@@ -42,6 +43,12 @@ VoxeLibre's normal pathing and then falls back to a bounded route planner
 that can follow ordinary stairs and wooden doors. Iron doors remain
 impassable.
 
+Newly generated taverns have two tables with plates and chairs, furnished by
+substituting a checked-in schematic for the stock tavern's layout at
+generation time. Existing, already-generated taverns are not refurnished.
+This is asset placement only; there is no tavern keeper or dinner service
+yet (tracked in #35).
+
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
 ## Attribution and licenses
@@ -60,3 +67,8 @@ plains, profession, and tier-badge textures. Mineclonia's
 `mobs_mc/LICENSE-media.md` lists textures not otherwise named there under the
 MIT License. The source game and its attribution are available at
 https://git.minetest.land/Mineclonia/Mineclonia.
+
+`schematics/tavern_furnished.mts` is a modification of VoxeLibre's
+`mcl_villages` tavern schematic. Its original schematic is credited to
+MysticTempest in VoxeLibre's `mcl_villages/README.txt` and is licensed
+CC BY-SA 4.0; this modified schematic is also CC BY-SA 4.0.
