@@ -63,14 +63,15 @@ core.register_entity(BOBBER_ENTITY, {
 -- hand, since only an object that large poked out past the body mesh to be
 -- seen at all; (3) shrinking visual_size back down at that same zero offset
 -- made it disappear again, now fully swallowed by the body mesh instead of
--- poking out of it. So position, not scale, is the remaining unknown: this
--- offsets along the bone's local x (untested direction/sign) to try to
--- clear the torso, at a size midway between the invisible 0.15 and the
--- room-filling 1 so it stays easy to spot while that's narrowed down.
+-- poking out of it; (4) offsetting +2 along local x (at a midway 0.4 size)
+-- moved it down near the foot, with only a corner peeking out -- so local x
+-- tracks mostly *downward* in world space here, not sideways, and 2 units
+-- is roughly a foot-to-hip span. Trying local y next at the same magnitude,
+-- to isolate what it does independently of x, before combining axes.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "evo_arm.right"
-local ROD_POSITION = vector.new(2, 0, 0)
+local ROD_POSITION = vector.new(0, 2, 0)
 local ROD_ROTATION = vector.new(0, 0, 45)
 
 core.register_entity(FISHING_ROD_ENTITY, {
