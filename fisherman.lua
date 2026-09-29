@@ -62,14 +62,18 @@ core.register_entity(BOBBER_ENTITY, {
 -- (the same one a dropped item spins in) and adds a grip-angle tilt.
 -- Confirmed in-game (#87 PR review, screenshot): rod stands upright,
 -- gripped at the hand, angled naturally for fishing -- but end-to-end
--- backwards (wood butt up, line/tip end down); negating the tip-up
--- rotation's x component flips which end points up without changing the
--- grip angle itself.
+-- backwards (line/tip end up, wood butt down). Negating the tip-up
+-- rotation's x component (screenshot) turned out not to swap the ends
+-- after all -- same coloring at the same ends, tip still up -- so it's
+-- reverted; adding 180 degrees to the in-plane z twist instead, since
+-- that applies after the object is already stood up out of flat, in its
+-- own final plane, which should swap top and bottom without re-flattening
+-- it the way changing x again risks.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
 local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
-local ROD_ROTATION = vector.new(-90, 0, 45)
+local ROD_ROTATION = vector.new(90, 0, 225)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
