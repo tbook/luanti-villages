@@ -60,20 +60,23 @@ core.register_entity(BOBBER_ENTITY, {
 -- composed through its parent "body") to get what set_attach expects.
 -- ROD_ROTATION tips the rod up out of its default flat-lying orientation
 -- (the same one a dropped item spins in) and adds a grip-angle tilt.
--- Confirmed in-game (#87 PR review, screenshot): rod stands upright,
--- gripped at the hand, angled naturally for fishing -- but end-to-end
--- backwards (line/tip end up, wood butt down). Negating the tip-up
--- rotation's x component (screenshot) turned out not to swap the ends
--- after all -- same coloring at the same ends, tip still up -- so it's
--- reverted; adding 180 degrees to the in-plane z twist instead, since
--- that applies after the object is already stood up out of flat, in its
--- own final plane, which should swap top and bottom without re-flattening
--- it the way changing x again risks.
+-- Confirmed in-game (#87 PR review, screenshot): at (90, 0, 45) the rod
+-- stands upright, right size, gripped at the hand, angled naturally for
+-- fishing -- but end-to-end backwards (line/tip end up, wood butt down).
+-- Two flip attempts since: negating x (screenshot) left the same ends in
+-- the same places, no visible change; adding 180 to z (screenshot) didn't
+-- swap the ends either -- it swung the item's broad face toward the
+-- camera instead of its thin edge, making it look like a wide blocky
+-- panel rather than a rod. Both x and z, then, are roughly the rod's own
+-- length and depth axes -- rotating around either just re-angles or
+-- re-faces it without swapping which end is "up". y is the one axis
+-- untried; back on the (90, 0, 45) baseline that actually looked like a
+-- rod, adding 180 to y next.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
 local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
-local ROD_ROTATION = vector.new(90, 0, 225)
+local ROD_ROTATION = vector.new(90, 180, 45)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
