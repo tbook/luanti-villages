@@ -573,10 +573,12 @@ local function recover_route(self, destination)
 	-- A legacy route may start successfully, then wedge on stairs or a door.
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
-		local target, path
+		-- plan_stair_route's fourth return is the route cost, which recovery has
+		-- no use for. Name the discard: an undeclared `_` here assigns a global.
+		local target, path, unused_cost
 		local candidates = approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
-		target, path, planner_failure, _, planner_report = plan_stair_route(self, candidates)
+		target, path, planner_failure, unused_cost, planner_report = plan_stair_route(self, candidates)
 		if target and path then
 			local recovered = set_route(self, destination.route_field, {
 				status = "travelling", mode = "planner", target = vector.new(target),
@@ -623,11 +625,41 @@ local function recover_stalled_route(self, destination)
 	return recover_route(self, destination)
 end
 
+-- Every field this module keeps on the villager describes a trip in progress.
+-- None of it survives a mapblock unload (on_activate below discards all of it),
+-- and a route additionally holds its arrival callback -- a live Lua function.
+local TRIP_FIELDS = {
+	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
+	"_villages_fish_route", "_villages_job_search_route",
+	"_villages_farm_target", "_villages_fish_target",
+}
+
 local function install(def)
 	local original_gopath = def.gopath or mcl_mobs.mob_class.gopath
 	local original_custom = def.do_custom
 	local original_activate = def.on_activate
+	local original_staticdata = def.get_staticdata or mcl_mobs.mob_class.get_staticdata
 	local original_door_action = def.do_pathfind_action or mcl_mobs.mob_class.do_pathfind_action
+
+	-- mcl_mobs serializes every field of self, so saving a route writes its
+	-- callback into the villager's staticdata as a dumped Lua function. The
+	-- engine warns that dumping functions is deprecated and will stop
+	-- supporting it; once it does, core.deserialize returns nil for the whole
+	-- string and the villager loses every saved field it has -- its _id, bed,
+	-- jobsite, profession and trades -- silently orphaning its claims. Since
+	-- on_activate throws these fields away regardless, leave them out of the
+	-- save entirely.
+	if original_staticdata then
+		def.get_staticdata = function(self)
+			local saved = {}
+			for _, field in ipairs(TRIP_FIELDS) do
+				saved[field], self[field] = self[field], nil
+			end
+			local data = original_staticdata(self)
+			for _, field in ipairs(TRIP_FIELDS) do self[field] = saved[field] end
+			return data
+		end
+	end
 
 	def.on_activate = function(self, staticdata, dtime)
 		local result = original_activate(self, staticdata, dtime)

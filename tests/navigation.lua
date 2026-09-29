@@ -1181,4 +1181,38 @@ assert(big_pond_entity._profession == "fisherman", "a large lake must still qual
 assert(lookup_calls < 500, "the flood fill must stop at its cap instead of scanning the whole lake")
 clear_pond()
 
+-- Regression test (#84): mcl_mobs serializes every field of the entity, so a
+-- saved route writes its arrival callback into the staticdata as a dumped Lua
+-- function. The engine has already deprecated dumping functions; once it stops
+-- supporting them, core.deserialize returns nil for the whole string and the
+-- villager loses every saved field -- its _id, bed, jobsite and trades -- with
+-- its claims silently orphaned. on_activate discards routes anyway, so none of
+-- this trip state may reach the save, and the live entity must keep it.
+local saved_fields
+local staticdata_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return true end,
+	get_staticdata = function(self)
+		saved_fields = {}
+		for field, value in pairs(self) do saved_fields[field] = value end
+		return "saved"
+	end,
+}
+dofile("navigation.lua")(staticdata_def)
+
+local travelling = {
+	_villages_bed_route = {status = "travelling", callback = function() end},
+	_villages_fish_target = {x = 1, y = 0, z = 1},
+	_id = "zoe",
+}
+assert(staticdata_def.get_staticdata(travelling) == "saved")
+assert(saved_fields._id == "zoe", "ordinary villager fields must still be saved")
+assert(not saved_fields._villages_bed_route,
+	"a route (and the live callback it holds) must not be written to staticdata")
+assert(not saved_fields._villages_fish_target,
+	"a trip target must not be written to staticdata")
+assert(travelling._villages_bed_route and travelling._villages_fish_target,
+	"the live villager must keep its trip state across a save")
+
 print("navigation.lua: ok")

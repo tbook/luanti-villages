@@ -3,6 +3,8 @@
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
+local is_standing_space = common.is_standing_space
+local is_suffocating = common.is_suffocating
 -- core.register_entity requires the loading mod's own name-prefix context
 -- (register.lua's check_modname_prefix reads core.get_current_modname()),
 -- which is only valid during a mod's own normal load -- not from inside the
@@ -15,7 +17,16 @@ local install_fisherman = dofile(core.get_modpath("villages") .. "/fisherman.lua
 local MODEL = "villages_villager.b3d"
 local BASE = "villages_villager_base.png^villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
+-- A bed exit is the square a villager stepped into its bed from, so it is
+-- always adjacent to the bed. Anything further is a record left over from
+-- some other bed and must never be teleported back to (#84).
+local BED_EXIT_RADIUS = 3
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+
+local function pos_string(pos)
+	if not pos then return "?" end
+	return string.format("(%.1f,%.1f,%.1f)", pos.x, pos.y, pos.z)
+end
 
 local profession_overlay = {
 	farmer = "farmer",
@@ -176,6 +187,36 @@ local function find_duplicate(self, pos)
 	end
 end
 
+-- object:remove() bypasses on_die, so VoxeLibre never clears the removed
+-- copy's bed and jobsite claims and they stay owned by an _id that no longer
+-- has a live villager standing anywhere near them (#84). Release them here
+-- instead -- but only the ones the survivor does not hold itself: both copies
+-- share an _id, so a claim the survivor still uses would otherwise be freed
+-- out from under it.
+local function release_claims(loser, survivor)
+	for _, field in ipairs({"_bed", "_jobsite"}) do
+		local pos = loser[field]
+		local kept = survivor[field]
+		if pos and not (kept and vector.equals(kept, pos)) then
+			local meta = core.get_meta(pos)
+			if meta:get_string("villager") == loser._id then
+				meta:set_string("villager", "")
+				core.log("action", string.format(
+					"[villages] released %s %s held by removed duplicate villager %s",
+					field, pos_string(pos), tostring(loser._id)))
+			end
+		end
+	end
+end
+
+local function remove_duplicate(loser, survivor, loser_pos, survivor_pos)
+	core.log("warning", string.format(
+		"[villages] removing duplicate villager %s at %s, keeping the copy at %s",
+		tostring(loser._id), pos_string(loser_pos), pos_string(survivor_pos)))
+	release_claims(loser, survivor)
+	loser.object:remove()
+end
+
 local function resolve_duplicate(self)
 	local pos = self.object:get_pos()
 	local dup = find_duplicate(self, pos)
@@ -183,12 +224,10 @@ local function resolve_duplicate(self)
 	local dup_pos = dup.object:get_pos()
 	if not dup_pos then return false end
 	if duplicate_key(pos, self.object) > duplicate_key(dup_pos, dup.object) then
-		core.log("warning", "[villages] removing duplicate villager " .. tostring(self._id))
-		self.object:remove()
+		remove_duplicate(self, dup, pos, dup_pos)
 		return true
 	end
-	core.log("warning", "[villages] removing duplicate villager " .. tostring(dup._id))
-	dup.object:remove()
+	remove_duplicate(dup, self, dup_pos, pos)
 	return false
 end
 
@@ -213,6 +252,7 @@ core.register_on_mods_loaded(function()
 	local original_head_bone_position = def.head_bone_position
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
+	local original_die = def.on_die
 	local original_animation = def.set_animation or mcl_mobs.mob_class.set_animation
 	local original_staticdata = def.get_staticdata or mcl_mobs.mob_class.get_staticdata
 	-- mob_class:set_yaw(yaw, delay) does not rotate the model itself; it only
@@ -232,26 +272,60 @@ core.register_on_mods_loaded(function()
 	def.head_swivel = "Head_Control"
 	def.head_bone_position = vector.new(0, 6.48, 0)
 
+	-- An exit is only good for the bed it was recorded beside, and only while
+	-- the square it names is still somewhere a villager can stand: the player
+	-- may have built over it while the villager slept, and a villager set down
+	-- inside an opaque node suffocates within seconds (#84).
+	local function usable_bed_exit(self)
+		local exit, bed = self._villages_bed_exit, self._villages_bed_exit_bed
+		if not exit then return end
+		if not bed or vector.distance(exit, bed) > BED_EXIT_RADIUS then return end
+		if not is_standing_space(exit) then return end
+		return exit
+	end
+
 	local function wake(self)
-		local exit = self._villages_bed_exit
+		local exit = usable_bed_exit(self)
+		if self._villages_bed_exit and not exit then
+			core.log("action", string.format(
+				"[villages] villager %s woke with no usable bed exit (%s); leaving it where it lies",
+				tostring(self._id), pos_string(self._villages_bed_exit)))
+		end
 		self._villages_sleeping = nil
 		self._villages_bed_exit = nil
+		self._villages_bed_exit_bed = nil
 		self.collisionbox = normal_box(self, original_box)
 		self.object:set_properties({collisionbox = self.collisionbox})
 		-- Return to the position from which this villager entered the bed. That
 		-- position was already safe for its full standing collision box, unlike
-		-- the sleeping position within the bed itself.
-		if exit then self.object:set_pos(exit) end
+		-- the sleeping position within the bed itself. Record the move: this is
+		-- the only place this mod relocates a villager on its own, so a burial
+		-- that follows one of these lines is this mod's doing, and a burial with
+		-- no such line is not (#84).
+		if exit then
+			core.log("action", string.format(
+				"[villages] villager %s left its bed for %s",
+				tostring(self._id), pos_string(exit)))
+			self.object:set_pos(exit)
+		end
 		self._current_animation = nil
 		original_animation(self, "stand")
 	end
 
 	local function begin_sleep(self, bed, node)
-		local exit = self.object:get_pos()
-		if exit and not self._villages_bed_exit then
-			self._villages_bed_exit = {x = exit.x, y = exit.y, z = exit.z}
-		end
 		local pos, yaw = sleep_position(bed, node)
+		-- Record the square this villager is stepping into bed from, replacing
+		-- any exit left over from an earlier night: a villager can claim a
+		-- different bed between two sleeps, and returning it to the old bed's
+		-- exit teleports it across the village, often into a wall (#84). The
+		-- one position that is never an exit is the sleeping position itself,
+		-- which is where a villager reactivating in its bed already stands --
+		-- keep the exit it entered from in that case.
+		local standing = self.object:get_pos()
+		if standing and vector.distance(standing, pos) >= 0.5 then
+			self._villages_bed_exit = {x = standing.x, y = standing.y, z = standing.z}
+			self._villages_bed_exit_bed = {x = bed.x, y = bed.y, z = bed.z}
+		end
 		self._villages_sleeping = true
 		self.state = "stand"
 		self.object:set_pos(pos)
@@ -279,12 +353,23 @@ core.register_on_mods_loaded(function()
 	end
 
 	-- Save only VoxeLibre-compatible entity fields. This also makes uninstalling
-	-- the mod safe while villagers are asleep.
+	-- the mod safe while villagers are asleep. mcl_mobs serializes every field
+	-- of self (api.lua's get_staticdata), so a bed exit left in place would
+	-- survive a mapblock unload and outlive the night it belongs to; the
+	-- villager that reloads can claim another bed entirely, and waking would
+	-- then teleport it back to the old one (#84). A position to step back into
+	-- is only meaningful for as long as the villager is lying in that bed, so
+	-- drop it from the save rather than reasoning about its age later.
 	def.get_staticdata = function(self)
 		local sleeping, box = self._villages_sleeping, self.collisionbox
 		local anim, child_anim = self.animation, self._child_animations
 		local swivel, bone = self.head_swivel, self.head_bone_position
+		local exit, exit_bed = self._villages_bed_exit, self._villages_bed_exit_bed
+		local activated_at = self._villages_activated_at
 		self._villages_sleeping = nil
+		self._villages_bed_exit = nil
+		self._villages_bed_exit_bed = nil
+		self._villages_activated_at = nil
 		self.collisionbox = normal_box(self, original_box)
 		self.animation = original_anim
 		self._child_animations = original_child_anim
@@ -292,9 +377,42 @@ core.register_on_mods_loaded(function()
 		self.head_bone_position = original_head_bone_position
 		local saved = original_staticdata(self)
 		self._villages_sleeping, self.collisionbox = sleeping, box
+		self._villages_bed_exit, self._villages_bed_exit_bed = exit, exit_bed
+		self._villages_activated_at = activated_at
 		self.animation, self._child_animations = anim, child_anim
 		self.head_swivel, self.head_bone_position = swivel, bone
 		return saved
+	end
+
+	-- Villagers leave no corpse and drop nothing, so a death looks exactly like
+	-- a disappearance in game. Record what killed each one, with the state that
+	-- distinguishes the known causes from each other: suffocation inside a node
+	-- after a bad teleport reports an environment cause and an opaque
+	-- standing_in node, while a fall, a mob, or the void each name themselves
+	-- (#84).
+	def.on_die = function(self, pos, cmi_cause)
+		local cause = cmi_cause and cmi_cause.type or "unknown"
+		local node = cmi_cause and cmi_cause.node
+		local detail = type(node) == "string" and (" node " .. node) or ""
+		local puncher = cmi_cause and cmi_cause.puncher
+		if puncher then
+			local entity = puncher.get_luaentity and puncher:get_luaentity()
+			detail = detail .. " by " .. (puncher.is_player and puncher:is_player()
+				and puncher:get_player_name() or entity and tostring(entity.name) or "?")
+		end
+		local died_at = pos or self.object:get_pos()
+		local loaded = self._villages_activated_at
+		local since_load = ""
+		if loaded and died_at then
+			since_load = string.format(", activated at %s (%.1f below)",
+				pos_string(loaded), loaded.y - died_at.y)
+		end
+		core.log("action", string.format(
+			"[villages] villager %s died at %s: %s%s (standing in %s, order %s%s%s)",
+			tostring(self._id), pos_string(died_at), tostring(cause),
+			detail, tostring(self.standing_in), tostring(self.order),
+			self._villages_sleeping and ", asleep" or "", since_load))
+		if original_die then return original_die(self, pos, cmi_cause) end
 	end
 
 	def.on_activate = function(self, staticdata, dtime)
@@ -309,6 +427,25 @@ core.register_on_mods_loaded(function()
 		self.collisionbox = normal_box(self, original_box)
 		self.object:set_properties({collisionbox = self.collisionbox})
 		refresh_visual(self)
+		-- A villager that arrives already sealed inside a node was buried before
+		-- this session began, and will suffocate in a few seconds no matter what
+		-- happens now. Say so at the moment it loads, so its death can be told
+		-- apart from one that starts here, among the living (#84). No rescue:
+		-- a villager buried by the world dying is the world working.
+		-- Where a villager loaded, kept only in memory. A villager that dies
+		-- well below where it activated fell there; one that dies where it
+		-- loaded was already there. Nothing else in the game reports that
+		-- difference, and it is the difference between this mod burying a
+		-- villager and the world handing one over already buried (#84).
+		local activated_at = self.object:get_pos()
+		self._villages_activated_at =
+			{x = activated_at.x, y = activated_at.y, z = activated_at.z}
+		local suffocating, node_name = is_suffocating(activated_at)
+		if suffocating then
+			core.log("warning", string.format(
+				"[villages] villager %s activated already buried in %s at %s; it will suffocate",
+				tostring(self._id), tostring(node_name), pos_string(self.object:get_pos())))
+		end
 		local bed, node = claimed_bed(self)
 		if self.order == "sleep" and is_sleep_time() and bed
 			and vector.distance(self.object:get_pos(), bed) < 2
