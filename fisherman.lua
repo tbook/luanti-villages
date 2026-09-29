@@ -47,31 +47,35 @@ core.register_entity(BOBBER_ENTITY, {
 -- itemstring, which the engine renders as that item's in-hand model/image;
 -- unlike a "sprite" visual (the bobber above), this rotates with its parent
 -- instead of always billboarding toward the camera, which a held tool needs).
--- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach to,
--- only the whole-arm "evo_arm.right" (confirmed as the standing/idle rig,
--- not an animation-only one, since only mobs_mc's illusioner ever drives
--- "magic.arm.*", for its spellcasting pose -- see villager_illusioner.lua).
--- ROD_POSITION/ROD_ROTATION are therefore an estimate, not something
--- confirmed against a running client (no Minetest/Luanti binary was
--- available to check this in-game); they mirror witch.lua's own
--- wand_rotation (a similarly stick-shaped attached item, tilted 45 degrees)
--- rather than a value read off the model. In-game rounds so far (#87 PR
--- review): (1) a -3 y offset with a small 0.2 visual_size was invisible; (2)
--- pinning position to the bone's own origin (no offset) at an oversized 1x1
--- visual_size rendered roughly villager-height, from the head down to the
--- ground -- proving the origin itself sits inside the body, not out at the
--- hand, since only an object that large poked out past the body mesh to be
--- seen at all; (3) shrinking visual_size back down at that same zero offset
--- made it disappear again, now fully swallowed by the body mesh instead of
--- poking out of it; (4) offsetting +2 along local x (at a midway 0.4 size)
--- moved it down near the foot, with only a corner peeking out -- so local x
--- tracks mostly *downward* in world space here, not sideways, and 2 units
--- is roughly a foot-to-hip span. Trying local y next at the same magnitude,
--- to isolate what it does independently of x, before combining axes.
+-- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach to.
+-- Five rounds of trial and error (#87 PR review) with a bone named
+-- "evo_arm.right" -- taken from a flat `strings` dump of the file, which
+-- only lists bone names in file order with no structure -- went nowhere
+-- (offsets in every direction either stayed invisible or slid toward the
+-- feet), because get_bone_position(self.object, "evo_arm.right") kept
+-- returning an exact (0,0,0) position AND rotation. That was the tell:
+-- parsing the b3d's actual NODE chunk tree (its real hierarchy, not just a
+-- flat string list) shows "evo_arm.right" is the model's ROOT node --
+--   evo_arm.right (root, pos 0,0,0)
+--     body (pos 0, 6.41, 0)
+--       arm (pos 0, 5.27, 0.24; rotated ~44 degrees -- a crossed-arm rest
+--            pose, matching what was actually seen in-game)
+--       leg.right / leg.left
+--       magic.arm.right -> bow (rotated ~90 degrees; the illusioner's own
+--            spellcasting/bow rig, per villager_illusioner.lua)
+--       magic.arm.left
+--       Head_Control -> Head -> nose
+-- -- so every earlier offset was nudging the whole skeleton's root, not an
+-- arm at all. The real bone is plain "arm". ROD_POSITION here is a fresh
+-- estimate along that bone's own local length axis (its parent offset is
+-- almost entirely +y from "body", the same axis convention as leg.right/
+-- leg.left's negative-y offsets below "body"), still not confirmed
+-- in-game; ROD_ROTATION is unchanged from the original witch.lua-derived
+-- guess and likely needs its own pass once positioning is right.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
-local ROD_BONE = "evo_arm.right"
-local ROD_POSITION = vector.new(0, 2, 0)
+local ROD_BONE = "arm"
+local ROD_POSITION = vector.new(0, -3, 0)
 local ROD_ROTATION = vector.new(0, 0, 45)
 
 core.register_entity(FISHING_ROD_ENTITY, {
@@ -223,17 +227,7 @@ local function spawn_fishing_rod(self)
 	local pos = self.object:get_pos()
 	if not pos then return nil end
 	local rod = core.add_entity(pos, FISHING_ROD_ENTITY)
-	if rod then
-		rod:set_attach(self.object, ROD_BONE, ROD_POSITION, ROD_ROTATION)
-		-- TEMPORARY (#87 PR review): get_bone_position gives the bone's actual
-		-- transform directly, instead of guessing an offset from screenshots.
-		-- Remove this block once ROD_POSITION/ROD_ROTATION are confirmed good.
-		local bone_pos, bone_rot = self.object:get_bone_position(ROD_BONE)
-		core.log("action", "[villages] fishing rod debug: bone_pos=" .. core.pos_to_string(bone_pos or vector.zero())
-			.. " bone_rot=" .. core.pos_to_string(bone_rot or vector.zero())
-			.. " fisherman_pos=" .. core.pos_to_string(self.object:get_pos() or vector.zero())
-			.. " rod_pos=" .. core.pos_to_string(rod:get_pos() or vector.zero()))
-	end
+	if rod then rod:set_attach(self.object, ROD_BONE, ROD_POSITION, ROD_ROTATION) end
 	return rod
 end
 

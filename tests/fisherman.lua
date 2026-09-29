@@ -44,8 +44,6 @@ minetest = {
 	get_modpath = function() return "." end,
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
-	log = function() end,
-	pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 	registered_nodes = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
 		["air"] = {liquidtype = "none"},
@@ -600,10 +598,7 @@ do
 	local water = {x = 5, y = 0, z = 0}
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
-		object = {
-			get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end,
-			get_bone_position = function() return {x = 0, y = 0, z = 0}, {x = 0, y = 0, z = 0} end,
-		},
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
 		gopath = function(self, target, callback)
 			-- Mirrors navigation.lua's arrival_callback: the route's target
 			-- (the stand) is recorded before the callback runs.
@@ -622,7 +617,7 @@ do
 	assert(fisherman._villages_fish_rod, "arrival must attach a held fishing rod (#87)")
 	assert(fisherman._villages_fish_rod.attach.parent == fisherman.object,
 		"the rod must attach to the fisherman's own object")
-	assert(fisherman._villages_fish_rod.attach.bone == "evo_arm.right")
+	assert(fisherman._villages_fish_rod.attach.bone == "arm")
 	timeofday, water_sites = 0, {}
 end
 
