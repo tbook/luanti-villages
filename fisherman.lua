@@ -42,11 +42,19 @@ core.register_entity(BOBBER_ENTITY, {
 
 -- #87: a held rod for the fishing cycle. mcl_mobs has no wielditem support
 -- (see the issue), so this is its own attached entity -- the same pattern
--- mobs_mc/witch.lua uses for its held potion/wand (a vl_held_item-style
--- entity with visual = "wielditem" and its textures set to the item's own
--- itemstring, which the engine renders as that item's in-hand model/image;
--- unlike a "sprite" visual (the bobber above), this rotates with its parent
--- instead of always billboarding toward the camera, which a held tool needs).
+-- mobs_mc/witch.lua uses for its held potion/wand (an entity whose textures
+-- are the item's own itemstring, which the engine renders as that item's
+-- image; unlike a "sprite" visual (the bobber above), this rotates with its
+-- parent instead of always billboarding toward the camera, which a held
+-- tool needs). The visual is "item", not witch.lua's "wielditem": the two
+-- differ in which image the engine extrudes -- "wielditem" prefers the
+-- item's wield_image, and mcl_fishing defines that as
+-- "mcl_fishing_fishing_rod.png^[transformFY^[transformR90", i.e. the icon
+-- flipped and turned a quarter turn for in-hand use. That baked-in
+-- transform is why rotating the rod kept producing angles that made no
+-- sense against the artwork. "item" extrudes the plain inventory_image
+-- instead, which already draws the wanted pose outright: wooden rod angled
+-- up, line hanging off the tip down to a bobber.
 -- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach
 -- to, and no separate left/right arm bones either: the whole crossed-arms
 -- pose is rigged onto a single bone named plain "arm" (a child of "body"),
@@ -58,31 +66,23 @@ core.register_entity(BOBBER_ENTITY, {
 -- from the mesh's own VRTS/BONE (skin weight) data and converted from
 -- mesh space into "arm"'s bone-local space (undoing its rest transform,
 -- composed through its parent "body") to get what set_attach expects.
--- ROD_ROTATION then stands the sprite upright. mcl_fishing_fishing_rod.png
--- already draws exactly the wanted pose -- wooden rod angled up to the
--- right, line hanging down off the tip to a bobber -- so the whole job is
--- to render that image the right way up, with its own plane vertical.
--- Guessing Euler angles for that went three rounds nowhere (the rod came
--- out upside down, then face-on like a plank, then pitched forward), so
--- it's solved rather than guessed: the attach rotation is applied in the
--- bone's frame, and "arm"'s rest rotation is a 180 degree turn about
--- (0, 0.376, 0.927) -- a 44.17 degree tilt in the yz plane, in matrix
--- terms -- so an x rotation of -44.17 cancels exactly that tilt, leaving
--- the sprite's own up axis pointing at world up and its face horizontal.
--- (The one thing not decidable from the file is whether the engine's
--- extruded item mesh flips the image vertically. It does -- both the
--- upside-down (90, 0, 45) and the pitched-forward (90, 180, 45) rounds
--- above only make sense that way -- but if this still renders inverted,
--- the correction is exactly +180 here, i.e. 135.83.)
+-- ROD_ROTATION then just has to stand that image up. Since the attach
+-- rotation is applied in the bone's frame, and "arm"'s rest rotation is a
+-- 180 degree turn about (0, 0.376, 0.927) -- a 44.17 degree tilt in the yz
+-- plane, in matrix terms -- an x rotation of 180 - 44.17 cancels the tilt
+-- and leaves the item's own up axis (local +y, the orientation a dropped
+-- item stands in at zero rotation) pointing at world up, with its face
+-- horizontal: composing the two gives a clean 180 degree y turn, so the
+-- rod hangs upright with its picture facing the villager's back.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
 local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
-local ROD_ROTATION = vector.new(-44.17, 0, 0)
+local ROD_ROTATION = vector.new(135.83, 0, 0)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
-		visual = "wielditem",
+		visual = "item",
 		visual_size = {x = 0.4, y = 0.4},
 		textures = {FISHING_ROD_ITEM},
 		physical = false,
