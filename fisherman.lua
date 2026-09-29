@@ -58,25 +58,27 @@ core.register_entity(BOBBER_ENTITY, {
 -- from the mesh's own VRTS/BONE (skin weight) data and converted from
 -- mesh space into "arm"'s bone-local space (undoing its rest transform,
 -- composed through its parent "body") to get what set_attach expects.
--- ROD_ROTATION tips the rod up out of its default flat-lying orientation
--- (the same one a dropped item spins in) and adds a grip-angle tilt.
--- Confirmed in-game (#87 PR review, screenshot): at (90, 0, 45) the rod
--- stands upright, right size, gripped at the hand, angled naturally for
--- fishing -- but end-to-end backwards (line/tip end up, wood butt down).
--- Two flip attempts since: negating x (screenshot) left the same ends in
--- the same places, no visible change; adding 180 to z (screenshot) didn't
--- swap the ends either -- it swung the item's broad face toward the
--- camera instead of its thin edge, making it look like a wide blocky
--- panel rather than a rod. Both x and z, then, are roughly the rod's own
--- length and depth axes -- rotating around either just re-angles or
--- re-faces it without swapping which end is "up". y is the one axis
--- untried; back on the (90, 0, 45) baseline that actually looked like a
--- rod, adding 180 to y next.
+-- ROD_ROTATION then stands the sprite upright. mcl_fishing_fishing_rod.png
+-- already draws exactly the wanted pose -- wooden rod angled up to the
+-- right, line hanging down off the tip to a bobber -- so the whole job is
+-- to render that image the right way up, with its own plane vertical.
+-- Guessing Euler angles for that went three rounds nowhere (the rod came
+-- out upside down, then face-on like a plank, then pitched forward), so
+-- it's solved rather than guessed: the attach rotation is applied in the
+-- bone's frame, and "arm"'s rest rotation is a 180 degree turn about
+-- (0, 0.376, 0.927) -- a 44.17 degree tilt in the yz plane, in matrix
+-- terms -- so an x rotation of -44.17 cancels exactly that tilt, leaving
+-- the sprite's own up axis pointing at world up and its face horizontal.
+-- (The one thing not decidable from the file is whether the engine's
+-- extruded item mesh flips the image vertically. It does -- both the
+-- upside-down (90, 0, 45) and the pitched-forward (90, 180, 45) rounds
+-- above only make sense that way -- but if this still renders inverted,
+-- the correction is exactly +180 here, i.e. 135.83.)
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
 local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
-local ROD_ROTATION = vector.new(90, 180, 45)
+local ROD_ROTATION = vector.new(-44.17, 0, 0)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
