@@ -66,19 +66,26 @@ core.register_entity(BOBBER_ENTITY, {
 -- from the mesh's own VRTS/BONE (skin weight) data and converted from
 -- mesh space into "arm"'s bone-local space (undoing its rest transform,
 -- composed through its parent "body") to get what set_attach expects.
--- ROD_ROTATION then just has to stand that image up. Since the attach
--- rotation is applied in the bone's frame, and "arm"'s rest rotation is a
--- 180 degree turn about (0, 0.376, 0.927) -- a 44.17 degree tilt in the yz
--- plane, in matrix terms -- an x rotation of 180 - 44.17 cancels the tilt
--- and leaves the item's own up axis (local +y, the orientation a dropped
--- item stands in at zero rotation) pointing at world up, with its face
--- horizontal: composing the two gives a clean 180 degree y turn, so the
--- rod hangs upright with its picture facing the villager's back.
+-- ROD_ROTATION then aims that image: upright, and pointing forward over
+-- the water rather than sideways across the body. Both fall out of the
+-- bone's own frame, since the attach rotation is applied in it. "arm"'s
+-- rest rotation is a 180 degree turn about (0, 0.376, 0.927) -- a 44.17
+-- degree tilt in the yz plane, in matrix terms -- and composing its
+-- inverse with a quarter turn about the vertical axis lands the item's up
+-- axis (local +y, the orientation a dropped item stands in at zero
+-- rotation) on world up, and its right axis -- the direction the drawn rod
+-- points -- on the model's +z, the side the nose is on. So the rod angles
+-- up and forward, out over the water the villager is facing.
+--
+-- ROD_POSITION is then lifted half the sprite's height (~0.3 node, scaled
+-- into mesh units and rotated into the bone's frame) above the hand
+-- cluster itself: the item's origin is its own center, so attaching at the
+-- hand exactly would hang half the rod below it.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
-local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
-local ROD_ROTATION = vector.new(135.83, 0, 0)
+local ROD_POSITION = vector.new(-3.21, 1.74, 0.91)
+local ROD_ROTATION = vector.new(90, -45.83, 90)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
