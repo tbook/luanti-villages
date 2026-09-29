@@ -84,14 +84,20 @@ core.register_entity(BOBBER_ENTITY, {
 -- the shoulder cap) gives the hand's position in mesh space; undoing
 -- "arm"'s own rest position/rotation (composed through its parent "body",
 -- via the standard child = parent_pos + parent_rot * local formula) turns
--- that into the bone-local offset set_attach itself expects. Rotation is
--- reset to identity for this pass -- isolating position first -- rather
--- than compounding it with the earlier, now-suspect 45 degree guess.
+-- that into the bone-local offset set_attach itself expects.
+--
+-- Confirmed in-game (#87 PR review, screenshot): that position lands right
+-- by the reaching hand -- but at identity rotation the rod lies flat on
+-- the ground, the same default orientation a dropped item spins in (flat
+-- plane, normal pointing up), rather than standing upright as if gripped.
+-- A 90 degree tip about x should stand it up out of that flat plane; the
+-- 45 degrees about z is the original witch.lua-derived grip-angle guess,
+-- carried back in now that position is no longer the variable in question.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
 local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
-local ROD_ROTATION = vector.new(0, 0, 0)
+local ROD_ROTATION = vector.new(90, 0, 45)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
