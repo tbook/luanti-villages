@@ -47,52 +47,21 @@ core.register_entity(BOBBER_ENTITY, {
 -- itemstring, which the engine renders as that item's in-hand model/image;
 -- unlike a "sprite" visual (the bobber above), this rotates with its parent
 -- instead of always billboarding toward the camera, which a held tool needs).
--- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach to.
--- Five rounds of trial and error (#87 PR review) with a bone named
--- "evo_arm.right" -- taken from a flat `strings` dump of the file, which
--- only lists bone names in file order with no structure -- went nowhere
--- (offsets in every direction either stayed invisible or slid toward the
--- feet), because get_bone_position(self.object, "evo_arm.right") kept
--- returning an exact (0,0,0) position AND rotation. That was the tell:
--- parsing the b3d's actual NODE chunk tree (its real hierarchy, not just a
--- flat string list) shows "evo_arm.right" is the model's ROOT node --
---   evo_arm.right (root, pos 0,0,0)
---     body (pos 0, 6.41, 0)
---       arm (pos 0, 5.27, 0.24; rotated ~44 degrees -- a crossed-arm rest
---            pose, matching what was actually seen in-game)
---       leg.right / leg.left
---       magic.arm.right -> bow (rotated ~90 degrees; the illusioner's own
---            spellcasting/bow rig, per villager_illusioner.lua)
---       magic.arm.left
---       Head_Control -> Head -> nose
--- -- so every earlier offset was nudging the whole skeleton's root, not an
--- arm at all. The real bone is plain "arm" -- but switching to it (right
--- size at last) still put the rod through the base of the neck, oriented
--- up and back. A local y offset can't fix that: rotation about y (the
--- axis "arm"'s own rest quaternion rotates around) leaves points on the y
--- axis unmoved, so nudging y alone can only slide the rod along that same
--- line near the pivot, never sweep it out to where the hand actually is.
---
--- Guessing a better axis blind would be round six; instead, this offset
--- was computed directly from the model's own geometry. "arm" turns out to
--- rig *both* forearms of the crossed-arms pose as one mirrored, otherwise
--- static prop (its skin weights select two symmetric vertex clusters, one
--- per hand, out of villages_villager.b3d's single shared mesh -- there is
--- no separate left/right arm bone). Locating the vertices actually
--- weighted to "arm", the low-y cluster (farthest from the shoulder, at
--- mesh-space y=8.234, matching a wrist/sleeve edge, versus y=12.802 for
--- the shoulder cap) gives the hand's position in mesh space; undoing
--- "arm"'s own rest position/rotation (composed through its parent "body",
--- via the standard child = parent_pos + parent_rot * local formula) turns
--- that into the bone-local offset set_attach itself expects.
---
--- Confirmed in-game (#87 PR review, screenshot): that position lands right
--- by the reaching hand -- but at identity rotation the rod lies flat on
--- the ground, the same default orientation a dropped item spins in (flat
--- plane, normal pointing up), rather than standing upright as if gripped.
--- A 90 degree tip about x should stand it up out of that flat plane; the
--- 45 degrees about z is the original witch.lua-derived grip-angle guess,
--- carried back in now that position is no longer the variable in question.
+-- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach
+-- to, and no separate left/right arm bones either: the whole crossed-arms
+-- pose is rigged onto a single bone named plain "arm" (a child of "body"),
+-- which drives two mirrored vertex clusters -- one per hand -- in the
+-- model's one shared mesh. (A `strings` dump of the file also turns up an
+-- "evo_arm.right", but that name belongs to the model's ROOT node, not an
+-- arm -- a red herring confirmed by parsing the b3d's actual NODE chunk
+-- tree.) ROD_POSITION is the right-hand vertex cluster's position, read
+-- from the mesh's own VRTS/BONE (skin weight) data and converted from
+-- mesh space into "arm"'s bone-local space (undoing its rest transform,
+-- composed through its parent "body") to get what set_attach expects.
+-- ROD_ROTATION tips the rod up out of its default flat-lying orientation
+-- (the same one a dropped item spins in) and adds a grip-angle tilt.
+-- Confirmed in-game (#87 PR review, screenshot): rod stands upright,
+-- gripped at the hand, angled naturally for fishing.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
