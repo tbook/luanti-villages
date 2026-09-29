@@ -80,6 +80,7 @@ minetest = {
 	get_node_or_nil = function(pos) return nodes[key(pos)] end,
 	get_item_group = function(name, group)
 		if group == "fire" then return name:find("fire", 1, true) and 1 or 0 end
+		if group == "opaque" then return name:find("mcl_core:", 1, true) and 1 or 0 end
 		return group == "bed" and name:find("_bottom", 1, true) and 1 or 0
 	end,
 	get_meta = function(pos)
@@ -441,6 +442,36 @@ assert(vector.equals(nils.object:get_pos(), nils_sleep_pos),
 	"an exit whose standing box now overlaps a wall must not be teleported to")
 nodes[key({x = 2, y = 0, z = 0})] = {name = "air", param2 = 0}
 nodes[key({x = 2, y = 1, z = 0})] = {name = "air", param2 = 0}
+
+-- A villager that loads already sealed inside a node was buried before this
+-- session and dies within seconds whatever happens next. Saying so at
+-- activation is what separates a death that began elsewhere from one that
+-- began here (#84). A villager lying in its bed must not trip it: beds are
+-- walkable, but they do not suffocate anyone.
+time = 0.5
+nodes[key({x = 2, y = 0, z = 0})] = {name = "mcl_core:stone", param2 = 0}
+local olive = make_villager("olive", false, {x = 2, y = 0, z = 0})
+objects = {olive.object}
+logged = {}
+entity_def.on_activate(olive, "", 0)
+local buried_log
+for _, entry in ipairs(logged) do
+	if entry.message:find("already buried", 1, true) then buried_log = entry.message end
+end
+assert(buried_log, "a villager that loads inside a solid node must be reported")
+assert(buried_log:find("mcl_core:stone", 1, true), buried_log)
+nodes[key({x = 2, y = 0, z = 0})] = {name = "air", param2 = 0}
+
+time = 0.9
+local pearl = make_villager("alice", false, {x = 1, y = 0, z = 0})
+objects = {pearl.object}
+logged = {}
+entity_def.on_activate(pearl, "", 0)
+assert(pearl._villages_sleeping)
+for _, entry in ipairs(logged) do
+	assert(not entry.message:find("already buried", 1, true),
+		"a villager asleep in its bed must not be reported as buried")
+end
 
 -- A villager leaves no corpse and drops nothing, so a death is indistinguishable
 -- from a disappearance in game (#84). Record the cause, and keep chaining to

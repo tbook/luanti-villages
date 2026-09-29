@@ -138,6 +138,21 @@ return {
 		end
 		return is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
 	end,
+	-- Whether a villager standing here is being suffocated by the node its feet
+	-- are in. Mirrors the condition in mcl_mobs/physics.lua's do_env_damage,
+	-- which is what actually deals the damage, so that a report from here means
+	-- the villager really is dying rather than merely standing somewhere odd:
+	-- a bed, a carpet or tall grass all fail this, a wall does not.
+	is_suffocating = function(pos)
+		local node = core.get_node_or_nil({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
+		local def = node and core.registered_nodes[node.name]
+		if not def then return false end
+		if def.walkable == false then return false end
+		if def.collision_box and def.collision_box.type ~= "regular" then return false end
+		if def.node_box and def.node_box.type ~= "regular" then return false end
+		if core.get_item_group(node.name, "disable_suffocation") == 1 then return false end
+		return core.get_item_group(node.name, "opaque") == 1, node.name
+	end,
 	is_surface_water = function(pos)
 		local node = core.get_node_or_nil(pos)
 		local def = node and core.registered_nodes[node.name]

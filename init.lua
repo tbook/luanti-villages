@@ -4,6 +4,7 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_standing_space = common.is_standing_space
+local is_suffocating = common.is_suffocating
 -- core.register_entity requires the loading mod's own name-prefix context
 -- (register.lua's check_modname_prefix reads core.get_current_modname()),
 -- which is only valid during a mod's own normal load -- not from inside the
@@ -297,8 +298,16 @@ core.register_on_mods_loaded(function()
 		self.object:set_properties({collisionbox = self.collisionbox})
 		-- Return to the position from which this villager entered the bed. That
 		-- position was already safe for its full standing collision box, unlike
-		-- the sleeping position within the bed itself.
-		if exit then self.object:set_pos(exit) end
+		-- the sleeping position within the bed itself. Record the move: this is
+		-- the only place this mod relocates a villager on its own, so a burial
+		-- that follows one of these lines is this mod's doing, and a burial with
+		-- no such line is not (#84).
+		if exit then
+			core.log("action", string.format(
+				"[villages] villager %s left its bed for %s",
+				tostring(self._id), pos_string(exit)))
+			self.object:set_pos(exit)
+		end
 		self._current_animation = nil
 		original_animation(self, "stand")
 	end
@@ -408,6 +417,17 @@ core.register_on_mods_loaded(function()
 		self.collisionbox = normal_box(self, original_box)
 		self.object:set_properties({collisionbox = self.collisionbox})
 		refresh_visual(self)
+		-- A villager that arrives already sealed inside a node was buried before
+		-- this session began, and will suffocate in a few seconds no matter what
+		-- happens now. Say so at the moment it loads, so its death can be told
+		-- apart from one that starts here, among the living (#84). No rescue:
+		-- a villager buried by the world dying is the world working.
+		local suffocating, node_name = is_suffocating(self.object:get_pos())
+		if suffocating then
+			core.log("warning", string.format(
+				"[villages] villager %s activated already buried in %s at %s; it will suffocate",
+				tostring(self._id), tostring(node_name), pos_string(self.object:get_pos())))
+		end
 		local bed, node = claimed_bed(self)
 		if self.order == "sleep" and is_sleep_time() and bed
 			and vector.distance(self.object:get_pos(), bed) < 2
