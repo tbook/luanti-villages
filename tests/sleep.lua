@@ -446,6 +446,26 @@ assert(vector.equals(nils.object:get_pos(), nils_sleep_pos),
 nodes[key({x = 2, y = 0, z = 0})] = {name = "air", param2 = 0}
 nodes[key({x = 2, y = 1, z = 0})] = {name = "air", param2 = 0}
 
+-- Touching a node is not reaching into it. A villager at x = 1.2 spans 0.9 to
+-- 1.5, so its box stops exactly at the boundary of the node beginning at 1.5
+-- and does not enter it. Villagers stand on half-node offsets constantly, and
+-- the node they most often touch this way is the bed they are climbing out of,
+-- so treating a touch as an overlap would decline most usable exits.
+time = 0.9
+local quinn = make_villager("alice", false, {x = 1.2, y = 0, z = 0})
+objects = {quinn.object}
+entity_def.on_activate(quinn, "", 0)
+assert(quinn._villages_sleeping)
+nodes[key({x = 2, y = 0, z = 0})] = {name = "mcl_core:stone", param2 = 0}
+nodes[key({x = 2, y = 1, z = 0})] = {name = "mcl_core:stone", param2 = 0}
+time = 0.5
+entity_def.do_custom(quinn, 1)
+assert(not quinn._villages_sleeping)
+assert(quinn.object:get_pos().x == 1.2,
+	"an exit whose box only touches the neighboring node must still be usable")
+nodes[key({x = 2, y = 0, z = 0})] = {name = "air", param2 = 0}
+nodes[key({x = 2, y = 1, z = 0})] = {name = "air", param2 = 0}
+
 -- A villager that loads already sealed inside a node was buried before this
 -- session and dies within seconds whatever happens next. Saying so at
 -- activation is what separates a death that began elsewhere from one that

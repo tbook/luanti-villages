@@ -573,10 +573,12 @@ local function recover_route(self, destination)
 	-- A legacy route may start successfully, then wedge on stairs or a door.
 	-- Hand that case to the Villages planner before backing off.
 	if destination.claimed(self) and route.mode ~= "planner" then
-		local target, path
+		-- plan_stair_route's fourth return is the route cost, which recovery has
+		-- no use for. Name the discard: an undeclared `_` here assigns a global.
+		local target, path, unused_cost
 		local candidates = approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
-		target, path, planner_failure, _, planner_report = plan_stair_route(self, candidates)
+		target, path, planner_failure, unused_cost, planner_report = plan_stair_route(self, candidates)
 		if target and path then
 			local recovered = set_route(self, destination.route_field, {
 				status = "travelling", mode = "planner", target = vector.new(target),

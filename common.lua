@@ -58,6 +58,7 @@ local HALF_WIDTH = 0.3
 local HEIGHT_NODES = 2
 -- mcl_mobs/physics.lua: feet_pos = pos + (-collisionbox[2]) + 0.25.
 local FEET_OFFSET = 0.01 + 0.25
+local EDGE = 0.001
 
 local function round(value)
 	return math.floor(value + 0.5)
@@ -128,8 +129,13 @@ return {
 	-- floor is only required under the center column, since standing with part
 	-- of the box over an edge is ordinary.
 	is_standing_space = function(pos)
-		local min_x, max_x = round(pos.x - HALF_WIDTH), round(pos.x + HALF_WIDTH)
-		local min_z, max_z = round(pos.z - HALF_WIDTH), round(pos.z + HALF_WIDTH)
+		-- Shrink the span by a hair so a box whose edge lands exactly on a node
+		-- boundary is not treated as reaching into the node beyond it. Villagers
+		-- stand on half-node offsets constantly, so without this the check
+		-- rejects a node the villager only touches -- most often the bed it is
+		-- climbing out of, since a bed is walkable.
+		local min_x, max_x = round(pos.x - HALF_WIDTH + EDGE), round(pos.x + HALF_WIDTH - EDGE)
+		local min_z, max_z = round(pos.z - HALF_WIDTH + EDGE), round(pos.z + HALF_WIDTH - EDGE)
 		local feet = round(pos.y)
 		for x = min_x, max_x do
 			for z = min_z, max_z do
