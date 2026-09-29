@@ -66,17 +66,32 @@ core.register_entity(BOBBER_ENTITY, {
 --       magic.arm.left
 --       Head_Control -> Head -> nose
 -- -- so every earlier offset was nudging the whole skeleton's root, not an
--- arm at all. The real bone is plain "arm". ROD_POSITION here is a fresh
--- estimate along that bone's own local length axis (its parent offset is
--- almost entirely +y from "body", the same axis convention as leg.right/
--- leg.left's negative-y offsets below "body"), still not confirmed
--- in-game; ROD_ROTATION is unchanged from the original witch.lua-derived
--- guess and likely needs its own pass once positioning is right.
+-- arm at all. The real bone is plain "arm" -- but switching to it (right
+-- size at last) still put the rod through the base of the neck, oriented
+-- up and back. A local y offset can't fix that: rotation about y (the
+-- axis "arm"'s own rest quaternion rotates around) leaves points on the y
+-- axis unmoved, so nudging y alone can only slide the rod along that same
+-- line near the pivot, never sweep it out to where the hand actually is.
+--
+-- Guessing a better axis blind would be round six; instead, this offset
+-- was computed directly from the model's own geometry. "arm" turns out to
+-- rig *both* forearms of the crossed-arms pose as one mirrored, otherwise
+-- static prop (its skin weights select two symmetric vertex clusters, one
+-- per hand, out of villages_villager.b3d's single shared mesh -- there is
+-- no separate left/right arm bone). Locating the vertices actually
+-- weighted to "arm", the low-y cluster (farthest from the shoulder, at
+-- mesh-space y=8.234, matching a wrist/sleeve edge, versus y=12.802 for
+-- the shoulder cap) gives the hand's position in mesh space; undoing
+-- "arm"'s own rest position/rotation (composed through its parent "body",
+-- via the standard child = parent_pos + parent_rot * local formula) turns
+-- that into the bone-local offset set_attach itself expects. Rotation is
+-- reset to identity for this pass -- isolating position first -- rather
+-- than compounding it with the earlier, now-suspect 45 degree guess.
 local FISHING_ROD_ENTITY = "villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
-local ROD_POSITION = vector.new(0, -3, 0)
-local ROD_ROTATION = vector.new(0, 0, 45)
+local ROD_POSITION = vector.new(-3.21, 3.77, -1.06)
+local ROD_ROTATION = vector.new(0, 0, 0)
 
 core.register_entity(FISHING_ROD_ENTITY, {
 	initial_properties = {
