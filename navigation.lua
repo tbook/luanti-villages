@@ -117,8 +117,10 @@ local function is_supported(pos)
 	-- A villager's feet are at the top of the supporting node. Low slabs do not
 	-- reach that height; fences and trapdoors are not walkable floor surfaces.
 	if collision_box_top(def) < 0.49 then return false end
-	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
-		return false
+	-- Nor are fence gates or walls: do_jump (mcl_mobs/movement.lua) will not
+	-- jump them, so a villager never gets up onto one.
+	for _, group in ipairs({"fence", "fence_gate", "wall", "trapdoor"}) do
+		if core.get_item_group(node.name, group) > 0 then return false end
 	end
 	if (def.damage_per_second or 0) > 0 then return false end
 	return core.get_item_group(node.name, "fire") == 0
@@ -816,7 +818,11 @@ local function install(def)
 				candidates = {cell}
 			end
 			local detour, path = plan_stair_route(self, candidates)
-			return detour ~= nil and start_engine_path(self, detour, path, callback_arrived, true)
+			if detour and start_engine_path(self, detour, path, callback_arrived, true) then return true end
+			-- Upstream saw its own route succeed, so it set no failure cooldown.
+			-- Set one, or every caller's next poll repeats the whole search.
+			self._pf_last_failed = os.time()
+			return false
 		end
 
 		local route = self[destination.route_field]

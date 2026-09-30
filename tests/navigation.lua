@@ -263,6 +263,22 @@ assert(detour_entity.callback_arrived == detour_arrived, "and its own arrival ca
 for _, waypoint in ipairs(detour_entity.waypoints) do
 	assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "the detour keeps clear of the overhang")
 end
+-- When no detour exists either, the failure is recorded so that vanilla's
+-- ready_to_path holds off the next attempt; upstream saw its own route
+-- succeed and set no cooldown of its own.
+support_available = false
+local stuck_entity = {
+	_jobsite = {x = 50, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+timeofday = 0.3
+assert(not overhang_def.gopath(stuck_entity, {x = -2, y = 0, z = 0}, nil, true))
+timeofday = 0.8
+assert(stuck_entity.state == "stand" and stuck_entity._pf_last_failed, "a failed detour sets the pathfinding cooldown")
+support_available = true
 low_ceiling = false
 
 def.do_custom(entity, 0.1)

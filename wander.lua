@@ -84,7 +84,9 @@ end
 local function plan_leg(self, pos)
 	local start = {x = pos.x, y = common.feet_node(pos), z = pos.z}
 	if not common.is_standing_space(start) then return nil end
-	local wanted = LEG_MIN + math.random() * (LEG_MAX - LEG_MIN)
+	-- A whole number of samples, so a fully open heading reaches it exactly
+	-- and ends the search.
+	local wanted = SAMPLE_STEP * math.floor((LEG_MIN + math.random() * (LEG_MAX - LEG_MIN)) / SAMPLE_STEP)
 	local yaw = (self.target_yaw or self.object:get_yaw() or 0) + (self.rotate or 0)
 	local best_length, best_target = 0, nil
 	for _, candidate in ipairs(candidate_yaws(yaw)) do

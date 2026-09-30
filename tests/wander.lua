@@ -2,6 +2,7 @@
 -- Lua 5.3+ folded atan2 into atan; the game runs LuaJIT, which has both.
 math.atan2 = math.atan2 or math.atan
 local nodes = {}
+local lookups = 0
 local function key(pos) return pos.x .. "," .. pos.y .. "," .. pos.z end
 
 vector = {
@@ -14,14 +15,22 @@ end}}
 
 minetest = {
 	get_modpath = function() return "." end,
-	get_item_group = function() return 0 end,
+	get_item_group = function(name, group)
+		local groups = {["mcl_fences:fence_gate"] = {fence_gate = 1}, ["mcl_walls:cobble"] = {wall = 1}}
+		return (groups[name] or {})[group] or 0
+	end,
 	registered_nodes = {
 		air = {walkable = false},
 		["mcl_core:stone"] = {walkable = true},
 		["mcl_fences:fence"] = {walkable = true},
+		["mcl_fences:fence_gate"] = {walkable = true, collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.125, 0.5, 1, 0.125}}},
+		["mcl_walls:cobble"] = {walkable = true, collision_box = {type = "fixed", fixed = {-0.25, -0.5, -0.25, 0.25, 1, 0.25}}},
 		["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
 	},
-	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
+	get_node_or_nil = function(pos)
+		lookups = lookups + 1
+		return {name = nodes[key(pos)] or "air"}
+	end,
 }
 
 local function fill(x1, y1, z1, x2, y2, z2, name)
@@ -153,6 +162,26 @@ fill(-1, 2, 0, 1, 2, 1, "mcl_core:stone")
 local ducked = villager(0, 0, 0)
 step(ducked)
 assert(ducked.state == "stand", "a low ceiling on the near side stops the climb")
+
+-- A closed gate or a wall across the way is one node high with air above,
+-- but do_jump will not jump either, so it is not a step to climb.
+for _, barrier in ipairs({"mcl_fences:fence_gate", "mcl_walls:cobble"}) do
+	reset()
+	fill(-10, 0, -10, 10, 1, -1, "mcl_core:stone")
+	fill(-1, 0, 0, -1, 1, 10, "mcl_core:stone")
+	fill(1, 0, 0, 1, 1, 10, "mcl_core:stone")
+	fill(0, 0, 1, 0, 0, 1, barrier)
+	local penned = villager(0, 0, 0)
+	step(penned)
+	assert(penned.state == "stand", "a villager does not plan to climb " .. barrier)
+end
+
+-- A fully open heading ends the search: the other headings are not sampled.
+reset()
+local open = villager(0, 0, 0)
+lookups = 0
+step(open)
+assert(lookups < 1000, "an open heading is planned without trying every other (" .. lookups .. " lookups)")
 
 -- A one-node drop is stepped down; a deeper one ends the leg at the edge.
 reset()

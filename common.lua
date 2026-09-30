@@ -91,8 +91,10 @@ local function is_supported(pos)
 	-- A villager's feet rest on the top of the supporting node. Low slabs do not
 	-- reach that height; fences and trapdoors are not walkable floor surfaces.
 	if collision_box_top(def) < 0.49 then return false end
-	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
-		return false
+	-- Nor are fence gates or walls: do_jump (mcl_mobs/movement.lua) will not
+	-- jump them, so a villager never gets up onto one.
+	for _, group in ipairs({"fence", "fence_gate", "wall", "trapdoor"}) do
+		if core.get_item_group(node.name, group) > 0 then return false end
 	end
 	return not is_hazard(node.name, def)
 end
