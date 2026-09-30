@@ -56,15 +56,18 @@ through the ordinary trade window, unlocking tiers as it is traded with. A
 keeper opens the tavern at 14:00 and stays until 18:30, sleeping last in the
 village. VoxeLibre cannot register new professions yet (#35), so a keeper is
 a butcher underneath; a keeper that loses its jukebox after trading keeps its
-menu and looks for another jukebox, never a smoker. Dinner service is not
-built yet (#16), but from 15:30 every adult walks to the nearest tavern within
+menu and looks for another jukebox, never a smoker. From 15:30 every adult walks to the nearest tavern within
 48 nodes of its bed and stays until 17:30; one not there by 17:00 goes home
 instead. The first villager to reach a tavern with no keeper takes the job,
 leaving its old one, unless a player has traded with it. The other guests
 each take a free chair that faces a table, in any tavern including one a
 player built, and sit until 17:30; a guest never takes a chair a player is
 sitting in, gets up if a player takes its chair, and stands inside when no
-seat is free.
+seat is free. While the keeper is at its jukebox, it serves each seated
+guest one meal from its menu an evening, shown on the plate on the guest's
+table; the guest eats it and the plate empties. The meal is only a display,
+nothing that can be taken, and a plate holding a player's item is never
+served on. A tavern with no keeper on duty serves no meals.
 
 For play testing, `/villages_goto` (requires `teleport`) teleports you above
 the nearest tavern seen generating in this world. If none is known yet, it

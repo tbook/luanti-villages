@@ -15,6 +15,8 @@ local is_suffocating = common.is_suffocating
 -- from a dofile inside that callback like the other behavior modules.
 local install_fisherman = dofile(core.get_modpath("villages") .. "/fisherman.lua")
 local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
+-- Registers villages:meal, so it loads here for the same reason.
+local meal = dofile(core.get_modpath("villages") .. "/meal.lua")
 local MODEL = "villages_villager.b3d"
 local BASE = "villages_villager_base.png^villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
@@ -522,7 +524,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)
-	dofile(core.get_modpath("villages") .. "/tavern.lua")(def)
+	dofile(core.get_modpath("villages") .. "/tavern.lua")(def, meal)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
 end)
 
