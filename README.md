@@ -57,7 +57,10 @@ keeper opens the tavern at 14:00 and stays until 18:30, sleeping last in the
 village. VoxeLibre cannot register new professions yet (#35), so a keeper is
 a butcher underneath; a keeper that loses its jukebox after trading keeps its
 menu and looks for another jukebox, never a smoker. Dinner service is not
-built yet (#16).
+built yet (#16), but from 15:30 every adult walks to the nearest tavern within
+48 nodes of its bed and stays until 17:30; one not there by 17:00 goes home
+instead. The first villager to reach a tavern with no keeper takes the job,
+leaving its old one, unless a player has traded with it.
 
 For play testing, `/villages_goto` (requires `teleport`) teleports you above
 the nearest tavern seen generating in this world. If none is known yet, it

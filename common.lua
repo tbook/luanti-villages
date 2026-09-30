@@ -134,6 +134,12 @@ local function stage_at(tod, villager)
 		if ticks < entry.start then break end
 		stage = entry.stage
 	end
+	-- A villager with no tavern tonight, or too late to reach it, goes
+	-- straight Home instead (#22); tavern.lua marks the day.
+	if stage == "tavern" and villager and core.get_day_count
+		and villager._villages_skip_tavern == core.get_day_count() then
+		return "home"
+	end
 	return stage
 end
 

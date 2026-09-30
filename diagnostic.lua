@@ -547,6 +547,10 @@ local function show(player, villager)
 		"Barrel claim (hidden from vanilla by the profession guard): " .. barrel_status(villager),
 		"",
 		"Keeper: " .. keeper.status(villager),
+		"Tavern visit: " .. (villager._villages_tavern_arrived and "at the tavern"
+			or villager._villages_tavern_target and ("heading to " .. pos_string(villager._villages_tavern_target))
+			or "none"),
+		"Tavern route: " .. route_status(villager._villages_tavern_route),
 		"",
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,

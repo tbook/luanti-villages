@@ -522,6 +522,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)
+	dofile(core.get_modpath("villages") .. "/tavern.lua")(def)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
 end)
 
