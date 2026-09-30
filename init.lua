@@ -504,3 +504,5 @@ core.register_on_mods_loaded(function()
 	install_fisherman(def)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
 end)
+
+dofile(core.get_modpath("villages") .. "/tavern_schematic.lua")
