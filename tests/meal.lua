@@ -101,8 +101,10 @@ minetest = {
 			set_rotation = function() end,
 			set_properties = function(_, props) entity.props = props end,
 			remove = function() entity.removed = true end,
+			get_luaentity = function() return entity end,
 		}
 		table.insert(entities, entity)
+		table.insert(objects, entity.object)
 		return entity.object
 	end,
 	add_particle = function() particles = particles + 1 end,
@@ -264,5 +266,26 @@ assert(alice._villages_meal, "served the next evening")
 time = 17600 / 24000
 def.do_custom(alice, 0.1)
 assert(not alice._villages_meal and meals_shown() == 0 and meal.plates[key(plate)] == nil, "Home clears the meal")
+
+-- A guest unloads mid-meal while its plate stays loaded: once its hold
+-- lapses, the other guest is served there, and the orphaned display goes
+-- first, so the plate never shows two meals.
+time = 15600 / 24000
+day = day + 1
+now = now + 5
+for _, guest in ipairs({alice, bob}) do
+	def.do_custom(guest, 0.1)
+	assert(guest._villages_seated)
+end
+now = now + 5
+def.do_custom(alice, 0.1)
+def.do_custom(bob, 0.1)
+local eater, waiter = alice, bob
+if bob._villages_meal then eater, waiter = bob, alice end
+assert(eater._villages_meal and not waiter._villages_meal and meals_shown() == 1)
+-- The eater unloads: it never ticks again, and its display stays.
+now = now + 6
+def.do_custom(waiter, 0.1)
+assert(waiter._villages_meal and meals_shown() == 1, "orphan cleared, one meal on the plate")
 
 print("meal.lua: ok")

@@ -97,11 +97,28 @@ local function keeper_on_duty(jukebox)
 	end
 end
 
-local function show(pos, node, item)
+-- A display whose guest no longer holds its plate: the guest unloaded, or
+-- was removed, while the plate stayed loaded, and nothing will finish it.
+local function orphaned(entity)
+	local hold_here = entity._plate and plates[entity._plate]
+	return not hold_here or hold_here.id ~= entity._guest or hold_here.until_time < now()
+end
+
+-- Clear any display left on this plate before serving another.
+local function clear_orphans(pos)
+	for _, object in ipairs(core.get_objects_inside_radius(pos, 0.5)) do
+		local entity = object:get_luaentity()
+		if entity and entity.name == ENTITY and orphaned(entity) then object:remove() end
+	end
+end
+
+local function show(self, pos, node, item)
 	local dir = core.wallmounted_to_dir(node.param2)
 	local at = {x = pos.x + dir.x * FRAME_OFFSET, y = pos.y + dir.y * FRAME_OFFSET, z = pos.z + dir.z * FRAME_OFFSET}
 	local object = core.add_entity(at, ENTITY)
 	if not object then return end
+	local entity = object:get_luaentity()
+	if entity then entity._plate, entity._guest = key(pos), self._id end
 	local definition = core.registered_items[item] or {}
 	local scale = definition.wield_scale or {x = 1, y = 1}
 	object:set_rotation(vector.dir_to_rotation(dir))
@@ -160,10 +177,14 @@ local function serve(self, jukebox)
 	local items = menu()
 	if #items == 0 then return end
 	local item = items[math.random(#items)]
-	local object = show(pos, node, item)
-	if not object then return end
-	served[key(jukebox)] = now()
+	clear_orphans(pos)
 	hold(self, pos)
+	local object = show(self, pos, node, item)
+	if not object then
+		plates[key(pos)] = nil
+		return
+	end
+	served[key(jukebox)] = now()
 	-- Counted from the moment it is served, so a meal cut short by standing
 	-- up, a reload or a player's item still spends the evening's meal.
 	self._villages_meal_day = core.get_day_count()
@@ -212,10 +233,10 @@ if core.register_entity then
 			static_save = false,
 			textures = {"blank.png"},
 		},
-		-- Never saved; one that outlives its guest's meal clears itself.
-		on_step = function(entity, dtime)
-			entity._age = (entity._age or 0) + dtime
-			if entity._age > EAT_SECONDS + 5 then entity.object:remove() end
+		-- Never saved; one that outlives its guest's hold on the plate
+		-- clears itself, before the plate can be served again.
+		on_step = function(entity)
+			if orphaned(entity) then entity.object:remove() end
 		end,
 	})
 end
