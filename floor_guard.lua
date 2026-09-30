@@ -72,7 +72,9 @@ return function(def)
 					tostring(self._id), node, pos_string(at), dtime, pos_string(before)))
 				object:set_pos(before)
 				object:set_velocity(vector.zero())
-				pos = before
+				-- moveresult describes the undone move, so let mcl_mobs step
+				-- without collision info rather than with the wrong info.
+				moveresult = nil
 			end
 		end
 		local result = original_step(self, dtime, moveresult)

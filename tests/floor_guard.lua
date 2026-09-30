@@ -21,8 +21,10 @@ vector = {zero = function() return {x = 0, y = 0, z = 0} end}
 
 local def = {}
 local step_calls = 0
+local last_moveresult
 def.on_step = function(self, dtime, moveresult)
 	step_calls = step_calls + 1
+	last_moveresult = moveresult
 	if self.move_to then
 		self.pos = self.move_to
 		self.move_to = nil
@@ -71,8 +73,9 @@ fill(0, 0, 9, 9)
 local v = villager({x = 0, y = 6.56, z = 0})
 def.on_step(v, 0.05)
 engine_moves(v, {x = 0, y = 3.56, z = 0})
-def.on_step(v, 2.6)
+def.on_step(v, 2.6, {touching_ground = true})
 assert_pos(v, 0, 6.56, 0, "a villager dropped through its floor is put back")
+assert(last_moveresult == nil, "mcl_mobs does not see the undone move's collision info")
 assert(v.velocity and v.velocity.y == 0, "its velocity is cleared")
 assert(#logs == 1 and logs[1]:find("dropped through mcl_core:stone at %(0.0,6.0,0.0%)"),
 	"the undo names the floor it passed through: " .. tostring(logs[1]))
@@ -108,6 +111,19 @@ engine_moves(v, {x = 2, y = 2.51, z = 0})
 def.on_step(v, 2.6)
 assert_pos(v, 2, 2.51, 0, "a real fall off a ledge is left alone")
 assert(#logs == 0, "and not reported")
+
+-- Falling down a one-wide shaft in the same column: the only walkable node is
+-- the ground below the new position, so nothing was passed through.
+reset()
+fill(0, 0, -5, 2)
+fill(1, 0, -5, 6)
+fill(-1, 0, -5, 6)
+v = villager({x = 0, y = 6.51, z = 0})
+def.on_step(v, 0.05)
+engine_moves(v, {x = 0, y = 2.51, z = 0})
+def.on_step(v, 2.6, {touching_ground = true})
+assert_pos(v, 0, 2.51, 0, "a fall down a shaft is left alone")
+assert(last_moveresult and last_moveresult.touching_ground, "and its moveresult is passed on")
 
 -- Stepping down a single stair drops less than a node.
 reset()
