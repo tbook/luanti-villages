@@ -5,6 +5,7 @@ local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
+local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
@@ -125,11 +126,12 @@ local function sleep_status(villager, bed_ok)
 	if route and route.status == "travelling" then return "travelling to bed" end
 	if route and route.status == "retry" then return "waiting to retry bed route" end
 	if not bed_ok then return "no valid claimed bed" end
-	if not is_sleep_time() then return "waiting for night" end
-	if villager.order ~= "sleep" then return "nighttime, but no sleep order" end
+	if not is_home_time() then return "waiting for evening" end
+	if villager.order ~= "sleep" then return "evening, but no sleep order" end
 	local pos = villager.object and villager.object:get_pos()
 	local d = distance(pos, villager._bed)
 	if d and d >= 2 then return string.format("travelling to bed (%.1f nodes away)", d) end
+	if not is_sleep_time() then return "home, waiting for bedtime" end
 	return "waiting to enter bed"
 end
 

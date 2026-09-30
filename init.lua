@@ -498,6 +498,16 @@ core.register_on_mods_loaded(function()
 		return result
 	end
 
+	-- VoxeLibre's get_activity (mobs_mc/villager.lua) is a leaked global that
+	-- do_activity looks up by name on every call, so replacing it here moves
+	-- vanilla villagers onto this mod's schedule (#22). If the upstream API in
+	-- #35 lands, this becomes a call to it.
+	if get_activity then
+		get_activity = common.get_activity
+	else
+		core.log("warning", "[villages] VoxeLibre's get_activity is gone; villagers keep the vanilla schedule")
+	end
+
 	dofile(core.get_modpath("villages") .. "/births.lua")(def)
 	dofile(core.get_modpath("villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
