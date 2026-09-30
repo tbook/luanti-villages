@@ -3,8 +3,8 @@
 -- square beside a bed and retain enough state for useful diagnostics.
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
-local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
+local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
 local planner = dofile(core.get_modpath("villages") .. "/planner.lua")
 local RETRY_SECONDS = 30
@@ -708,7 +708,7 @@ local function install(def)
 		local destination
 		local no_jobsite_candidate = false
 		local now = core.get_gametime()
-		if self._bed and same_pos(target, self._bed) and is_sleep_time() then
+		if self._bed and same_pos(target, self._bed) and is_home_time() then
 			destination = {
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
 			}
@@ -728,7 +728,7 @@ local function install(def)
 				pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
 				cardinal_only = true, raised_ok = true, candidate_filter = unoccupied_candidates,
 			}
-		elseif not self._jobsite and not is_sleep_time() then
+		elseif not self._jobsite and not is_home_time() then
 			local node = core.get_node_or_nil(target)
 			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
 				local route = self._villages_job_search_route
@@ -830,11 +830,11 @@ local function install(def)
 			self._villages_fish_target = nil
 			return result
 		end
-		if not is_sleep_time() then
+		if not is_home_time() then
 			cancel_route(self, "_villages_bed_route")
 		else
 			-- VoxeLibre only schedules activity every five seconds. Start a bed trip
-			-- promptly at night so a wandering villager does not wait for that timer.
+			-- promptly at the Home stage so a wandering villager does not wait for that timer.
 			if not self._villages_bed_route and not self.following and self.state ~= PATHFINDING
 			and has_claimed_bed(self) and self.object:get_pos() then
 				if vector.distance(self.object:get_pos(), self._bed) >= 2 then
@@ -880,7 +880,7 @@ local function install(def)
 			claimed = has_fish_target,
 		}
 		if working and (recover_stalled_route(self, fish_destination) or recover_route(self, fish_destination)) then return result end
-		if self._jobsite or is_sleep_time() then
+		if self._jobsite or is_home_time() then
 			cancel_route(self, "_villages_job_search_route")
 		else
 			local search_route = self._villages_job_search_route

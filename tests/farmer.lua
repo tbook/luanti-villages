@@ -66,7 +66,7 @@ assert(not farmer._villages_farm_target)
 assert(not existing_drop.removed, "farmers should not collect pre-existing ground items")
 assert(not nearby_villager.removed, "farmers must not target nearby villagers")
 
-time = 0.5
+time = 0.7
 path_target = nil
 farmer._villages_farm_next = nil
 def.do_custom(farmer, 0.1)

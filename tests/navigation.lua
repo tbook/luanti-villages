@@ -521,7 +521,7 @@ local job_entity = {
 		set_velocity = function() end,
 	},
 }
-timeofday = 0.5
+timeofday = 0.7
 assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
 assert(job_target.x == 10 and job_target.z == 0)
 assert(not job_entity._villages_job_route)
@@ -723,7 +723,7 @@ iron_door = false
 
 -- A work-period interruption invalidates a farm route and its chosen crop as
 -- one unit, so farmer.lua can choose a fresh crop next time work begins.
-timeofday = 0.5
+timeofday = 0.7
 local interrupted_farmer = {
 	_villages_farm_target = {x = 2, y = 0, z = 0},
 	_villages_farm_route = {status = "travelling"},
@@ -813,7 +813,7 @@ raised_shore_nodes = {}
 
 -- A work-period interruption invalidates a fish route and its target as one
 -- unit, so fisherman.lua can choose a fresh spot next time work begins.
-timeofday = 0.5
+timeofday = 0.7
 local interrupted_fisherman = {
 	_villages_fish_target = {x = 2, y = 0, z = 0},
 	_villages_fish_route = {status = "travelling"},

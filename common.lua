@@ -97,20 +97,62 @@ local function is_supported(pos)
 	return not is_hazard(node.name, def)
 end
 
+-- The villager day (#22), in game ticks (1000 ticks = 1 game hour). Every
+-- stage runs from its start until the next stage's start, wrapping at
+-- midnight. This one table drives both this mod's own time checks and the
+-- get_activity wrapper handed to VoxeLibre below.
+local SCHEDULE = {
+	{start = 5500, stage = "putter"},
+	{start = 7000, stage = "work"},
+	{start = 15500, stage = "tavern"},
+	{start = 17500, stage = "home"},
+	{start = 18500, stage = "sleep"},
+}
+
+local function is_thunder()
+	return mcl_weather and mcl_weather.get_weather
+		and mcl_weather.get_weather() == "thunder" or false
+end
+
+-- tod is core.get_timeofday()'s 0..1 fraction; omit it for the current time.
+-- A thunderstorm sends everyone to bed at any hour.
+local function stage_at(tod)
+	if is_thunder() then return "sleep" end
+	local ticks = ((tod or core.get_timeofday()) * 24000) % 24000
+	local stage = SCHEDULE[#SCHEDULE].stage
+	for _, entry in ipairs(SCHEDULE) do
+		if ticks < entry.start then break end
+		stage = entry.stage
+	end
+	return stage
+end
+
+-- What VoxeLibre's do_activity (mobs_mc/villager.lua) should do in each
+-- stage. It understands only "work", "sleep" and "gathering"; anything else
+-- makes it clear self.order and leave the villager to this mod. "sleep"
+-- during Home walks the villager to its bed, where is_sleep_time keeps it
+-- standing until the Sleep stage lets it lie down.
+local vanilla_activity = {
+	putter = "putter",
+	work = "work",
+	tavern = "tavern",
+	home = "sleep",
+	sleep = "sleep",
+}
+
 return {
-	is_sleep_time = function()
-		local tod = core.get_timeofday() * 24000
-		return tod > 17500 or tod < 6500
-			or (mcl_weather and mcl_weather.get_weather
-				and mcl_weather.get_weather() == "thunder")
+	schedule_stage = stage_at,
+	-- Replacement for VoxeLibre's get_activity(tod), which villager.lua
+	-- declares without `local` and looks up as a global on every call.
+	get_activity = function(tod) return vanilla_activity[stage_at(tod)] end,
+	-- Lying down in bed.
+	is_sleep_time = function() return stage_at() == "sleep" end,
+	-- Heading to, or staying at, the claimed bed.
+	is_home_time = function()
+		local stage = stage_at()
+		return stage == "home" or stage == "sleep"
 	end,
-	is_work_time = function()
-		if mcl_weather and mcl_weather.get_weather and mcl_weather.get_weather() == "thunder" then
-			return false
-		end
-		local tod = core.get_timeofday() * 24000
-		return (tod > 7500 and tod < 11000) or (tod > 13500 and tod < 16000)
-	end,
+	is_work_time = function() return stage_at() == "work" end,
 	is_workstation_node = function(name)
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
