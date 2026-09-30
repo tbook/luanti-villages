@@ -115,19 +115,29 @@ end
 -- traded with, whose trades would be lost with it (#15). Most villages have
 -- more jobsites than villagers, so waiting for someone unemployed would
 -- leave the tavern empty for good.
+-- Everything the old job kept in this mod, so it cannot outlive the job. A
+-- fisherman's flag in particular would have fisherman.lua send the keeper
+-- fishing during Staff, which counts as work time.
+local OLD_JOB_FIELDS = {
+	"_villages_fisherman", "_villages_fisherman_check",
+	"_villages_fish_target", "_villages_fish_route", "_villages_fish_next",
+	"_villages_farm_target", "_villages_farm_route", "_villages_farm_next",
+	"_villages_job_route", "_villages_job_search_route",
+}
+
 local function take_over(self, pos)
 	if self.child or not self._id or self._villages_keeper or self._profession == "nitwit" then return false end
+	-- These are employ()'s own conditions, checked up front so nothing below
+	-- can fail halfway: once the old job is released, employ() must succeed.
 	if not is_jukebox(pos) or not unclaimed(pos) or has_traded(self) then return false end
 	local previous = self._jobsite
 	if previous and core.get_meta(previous):get_string("villager") == self._id then
 		core.get_meta(previous):set_string("villager", "")
 	end
 	local profession = self._profession
+	for _, field in ipairs(OLD_JOB_FIELDS) do self[field] = nil end
 	self._jobsite, self._profession, self._trades = nil, "unemployed", nil
-	if not employ(self, pos) then
-		self._profession = profession
-		return false
-	end
+	employ(self, pos)
 	core.log("action", string.format("[villages] villager %s left %s%s to keep the tavern",
 		tostring(self._id), tostring(profession), previous and (" at " .. pos_string(previous)) or ""))
 	return true

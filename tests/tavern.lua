@@ -113,6 +113,45 @@ def.do_custom(carol, 0.1)
 assert(carol._villages_tavern_arrived and not carol._villages_keeper and carol._profession == "farmer")
 assert((metas[key(empty)] or {}).villager == nil)
 
+-- Unloaded and reloaded on the way (a player walked out of range): the
+-- villager resumes the same trip instead of idling until Home.
+local frank = villager("frank", {x = 60, y = 0, z = 0}, {_bed = {x = 25, y = 0, z = 0}})
+def.do_custom(frank, 0.1)
+assert(vector.equals(frank._villages_tavern_target, jukebox))
+frank._villages_tavern_route = {status = "travelling"}
+def.on_activate(frank, "", 0)
+frank.state = "stand"
+local before = #gopaths
+def.do_custom(frank, 0.1)
+assert(#gopaths == before + 1 and vector.equals(gopaths[#gopaths].target, jukebox), "resumes after reload")
+-- Reloaded while inside: back in place and holding, not stranded.
+def.on_activate(bob, "", 0)
+assert(bob.order == nil and not bob._villages_tavern_arrived)
+def.do_custom(bob, 0.1)
+assert(bob._villages_tavern_arrived and bob.order == "stand", "a reloaded guest settles back in")
+
+-- Pushed back out of the tavern: the guest walks back in.
+bob.object:set_pos({x = 10, y = 0, z = 0})
+before = #gopaths
+def.do_custom(bob, 0.1)
+assert(not bob._villages_tavern_arrived and #gopaths == before + 1, "walks back in")
+bob.state = "stand"
+bob.object:set_pos({x = 18, y = 0, z = 1})
+def.do_custom(bob, 0.1)
+assert(bob._villages_tavern_arrived)
+
+-- A fisherman taking over sheds its old job entirely, or fisherman.lua would
+-- send the keeper fishing during Staff (work time).
+local third = {x = -30, y = 0, z = 0}
+nodes[key(third)] = "mcl_jukebox:jukebox"
+local gina = villager("gina", {x = -29, y = 0, z = 0}, {
+	_bed = {x = -30, y = 0, z = 3}, _profession = "fisherman", _villages_fisherman = true,
+	_villages_fish_target = {x = -40, y = 0, z = 0}, _villages_fish_route = {status = "arrived"},
+})
+def.do_custom(gina, 0.1)
+assert(gina._villages_keeper and gina._profession == "butcher")
+assert(gina._villages_fisherman == nil and gina._villages_fish_target == nil and gina._villages_fish_route == nil)
+
 -- Leave-by 17:00: a villager still on the way goes home instead.
 local dave = villager("dave", {x = 100, y = 0, z = 0}, {_bed = {x = 30, y = 0, z = 0}})
 def.do_custom(dave, 0.1)

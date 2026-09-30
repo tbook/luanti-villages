@@ -114,9 +114,16 @@ return function(def)
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
 
+	-- Keep the evening's destination across an unload: it is plain data,
+	-- and the day's one decision has already been made, so dropping it would
+	-- leave the villager neither at dinner nor going home. The route and the
+	-- arrival are this session's and are redone; the hold is released until
+	-- the villager is back inside.
 	def.on_activate = function(self, staticdata, dtime)
 		local result = original_activate(self, staticdata, dtime)
-		end_visit(self)
+		self._villages_tavern_route = nil
+		self._villages_tavern_arrived = nil
+		if self.order == "stand" then self.order = nil end
 		return result
 	end
 
