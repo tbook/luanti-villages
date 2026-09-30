@@ -87,11 +87,16 @@ local function claim_owner_entity(pos, kind)
 	return loaded_villager(owner, pos)
 end
 
+-- A keeper's jukebox (keeper.lua) is a jobsite too, though not a vanilla one.
+local function is_jobsite_node(name)
+	return is_workstation_node(name) or name == "mcl_jukebox:jukebox"
+end
+
 local function status_of_claim(pos, id, kind)
 	if not pos then return "none assigned" end
 	local node = core.get_node_or_nil(pos)
 	if not node then return "assigned position is unloaded" end
-	if kind == "jobsite" and not is_workstation_node(node.name) then
+	if kind == "jobsite" and not is_jobsite_node(node.name) then
 		return "assigned node is not a workstation (" .. node.name .. ")"
 	end
 	local meta = core.get_meta(pos)
@@ -467,7 +472,7 @@ local function inspectable_node(pos)
 		bed_group = node and core.get_item_group(node.name, "bed") or 0
 	end
 	if bed_group == 1 then return "bed", pos, node end
-	if is_workstation_node(node.name) or node.name == "mcl_jukebox:jukebox" then
+	if is_jobsite_node(node.name) then
 		return "workstation", pos, node
 	end
 end

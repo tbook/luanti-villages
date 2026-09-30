@@ -1,4 +1,5 @@
 local shown, original_uses = nil, 0
+vector = vector or {distance = function(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2) end}
 local metadata = {}
 local timeofday = 0.4
 -- Populated by place_pond() below, far enough apart (see comment there) that
@@ -47,6 +48,7 @@ minetest = {
 		if pos.x == 4 and pos.y == 0 and pos.z == 0 then return {name = "mcl_composters:composter"} end
 		if pos.x == 5 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
 		if pos.x == 6 and pos.y == 0 and pos.z == 0 then return {name = "mcl_barrels:barrel_closed"} end
+		if pos.x == 7 and pos.y == 0 and pos.z == 0 then return {name = "mcl_jukebox:jukebox"} end
 		if water_nodes[pos_key3(pos)] then return {name = "mcl_core:water_source"} end
 		return {name = "air"}
 	end,
@@ -307,5 +309,28 @@ assert(original_uses == 1)
 
 lookup("stack", player, {type = "node", under = {x = 9, y = 0, z = 0}})
 assert(original_uses == 2)
+
+-- A keeper's jukebox is a real jobsite claim, not "not a workstation" (#15).
+metadata["7,0,0"] = {villager = "villager-k"}
+local tavern_keeper = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-k", _profession = "butcher",
+			_villages_keeper = true, _jobsite = {x = 7, y = 0, z = 0},
+			order = "work", state = "stand",
+			object = {
+				get_pos = function() return {x = 7, y = 0, z = 1} end,
+				get_properties = function()
+					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+				end,
+			},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = tavern_keeper})
+assert(shown.form:find("Jobsite claim: valid claim", 1, true), shown.form)
+assert(not shown.form:find("no valid claimed jobsite", 1, true), shown.form)
+lookup("stack", player, {type = "node", under = {x = 7, y = 0, z = 0}})
+assert(shown.formname == "villages:workstation_diagnostic", "a jukebox can be inspected")
 
 print("diagnostic.lua: ok")
