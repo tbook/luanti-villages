@@ -467,7 +467,7 @@ local function inspectable_node(pos)
 		bed_group = node and core.get_item_group(node.name, "bed") or 0
 	end
 	if bed_group == 1 then return "bed", pos, node end
-	if is_workstation_node(node.name) then
+	if is_workstation_node(node.name) or node.name == "mcl_jukebox:jukebox" then
 		return "workstation", pos, node
 	end
 end
@@ -568,6 +568,9 @@ local function show_node(player, kind, pos, node)
 		else
 			local job_ok = status_of_claim(owner._jobsite, owner._id, "jobsite") == "valid claim"
 			table.insert(lines, "Owner work status: " .. work_status(owner, job_ok))
+			if owner._villages_keeper then
+				table.insert(lines, "Keeper: " .. keeper.status(owner))
+			end
 		end
 	end
 	table.insert(lines, "")

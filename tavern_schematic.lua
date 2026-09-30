@@ -11,6 +11,12 @@ local function index(size, x, y, z)
 	return z * size.y * size.x + y * size.x + x + 1
 end
 
+-- The facedir param2 that seats someone facing the given direction. The
+-- chair's backrest sits on its +z side at param2 0 (mcl_decor
+-- chairs_tables.lua tpl_chair), so the sitter faces -z; each param2 step
+-- turns it a quarter clockwise seen from above (+z -> +x -> -z -> -x).
+local CHAIR_FACING = {["-z"] = 0, ["-x"] = 1, ["+z"] = 2, ["+x"] = 3}
+
 local function furnish(schematic)
 	local size = schematic.size
 	if size.x ~= 12 or size.y ~= 13 or size.z ~= 10 then return false end
@@ -27,10 +33,10 @@ local function furnish(schematic)
 		{5, 2, 7, "mcl_fences:fence", "mcl_decor:table_wooden", 0},
 		{4, 3, 3, "mesecons_pressureplates:pressure_plate_wood_off", "mcl_itemframes:plate", 1},
 		{5, 3, 7, "mesecons_pressureplates:pressure_plate_wood_off", "mcl_itemframes:plate", 1},
-		{4, 2, 2, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", 0},
-		{4, 2, 4, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", 2},
-		{4, 2, 7, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", 1},
-		{6, 2, 7, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", 3},
+		{4, 2, 2, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["+z"]},
+		{4, 2, 4, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["-z"]},
+		{4, 2, 7, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["+x"]},
+		{6, 2, 7, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["-x"]},
 	}
 	for _, change in ipairs(changes) do
 		local cell = schematic.data[index(size, change[1], change[2], change[3])]

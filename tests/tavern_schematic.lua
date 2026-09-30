@@ -26,8 +26,15 @@ assert(cell(4, 2, 3).name == "mcl_decor:table_wooden")
 assert(cell(5, 2, 7).name == "mcl_decor:table_wooden")
 assert(cell(4, 3, 3).name == "mcl_itemframes:plate" and cell(4, 3, 3).param2 == 1)
 assert(cell(5, 3, 7).name == "mcl_itemframes:plate" and cell(5, 3, 7).param2 == 1)
+-- The sitter faces away from the backrest, which is on +z at param2 0
+-- (mcl_decor tpl_chair); every seat must face a table.
+local facing = {[0] = {0, -1}, [1] = {-1, 0}, [2] = {0, 1}, [3] = {1, 0}}
 for _, seat in ipairs({{4, 2}, {4, 4}, {4, 7}, {6, 7}}) do
-	assert(cell(seat[1], 2, seat[2]).name == "mcl_decor:chair_wooden")
+	local chair = cell(seat[1], 2, seat[2])
+	assert(chair.name == "mcl_decor:chair_wooden")
+	local d = facing[chair.param2]
+	assert(cell(seat[1] + d[1], 2, seat[2] + d[2]).name == "mcl_decor:table_wooden",
+		("chair at %d,%d faces away from its table"):format(seat[1], seat[2]))
 end
 assert(not furnish(schematic), "already furnished tavern must not be transformed twice")
 set(4, 2, 3, "mcl_fences:fence")
