@@ -554,6 +554,8 @@ local function show(player, villager)
 			or "none"),
 		"Tavern route: " .. route_status(villager._villages_tavern_route),
 		"Tavern seat: " .. seat.status(villager),
+		"Tavern meal: " .. (villager._villages_meal and ("eating " .. villager._villages_meal.item)
+			or villager._villages_meal_day == core.get_day_count() and "has eaten tonight" or "not served tonight"),
 		"",
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,

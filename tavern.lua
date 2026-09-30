@@ -1,8 +1,8 @@
 -- The evening trip to the tavern (#16, first slice): during the Tavern stage
 -- (#22) every adult walks to the nearest tavern's jukebox and stays there
 -- until Home. The first to find a tavern with no keeper becomes its keeper;
--- the rest take a seat at a table if one is free (seat.lua, #99). Plates and
--- meals come later.
+-- the rest take a seat at a table if one is free (seat.lua, #99) and are
+-- served dinner there while the keeper is on duty (meal.lua, #100).
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
@@ -38,7 +38,10 @@ local function nearest_tavern(origin)
 	return best
 end
 
+local meal
+
 local function end_visit(self)
+	meal.stand(self)
 	seat.stand(self)
 	local route = self._villages_tavern_route
 	self._villages_tavern_route = nil
@@ -130,10 +133,14 @@ local function dining(self)
 		and not (node and node.name ~= JUKEBOX)
 end
 
-return function(def)
+return function(def, shared_meal)
+	-- init.lua passes the copy it loaded, which registered the meal entity.
+	meal = shared_meal or dofile(core.get_modpath("villages") .. "/meal.lua")
 	seat.install(def)
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
+	local original_staticdata = def.get_staticdata
+	local original_die = def.on_die
 
 	-- Keep the evening's destination across an unload: it is plain data,
 	-- and the day's one decision has already been made, so dropping it would
@@ -145,7 +152,23 @@ return function(def)
 		self._villages_tavern_route = nil
 		self._villages_tavern_arrived = nil
 		if self.order == "stand" then self.order = nil end
+		-- The meal entity is never saved; the evening's meal day is.
+		self._villages_meal, self._villages_seated_at = nil, nil
 		return result
+	end
+
+	-- The meal holds its entity, which cannot be serialized.
+	def.get_staticdata = function(self)
+		local current, seated_at = self._villages_meal, self._villages_seated_at
+		self._villages_meal, self._villages_seated_at = nil, nil
+		local saved = original_staticdata(self)
+		self._villages_meal, self._villages_seated_at = current, seated_at
+		return saved
+	end
+
+	def.on_die = function(self, pos, cmi_cause)
+		meal.stand(self)
+		return original_die(self, pos, cmi_cause)
 	end
 
 	def.do_custom = function(self, dtime)
@@ -154,8 +177,10 @@ return function(def)
 		if self._villages_seated then
 			if dining(self) and seat.hold_seat(self) then
 				self.order = "stand"
+				meal.tick(self, dtime, self._villages_tavern_target)
 				return false
 			end
+			meal.stand(self)
 			seat.stand(self)
 		end
 		local result = original_custom(self, dtime)

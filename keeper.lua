@@ -318,4 +318,5 @@ return {
 		return string.format("heading to the jukebox (%.1f nodes away)", distance or -1)
 	end,
 	trades = keeper_trades,
+	MENU = MENU,
 }
