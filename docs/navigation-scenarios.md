@@ -170,6 +170,24 @@ walk out; the debug log records `woke with no usable bed exit` for that case.
 A villager that disappears here is a regression: check the log for a
 `[living_villages] villager ... died` line, which names the cause.
 
+## 15. Wandering in a small room
+
+Watch a villager wander through the Putter stage (5:30–7:00) in a house with
+the door closed, then an unemployed villager or a nitwit wandering outside
+during the day among fences, walls and field edges (#93).
+
+Expected result: every walk is a short straight line that ends in a stop. A
+villager turns on the spot and then walks; it never walks face-first into a
+wall, a fence, a closed door or a window and keeps pushing. In a space too
+small for a two-node walk it stands and looks around instead. It steps up and
+down single blocks, but never walks into water or off a drop of two or more.
+
+Then watch villagers arrive for dinner at a generated tavern. The stairs either
+side of its front step sit under the wall posts that hold its torches, at head
+height. Villagers must climb to the door by the middle step, never pushing
+their heads into a post. A route that would pass under one is replanned before
+the villager sets off, so the diagnostic shows `mode planner` for that trip.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.
