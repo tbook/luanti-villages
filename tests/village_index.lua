@@ -19,13 +19,48 @@ minetest = {
 	log = function(_, m) table.insert(logs, m) end,
 	register_chatcommand = function(name, def) assert(name == "villages_goto"); command = def end,
 	get_player_by_name = function() return player end,
+	get_mapgen_setting = function(name)
+		return ({seed = "1653956509573478210", chunksize = "5"})[name]
+	end,
+	get_spawn_level = function() return 10 end,
 }
 local placed = 0
 settlements = {place_schematics = function() placed = placed + 1 end}
-dofile("village_index.lua")
+local index = dofile("village_index.lua")
 
+-- Village chunks VoxeLibre actually tried in a real world ("World 4",
+-- seed 1653956509573478210), read from the mcl_villages:structblock markers
+-- it leaves at each tried chunk's minp.
+local seed = index.low32("1653956509573478210")
+assert(seed == 3004331842, "low 32 bits of the seed")
+local tried = {
+	{-1872, 48, 208}, {-992, 128, -272}, {-992, 208, 208}, {-672, 128, 208}, {-592, 48, 368},
+	{-352, 208, -592}, {-352, 208, -272}, {-272, 128, -512}, {-272, 128, -352}, {-192, 128, 128},
+	{-112, 208, -512}, {208, 48, -832},
+}
+for _, c in ipairs(tried) do
+	local minp = vec(c[1], c[2], c[3])
+	assert(index.blockseed(minp, seed) % 77 == 17, "predicts " .. minetest.pos_to_string(minp))
+	assert(index.chunk_origin(c[1] + 40, 80) == c[1] and index.chunk_origin(c[3] + 79, 80) == c[3])
+end
+local misses = 0
+for x = -5, 5 do
+	if index.blockseed(vec(-32 + 80 * x, -32, -32), seed) % 77 ~= 17 then misses = misses + 1 end
+end
+assert(misses >= 9, "most chunks are not village sites")
+
+-- With nothing recorded, the command goes to the nearest predicted site and
+-- then moves on to the next one.
 local ok, message = command.func("p", "")
-assert(not ok and message:find("0 village"), message)
+assert(ok and message:find("predicted village site"), message)
+local first = vec(player_pos.x, player_pos.y, player_pos.z)
+assert(first.y == 50, "lands above the estimated ground")
+player_pos = vec(0, 0, 0)
+ok, message = command.func("p", "")
+assert(ok and (player_pos.x ~= first.x or player_pos.z ~= first.z), "a visited site is not offered again")
+local site = index.predicted_sites(vec(0, 0, 0), seed, {}, 1)[1]
+assert(site and index.blockseed(site.minp, seed) % 77 == 17)
+player_pos = vec(0, 0, 0)
 
 settlements.place_schematics({{name = "belltower", pos = vec(100, 5, 0)}, {name = "small_house", pos = vec(110, 5, 0)}})
 settlements.place_schematics({{name = "belltower", pos = vec(500, 7, 0)}, {name = "tavern", pos = vec(510, 7, 4)}})
@@ -37,5 +72,8 @@ assert(ok and player_pos.x == 516 and player_pos.y == 19 and player_pos.z == 9, 
 player_pos = vec(0, 0, 0)
 ok = command.func("p", "any")
 assert(ok and player_pos.x == 100 and player_pos.y == 17, "any picks the nearest village, tavern or not")
+player_pos = vec(0, 0, 0)
+ok, message = command.func("p", "new")
+assert(ok and message:find("predicted"), "new skips known taverns")
 
 print("village_index.lua: ok")
