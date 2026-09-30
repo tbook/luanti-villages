@@ -516,3 +516,4 @@ core.register_on_mods_loaded(function()
 end)
 
 dofile(core.get_modpath("villages") .. "/tavern_schematic.lua")
+dofile(core.get_modpath("villages") .. "/village_index.lua")

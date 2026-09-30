@@ -50,6 +50,11 @@ currently is rather than a separately maintained copy. Existing,
 already-generated taverns are not refurnished. This is asset placement only;
 there is no tavern keeper or dinner service yet (tracked in #35).
 
+For play testing, `/villages_goto` (requires `teleport`) teleports you above
+the nearest tavern generated in this world, and `/villages_goto any` to the
+nearest village. Only villages generated while the mod is installed are
+known; each one is also logged to `debug.txt` as it generates.
+
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
 ## Attribution and licenses
