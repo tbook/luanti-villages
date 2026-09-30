@@ -215,6 +215,17 @@ local function has_fish_target(self)
 	return self._villages_fish_target ~= nil and common.is_surface_water(self._villages_fish_target)
 end
 
+-- The evening trip (#16) heads for a jukebox, a tavern's one fixed landmark.
+local function has_tavern_target(self)
+	local pos = self._villages_tavern_target
+	local node = pos and core.get_node_or_nil(pos)
+	return node ~= nil and node.name == "mcl_jukebox:jukebox"
+end
+
+local function is_tavern_time(self)
+	return common.schedule_stage(nil, self) == "tavern"
+end
+
 local function stop(self)
 	self.state = "stand"
 	self._target = nil
@@ -728,6 +739,11 @@ local function install(def)
 				pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
 				cardinal_only = true, raised_ok = true, candidate_filter = unoccupied_candidates,
 			}
+		elseif self._villages_tavern_target and same_pos(target, self._villages_tavern_target)
+			and is_tavern_time(self) and has_tavern_target(self) then
+			destination = {
+				pos = self._villages_tavern_target, route_field = "_villages_tavern_route", kind = "tavern",
+			}
 		elseif not self._jobsite and not is_home_time(self) then
 			local node = core.get_node_or_nil(target)
 			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
@@ -826,6 +842,7 @@ local function install(def)
 			cancel_route(self, "_villages_farm_route")
 			cancel_route(self, "_villages_fish_route")
 			cancel_route(self, "_villages_job_search_route")
+			cancel_route(self, "_villages_tavern_route")
 			self._villages_farm_target = nil
 			self._villages_fish_target = nil
 			return result
@@ -852,6 +869,18 @@ local function install(def)
 				claimed = has_claimed_bed,
 			}
 			if recover_stalled_route(self, bed_destination) or recover_route(self, bed_destination) then return result end
+		end
+
+		if not is_tavern_time(self) then
+			cancel_route(self, "_villages_tavern_route")
+		else
+			local tavern_destination = {
+				pos = self._villages_tavern_target, route_field = "_villages_tavern_route", kind = "tavern",
+				claimed = has_tavern_target,
+			}
+			if recover_stalled_route(self, tavern_destination) or recover_route(self, tavern_destination) then
+				return result
+			end
 		end
 
 		local working = is_work_time(self)
