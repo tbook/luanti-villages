@@ -105,6 +105,28 @@ carol.object:set_pos({x = 29, y = 0, z = 0})
 gopaths[1].callback(carol)
 assert(carol._villages_keeper and vector.equals(carol._jobsite, second))
 
+-- After vanilla's 17:30 night begins, its do_activity clears the work order
+-- and skips do_work; the keeper must still hold its post until 18:30.
+time = 18000 / 24000
+vanilla_custom = function(self) if self.order == "work" then self.order = nil end end
+alice.order = "work"
+def.do_custom(alice, 0.1)
+assert(alice.order == "work", "keeper keeps working through vanilla's night")
+assert(keeper.status(alice) == "staffing the tavern")
+local count = #gopaths
+alice.object:set_pos({x = 12, y = 0, z = 0})
+now = now + 10
+def.do_custom(alice, 0.1)
+assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, jukebox), "a drifted keeper walks back")
+assert(alice.order == nil)
+alice.object:set_pos({x = 4, y = 0, z = 0})
+time = 19500 / 24000
+alice.order = nil
+def.do_custom(alice, 0.1)
+assert(alice.order == nil, "no hold once service ends")
+time = 10000 / 24000
+vanilla_custom = function() end
+
 -- A keeper refuses vanilla trips to any other workstation.
 minetest.get_item_group = function(name, group) return 0 end
 local common = dofile("common.lua")

@@ -132,13 +132,21 @@ local function seek_jukebox(self)
 	end, true)
 end
 
--- A keeper that drifted from the jukebox during service goes back to it.
--- Vanilla's do_work already does this by day, but vanilla's night begins at
--- 17500 (villager.lua is_night), while the tavern stays staffed until 18500.
+-- Keep a keeper at the jukebox for all of service. Vanilla's do_work does
+-- this by day, but vanilla's night begins at 17500 (villager.lua is_night):
+-- from then on do_activity clears the "work" order every poll and never
+-- calls do_work, while the tavern stays staffed until 18500. So hold the
+-- order here -- "work" is what stops the wander (mcl_mobs/movement.lua) --
+-- and walk a keeper that drifted back.
 local function staff(self)
 	local jukebox = claimed_jukebox(self)
 	local pos = self.object:get_pos()
-	if not jukebox or not pos or vector.distance(pos, jukebox) < STAFF_DISTANCE then return end
+	if not jukebox or not pos then return end
+	if vector.distance(pos, jukebox) < STAFF_DISTANCE then
+		self.order = "work"
+		return
+	end
+	if self.order == "work" then self.order = nil end
 	local now = core.get_gametime()
 	if now < (self._villages_keeper_staff_check or 0) then return end
 	self._villages_keeper_staff_check = now + STAFF_INTERVAL
@@ -260,7 +268,9 @@ return {
 		local pos = self.object and self.object:get_pos()
 		local distance = pos and vector.distance(pos, jukebox)
 		if stage ~= "staff" then return "off duty (" .. stage .. ")" end
-		if distance and distance < STAFF_DISTANCE then return "staffing the tavern" end
+		if distance and distance < STAFF_DISTANCE then
+			return self.order == "work" and "staffing the tavern" or "at the jukebox, not yet working"
+		end
 		return string.format("heading to the jukebox (%.1f nodes away)", distance or -1)
 	end,
 	trades = keeper_trades,
