@@ -60,7 +60,11 @@ menu and looks for another jukebox, never a smoker. Dinner service is not
 built yet (#16), but from 15:30 every adult walks to the nearest tavern within
 48 nodes of its bed and stays until 17:30; one not there by 17:00 goes home
 instead. The first villager to reach a tavern with no keeper takes the job,
-leaving its old one, unless a player has traded with it.
+leaving its old one, unless a player has traded with it. The other guests
+each take a free chair that faces a table, in any tavern including one a
+player built, and sit until 17:30; a guest never takes a chair a player is
+sitting in, gets up if a player takes its chair, and stands inside when no
+seat is free.
 
 For play testing, `/villages_goto` (requires `teleport`) teleports you above
 the nearest tavern seen generating in this world. If none is known yet, it

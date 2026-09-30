@@ -1,10 +1,12 @@
 -- The evening trip to the tavern (#16, first slice): during the Tavern stage
 -- (#22) every adult walks to the nearest tavern's jukebox and stays there
--- until Home. The first to find a tavern with no keeper becomes its keeper.
--- Seats, plates and meals come later.
+-- until Home. The first to find a tavern with no keeper becomes its keeper;
+-- the rest take a seat at a table if one is free (seat.lua, #99). Plates and
+-- meals come later.
 local core = minetest
 local common = dofile(core.get_modpath("villages") .. "/common.lua")
 local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
+local seat = dofile(core.get_modpath("villages") .. "/seat.lua")
 local JUKEBOX = "mcl_jukebox:jukebox"
 -- How far from its bed a villager looks for a tavern: its own village, not
 -- the next one over, and inside vanilla's 50-node leash, past which
@@ -37,6 +39,7 @@ local function nearest_tavern(origin)
 end
 
 local function end_visit(self)
+	seat.stand(self)
 	local route = self._villages_tavern_route
 	self._villages_tavern_route = nil
 	if route and route.status == "travelling" and self.state == "gowp" then
@@ -69,8 +72,16 @@ visit = function(self)
 			end_visit(self)
 			return
 		end
+		-- On the way to a chair, which may be further from the jukebox than
+		-- the arrival distance.
+		if self._villages_seat and seat.approach_seat(self) then return end
 		if vector.distance(pos, jukebox) < ARRIVE_DISTANCE then
 			if not self._villages_tavern_arrived then arrive(self) end
+			-- A keeper stays on its feet; everyone else looks for a seat,
+			-- and stands if there is none.
+			if not self._villages_keeper and seat.reserve(self, jukebox) and seat.approach_seat(self) then
+				return
+			end
 			-- Stay put. Vanilla clears the order on every activity poll
 			-- (villager.lua do_activity's else branch), so hold it each tick;
 			-- "stand" is one of the orders that stops the wander
@@ -110,7 +121,17 @@ visit = function(self)
 	return visit(self)
 end
 
+-- Still at dinner: the Tavern stage, and the tavern still there.
+local function dining(self)
+	local jukebox = self._villages_tavern_target
+	local node = jukebox and core.get_node_or_nil(jukebox)
+	return not self.child and self._id and not self.following
+		and common.schedule_stage(nil, self) == "tavern"
+		and not (node and node.name ~= JUKEBOX)
+end
+
 return function(def)
+	seat.install(def)
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
 
@@ -128,12 +149,19 @@ return function(def)
 	end
 
 	def.do_custom = function(self, dtime)
+		-- Seated, like asleep in init.lua: skip the vanilla do_custom, whose
+		-- activity poll would walk the guest off, and hold the pose each tick.
+		if self._villages_seated then
+			if dining(self) and seat.hold_seat(self) then
+				self.order = "stand"
+				return false
+			end
+			seat.stand(self)
+		end
 		local result = original_custom(self, dtime)
 		if result == false then return result end
 		-- Keepers never see this stage: theirs is Staff (common.lua).
-		local dining = not self.child and self._id and not self.following
-			and common.schedule_stage(nil, self) == "tavern"
-		if dining then
+		if dining(self) then
 			visit(self)
 		elseif self._villages_tavern_target then
 			end_visit(self)
