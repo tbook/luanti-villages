@@ -22,6 +22,7 @@ VoxeLibre's format, so removing the mod leaves a working world.
 | `seat.lua` | Chair reservation and the sitting pose |
 | `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
 | `tavern_schematic.lua` | Furnishes newly generated taverns by editing the stock schematic in memory |
+| `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |
 | `tests/*.lua` | Standalone tests, one per module, that stub the engine |

@@ -530,6 +530,7 @@ core.register_on_mods_loaded(function()
 	keeper.install(def)
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
+	dofile(core.get_modpath("living_villages") .. "/floor_guard.lua")(def)
 end)
 
 dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
