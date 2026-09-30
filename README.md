@@ -59,6 +59,15 @@ a butcher underneath; a keeper that loses its jukebox after trading keeps its
 menu and looks for another jukebox, never a smoker. Dinner service is not
 built yet (#16).
 
+For play testing, `/villages_goto` (requires `teleport`) teleports you above
+the nearest tavern seen generating in this world. If none is known yet, it
+goes to the nearest untried site where VoxeLibre will attempt a village,
+predicted from the world seed; run it again once the village has generated
+to reach its tavern, or to move on to the next site. `/villages_goto any`
+goes to the nearest known village, and `/villages_goto new` skips known
+taverns to try another site. Each village is logged to `debug.txt` as it
+generates.
+
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
 ## Attribution and licenses
