@@ -12,7 +12,7 @@
 -- Fisherman is for life: this guard never demotes one, so nothing here needs
 -- to distinguish a barrel fisherman from a fallback one.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local FISH_SEARCH_RADIUS = 32
 -- Asymmetric vertically, matching navigation.lua's promotion search: a lake
 -- below the villager's own standing height is common, water above is rare.
@@ -24,7 +24,7 @@ local FISH_RETRY_INTERVAL = 5
 local CAST_SECONDS = 2
 local WAIT_SECONDS = 8
 local REEL_SECONDS = 2
-local BOBBER_ENTITY = "villages:bobber"
+local BOBBER_ENTITY = "living_villages:bobber"
 local BOBBER_DISTANCE = 2
 local BOBBER_HEIGHT = 0.15
 
@@ -55,7 +55,7 @@ core.register_entity(BOBBER_ENTITY, {
 -- sense against the artwork. "item" extrudes the plain inventory_image
 -- instead, which already draws the wanted pose outright: wooden rod angled
 -- up, line hanging off the tip down to a bobber.
--- villages_villager.b3d has no witch-style "Wield_R" hand bone to attach
+-- living_villages_villager.b3d has no witch-style "Wield_R" hand bone to attach
 -- to, and no separate left/right arm bones either: the whole crossed-arms
 -- pose is rigged onto a single bone named plain "arm" (a child of "body"),
 -- which drives two mirrored vertex clusters -- one per hand -- in the
@@ -81,7 +81,7 @@ core.register_entity(BOBBER_ENTITY, {
 -- into mesh units and rotated into the bone's frame) above the hand
 -- cluster itself: the item's origin is its own center, so attaching at the
 -- hand exactly would hang half the rod below it.
-local FISHING_ROD_ENTITY = "villages:fishing_rod"
+local FISHING_ROD_ENTITY = "living_villages:fishing_rod"
 local FISHING_ROD_ITEM = "mcl_fishing:fishing_rod"
 local ROD_BONE = "arm"
 local ROD_POSITION = vector.new(-3.21, 1.74, 0.91)

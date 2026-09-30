@@ -2,14 +2,14 @@
 -- This intentionally reflects state only; it does not claim, release, or alter
 -- beds, jobs, paths, or villager AI.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
-local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
+local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
 -- Only for its status line: this copy's reservation table is never used.
-local seat = dofile(core.get_modpath("villages") .. "/seat.lua")
+local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
@@ -560,7 +560,7 @@ local function show(player, villager)
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}
-	show_form(player, "villages:diagnostic", lines)
+	show_form(player, "living_villages:diagnostic", lines)
 end
 
 local function show_node(player, kind, pos, node)
@@ -589,7 +589,7 @@ local function show_node(player, kind, pos, node)
 	end
 	table.insert(lines, "")
 	table.insert(lines, "Owner resolution is limited to villagers loaded within 64 nodes.")
-	show_form(player, "villages:" .. kind .. "_diagnostic", lines)
+	show_form(player, "living_villages:" .. kind .. "_diagnostic", lines)
 end
 
 local function permitted(player)

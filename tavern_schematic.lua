@@ -70,7 +70,7 @@ for _, building in ipairs(settlements.schematic_table) do
 		if schematic and furnish(schematic) then
 			building.mts = schematic
 		else
-			core.log("warning", "[villages] stock tavern layout changed; furniture was not added")
+			core.log("warning", "[living_villages] stock tavern layout changed; furniture was not added")
 		end
 		break
 	end
@@ -78,7 +78,7 @@ end
 
 -- Schematic placement does not call the plate's on_construct callback.
 core.register_lbm({
-	name = "villages:initialize_tavern_plates",
+	name = "living_villages:initialize_tavern_plates",
 	nodenames = {"mcl_itemframes:plate"},
 	run_at_every_load = false,
 	action = function(pos)

@@ -154,7 +154,7 @@ objects = {alice.object}
 entity_def.on_activate(alice, "", 0)
 assert(alice._villages_sleeping)
 assert(alice.last_animation == "sleep")
-assert(alice_props.mesh == "villages_villager.b3d")
+assert(alice_props.mesh == "living_villages_villager.b3d")
 assert(alice_props.textures[1]:find("profession_weaponsmith", 1, true))
 assert(alice_props.textures[1]:find("badge_iron", 1, true))
 assert(alice_props.collisionbox[5] == 0.3)

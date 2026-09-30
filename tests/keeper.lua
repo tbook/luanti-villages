@@ -161,7 +161,7 @@ assert(dave._villages_keeper)
 def.on_rightclick(dave, player)
 local title = "label[3,0;" .. minetest.formspec_escape("{#313131}<mobs_mc:Butcher> - <mobs_mc:Novice>{#ffffff}") .. "]"
 minetest.show_formspec("p", "mobs_mc:trade_p", "size[9,8.75]" .. title)
-assert(shown.p[2]:find("<villages:Tavern Keeper> - <mobs_mc:Novice>", 1, true), shown.p[2])
+assert(shown.p[2]:find("<living_villages:Tavern Keeper> - <mobs_mc:Novice>", 1, true), shown.p[2])
 assert(not shown.p[2]:find("Butcher", 1, true))
 -- An ordinary butcher's window is left alone.
 local erin = villager("erin", {x = 0, y = 0, z = 9}, "butcher")

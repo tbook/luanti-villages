@@ -141,7 +141,7 @@ local object = {
 			object = {
 				get_pos = function() return {x = 10, y = 0, z = 0} end,
 				get_properties = function()
-					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+					return {mesh = "living_villages_villager.b3d", textures = {"living_villages_villager_base.png"}}
 				end,
 			},
 		}
@@ -153,7 +153,7 @@ assert(shown and shown.name == "admin")
 assert(shown.form:find("Villager diagnostics", 1, true))
 assert(shown.form:find("Profession: farmer", 1, true))
 assert(shown.form:find(
-	"Visual: mesh villages_villager.b3d, textures [villages_villager_base.png], "
+	"Visual: mesh living_villages_villager.b3d, textures [living_villages_villager_base.png], "
 	.. "visual_size none, is_visible true (default)", 1, true))
 assert(shown.form:find("Bed owner: this villager", 1, true))
 assert(shown.form:find("Bed claim: valid claim", 1, true))
@@ -185,22 +185,22 @@ assert(shown.form:find("Births: checked today; local cooldown until day 4", 1, t
 assert(original_uses == 0)
 
 lookup("stack", player, {type = "node", under = {x = 1, y = 0, z = 0}})
-assert(shown.formname == "villages:bed_diagnostic")
+assert(shown.formname == "living_villages:bed_diagnostic")
 assert(shown.form:find("Recorded owner: villager villager-1", 1, true))
 
 lookup("stack", player, {type = "node", under = {x = 2, y = 0, z = 0}})
-assert(shown.formname == "villages:bed_diagnostic")
+assert(shown.formname == "living_villages:bed_diagnostic")
 assert(shown.form:find("Position: (1.0, 0.0, 0.0)", 1, true))
 
 lookup("stack", player, {type = "node", under = {x = 4, y = 0, z = 0}})
-assert(shown.formname == "villages:workstation_diagnostic")
+assert(shown.formname == "living_villages:workstation_diagnostic")
 assert(shown.form:find("Recorded owner: villager villager-2 (loaded cleric)", 1, true))
 
 -- Punching an empty bed whose claiming villager is loaded nearby should
 -- surface where that villager actually is, not just that it is claimed.
 metadata["5,0,0"] = {villager = "villager-3"}
 lookup("stack", player, {type = "node", under = {x = 5, y = 0, z = 0}})
-assert(shown.formname == "villages:bed_diagnostic")
+assert(shown.formname == "living_villages:bed_diagnostic")
 assert(shown.form:find("Owner position: (5.0, 0.0, 0.3)", 1, true), shown.form)
 assert(shown.form:find("Owner sleep status: sleeping", 1, true), shown.form)
 
@@ -213,7 +213,7 @@ local far_worker = {
 			object = {
 				get_pos = function() return {x = 10, y = 0, z = 0} end,
 				get_properties = function()
-					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+					return {mesh = "living_villages_villager.b3d", textures = {"living_villages_villager_base.png"}}
 				end,
 			},
 		}
@@ -241,7 +241,7 @@ local barrel_fisherman = {
 			object = {
 				get_pos = function() return {x = 10, y = 0, z = 0} end,
 				get_properties = function()
-					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+					return {mesh = "living_villages_villager.b3d", textures = {"living_villages_villager_base.png"}}
 				end,
 			},
 		}
@@ -321,7 +321,7 @@ local tavern_keeper = {
 			object = {
 				get_pos = function() return {x = 7, y = 0, z = 1} end,
 				get_properties = function()
-					return {mesh = "villages_villager.b3d", textures = {"villages_villager_base.png"}}
+					return {mesh = "living_villages_villager.b3d", textures = {"living_villages_villager_base.png"}}
 				end,
 			},
 		}
@@ -331,6 +331,6 @@ lookup("stack", player, {type = "object", ref = tavern_keeper})
 assert(shown.form:find("Jobsite claim: valid claim", 1, true), shown.form)
 assert(not shown.form:find("no valid claimed jobsite", 1, true), shown.form)
 lookup("stack", player, {type = "node", under = {x = 7, y = 0, z = 0}})
-assert(shown.formname == "villages:workstation_diagnostic", "a jukebox can be inspected")
+assert(shown.formname == "living_villages:workstation_diagnostic", "a jukebox can be inspected")
 
 print("diagnostic.lua: ok")
