@@ -529,6 +529,8 @@ core.register_on_mods_loaded(function()
 	install_fisherman(def)
 	keeper.install(def)
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal)
+	-- Outermost, so it sees "walk" after everything else has had its say.
+	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
 end)
 

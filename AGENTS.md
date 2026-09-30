@@ -19,6 +19,7 @@ VoxeLibre's format, so removing the mod leaves a working world.
 | `nitwit.lua` | Keeps nitwits from being demoted to unemployed by VoxeLibre's jobsite check |
 | `keeper.lua` | Tavern keeper role, which is a butcher underneath and claims a jukebox, plus its menu and hours |
 | `tavern.lua` | The evening tavern visit and keeper takeover |
+| `wander.lua` | Replaces vanilla's aimless walk with short, checked straight legs that stop short of walls |
 | `seat.lua` | Chair reservation and the sitting pose |
 | `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
 | `tavern_schematic.lua` | Furnishes newly generated taverns by editing the stock schematic in memory |

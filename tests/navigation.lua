@@ -20,6 +20,7 @@ local water_sites = {}
 local water_source_nodes = {}
 local water_scans = 0
 local raised_shore_nodes = {}
+local logged = {}
 
 minetest = {
 	registered_nodes = {
@@ -106,6 +107,8 @@ minetest = {
 	get_objects_inside_radius = function() return nearby_objects end,
 	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
 	register_globalstep = function(callback) globalstep = callback end,
+	log = function(level, message) table.insert(logged, message) end,
+	pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 }
 vector = {
 	new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
@@ -208,6 +211,74 @@ local low_ceiling_entity = {
 }
 assert(def.gopath(low_ceiling_entity, low_ceiling_entity._bed, nil, true))
 assert(gopath_target.x == -1 and gopath_target.z == 0)
+low_ceiling = false
+
+-- core.find_path plans for a walker one node tall, so the legacy mover's own
+-- route can pass under something at head height, like the wall posts beside
+-- a tavern's steps (#93). Such a route is dropped for the planner's, which
+-- keeps the whole villager clear, and the engine preflight path is not used.
+low_ceiling = true
+local overhang_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self, target, callback)
+		self.current_target = {pos = {x = 2, y = 0, z = 0}}
+		self.waypoints = {{pos = {x = 1, y = 0, z = 0}}, {pos = vector.new(target)}}
+		self.state = "gowp"
+		return true
+	end,
+}
+dofile("navigation.lua")(overhang_def)
+local overhang_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(overhang_def.gopath(overhang_entity, overhang_entity._bed, nil, true))
+assert(overhang_entity._villages_bed_route.mode == "planner", "a route under an overhang goes to the planner")
+for _, waypoint in ipairs(overhang_entity.waypoints) do
+	assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "the planner's route keeps clear of the overhang")
+end
+assert(logged[#logged]:find("passes under mcl_panes:glass_pane at (1,1,0)", 1, true), "a replan is logged")
+
+-- A trip this module does not otherwise manage (a keeper to its jukebox, a
+-- guest to its seat) is rerouted the same way, to the target itself when a
+-- villager can stand there.
+local detour_arrived = function() end
+local detour_entity = {
+	_jobsite = {x = 50, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+timeofday = 0.3
+assert(overhang_def.gopath(detour_entity, {x = -2, y = 0, z = 0}, detour_arrived, true))
+timeofday = 0.8
+assert(detour_entity.state == "gowp" and detour_entity._target.x == -2 and detour_entity._target.z == 0,
+	"an unmanaged trip keeps its own target")
+assert(detour_entity.callback_arrived == detour_arrived, "and its own arrival callback")
+for _, waypoint in ipairs(detour_entity.waypoints) do
+	assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "the detour keeps clear of the overhang")
+end
+-- When no detour exists either, the failure is recorded so that vanilla's
+-- ready_to_path holds off the next attempt; upstream saw its own route
+-- succeed and set no cooldown of its own.
+support_available = false
+local stuck_entity = {
+	_jobsite = {x = 50, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+timeofday = 0.3
+assert(not overhang_def.gopath(stuck_entity, {x = -2, y = 0, z = 0}, nil, true))
+timeofday = 0.8
+assert(stuck_entity.state == "stand" and stuck_entity._pf_last_failed, "a failed detour sets the pathfinding cooldown")
+support_available = true
 low_ceiling = false
 
 def.do_custom(entity, 0.1)
