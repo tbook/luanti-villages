@@ -91,10 +91,30 @@ local function is_supported(pos)
 	-- A villager's feet rest on the top of the supporting node. Low slabs do not
 	-- reach that height; fences and trapdoors are not walkable floor surfaces.
 	if collision_box_top(def) < 0.49 then return false end
-	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
-		return false
+	-- Nor are fence gates or walls: do_jump (mcl_mobs/movement.lua) will not
+	-- jump them, so a villager never gets up onto one.
+	for _, group in ipairs({"fence", "fence_gate", "wall", "trapdoor"}) do
+		if core.get_item_group(node.name, group) > 0 then return false end
 	end
 	return not is_hazard(node.name, def)
+end
+
+-- Whether every node the standing box at pos touches, from layer bottom to
+-- top, is clear.
+local function box_is_clear(pos, bottom, top)
+	-- Shrink the span by a hair so a box whose edge lands exactly on a node
+	-- boundary is not treated as reaching into the node beyond it. Villagers
+	-- stand on half-node offsets constantly, so without this the check
+	-- rejects a node the villager only touches -- most often the bed it is
+	-- climbing out of, since a bed is walkable.
+	for x = round(pos.x - HALF_WIDTH + EDGE), round(pos.x + HALF_WIDTH - EDGE) do
+		for z = round(pos.z - HALF_WIDTH + EDGE), round(pos.z + HALF_WIDTH - EDGE) do
+			for y = bottom, top do
+				if not is_clear({x = x, y = y, z = z}) then return false end
+			end
+		end
+	end
+	return true
 end
 
 -- The villager day (#22), in game ticks (1000 ticks = 1 game hour). Every
@@ -206,23 +226,35 @@ return {
 	-- floor is only required under the center column, since standing with part
 	-- of the box over an edge is ordinary.
 	is_standing_space = function(pos)
-		-- Shrink the span by a hair so a box whose edge lands exactly on a node
-		-- boundary is not treated as reaching into the node beyond it. Villagers
-		-- stand on half-node offsets constantly, so without this the check
-		-- rejects a node the villager only touches -- most often the bed it is
-		-- climbing out of, since a bed is walkable.
-		local min_x, max_x = round(pos.x - HALF_WIDTH + EDGE), round(pos.x + HALF_WIDTH - EDGE)
-		local min_z, max_z = round(pos.z - HALF_WIDTH + EDGE), round(pos.z + HALF_WIDTH - EDGE)
 		local feet = round(pos.y)
-		for x = min_x, max_x do
-			for z = min_z, max_z do
-				for y = feet, feet + HEIGHT_NODES - 1 do
-					if not is_clear({x = x, y = y, z = z}) then return false end
-				end
-			end
-		end
-		return is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
+		return box_is_clear(pos, feet, feet + HEIGHT_NODES - 1)
+			and is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
 	end,
+	-- The two halves of is_standing_space, for a villager partway over a step
+	-- or a kerb: its box already reaches over the next floor while its center
+	-- is still over the last one.
+	is_body_clear = function(pos)
+		local feet = round(pos.y)
+		return box_is_clear(pos, feet, feet + HEIGHT_NODES - 1)
+	end,
+	has_floor = function(pos)
+		return is_supported({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
+	end,
+	-- Whether the single node at pos is one a villager's body may pass through.
+	is_clear_node = function(pos)
+		return is_clear({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
+	end,
+	-- Whether the node layer just above a villager standing at pos is clear
+	-- across its whole box. A step up is a jump that lifts the head into that
+	-- layer before the villager has moved over the higher floor (#56).
+	has_headroom = function(pos)
+		local above = round(pos.y) + HEIGHT_NODES
+		return box_is_clear(pos, above, above)
+	end,
+	-- The node a villager's feet are in. The entity position sits a hair
+	-- above the floor, and below a node boundary on a lowered floor such as
+	-- a grass path, so sample where mcl_mobs/physics.lua samples the feet.
+	feet_node = function(pos) return round(pos.y + FEET_OFFSET) end,
 	-- Whether a villager standing here is being suffocated by the node its feet
 	-- are in. Mirrors the condition in mcl_mobs/physics.lua's do_env_damage,
 	-- which is what actually deals the damage, so that a report from here means

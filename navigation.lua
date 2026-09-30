@@ -117,8 +117,10 @@ local function is_supported(pos)
 	-- A villager's feet are at the top of the supporting node. Low slabs do not
 	-- reach that height; fences and trapdoors are not walkable floor surfaces.
 	if collision_box_top(def) < 0.49 then return false end
-	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
-		return false
+	-- Nor are fence gates or walls: do_jump (mcl_mobs/movement.lua) will not
+	-- jump them, so a villager never gets up onto one.
+	for _, group in ipairs({"fence", "fence_gate", "wall", "trapdoor"}) do
+		if core.get_item_group(node.name, group) > 0 then return false end
 	end
 	if (def.damage_per_second or 0) > 0 then return false end
 	return core.get_item_group(node.name, "fire") == 0
@@ -286,6 +288,35 @@ local function path_cost(path)
 	return cost
 end
 
+-- core.find_path treats a walker as one node tall (mcl_mobs/pathfinding.lua
+-- says as much), so its routes pass under anything at head height -- the
+-- wall posts that hold the torches beside a tavern's steps, say -- and the
+-- villager walks into it and keeps pushing (#93). Each waypoint is the node
+-- the feet are in; the node above it must be open too.
+local function has_headroom(path)
+	for _, point in ipairs(path) do
+		local pos = point.pos or point
+		local head = vector.round({x = pos.x, y = pos.y + 1, z = pos.z})
+		if not is_open(head, true) then return false, head end
+	end
+	return true
+end
+
+-- Returns false and the obstructing node when the legacy mover's route has
+-- the villager walk under something.
+local function legacy_route_has_headroom(self)
+	local route = {}
+	if self.current_target and self.current_target.pos then table.insert(route, self.current_target) end
+	for _, waypoint in ipairs(self.waypoints or {}) do table.insert(route, waypoint) end
+	return has_headroom(route)
+end
+
+local function log_overhang(self, target, head)
+	local node = core.get_node_or_nil(head)
+	core.log("action", string.format("[living_villages] villager %s: route to %s passes under %s at %s; replanning",
+		tostring(self._id), core.pos_to_string(vector.round(target)), node and node.name or "?", core.pos_to_string(head)))
+end
+
 local function choose_approach(self, candidates)
 	local start = self.object:get_pos()
 	if not start then return nil end
@@ -294,6 +325,7 @@ local function choose_approach(self, candidates)
 	local best_candidate, best_path, best_cost
 	for _, candidate in ipairs(candidates) do
 		local path = core.find_path(start, candidate, PATH_RANGE, 1, 4)
+		if path and not has_headroom(path) then path = nil end
 		local cost = path and path_cost(path)
 		if cost and (not best_cost or cost < best_cost) then
 			best_candidate, best_path, best_cost = candidate, path, cost
@@ -564,7 +596,7 @@ local function start_engine_path(self, target, path, arrived, door_actions, rout
 		arrived = function(entity, arrived_target)
 			-- A stale or superseded route must not act on this door either, just
 			-- as it must not complete the wrapped arrival callback below.
-			if owns_route(entity, route_field, route_id) and entity.do_pathfind_action then
+			if (not route_field or owns_route(entity, route_field, route_id)) and entity.do_pathfind_action then
 				entity.do_pathfind_action(entity, {type = "door", action = "close", target = door})
 			end
 			if on_arrive then return on_arrive(entity, arrived_target) end
@@ -769,7 +801,28 @@ local function install(def)
 			end
 		end
 		if not destination then
-			return original_gopath(self, target, callback_arrived, prioritised)
+			local started = original_gopath(self, target, callback_arrived, prioritised)
+			if not (started or self.state == PATHFINDING) then return started end
+			local clear, head = legacy_route_has_headroom(self)
+			if clear then return started end
+			-- Trips this module does not otherwise manage -- a keeper walking
+			-- to its jukebox, a guest to its seat, vanilla's own -- still must
+			-- not walk under anything. Reroute to the target itself when a
+			-- villager can stand there, or else to a spot beside it.
+			log_overhang(self, target, head)
+			stop(self)
+			local candidates = approaches(target)
+			local cell = vector.round(target)
+			if is_open(cell, true) and is_open({x = cell.x, y = cell.y + 1, z = cell.z}, true)
+				and is_supported(cell) then
+				candidates = {cell}
+			end
+			local detour, path = plan_stair_route(self, candidates)
+			if detour and start_engine_path(self, detour, path, callback_arrived, true) then return true end
+			-- Upstream saw its own route succeed, so it set no failure cooldown.
+			-- Set one, or every caller's next poll repeats the whole search.
+			self._pf_last_failed = os.time()
+			return false
 		end
 
 		local route = self[destination.route_field]
@@ -806,7 +859,15 @@ local function install(def)
 		})
 		local arrived = arrival_callback(destination.route_field, route.id, candidate, callback_arrived, destination.sleep)
 		local started = original_gopath(self, candidate, arrived, true)
-		if started or self.state == PATHFINDING then return true end
+		if started or self.state == PATHFINDING then
+			local clear, head = legacy_route_has_headroom(self)
+			if clear then return true end
+			log_overhang(self, candidate, head)
+			-- The legacy mover plans its own route, door stitching included, so
+			-- the preflight above cannot vouch for it. Take the planner's
+			-- instead, which keeps the whole villager clear.
+			stop(self)
+		end
 		if start_engine_path(self, candidate, engine_path, arrived, nil, destination.route_field, route.id) then
 			self[destination.route_field].mode = "engine"
 			return true
