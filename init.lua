@@ -254,6 +254,10 @@ core.register_on_mods_loaded(function()
 		return
 	end
 
+	-- Wraps vanilla's do_custom alone, before anything below captures it, so
+	-- only vanilla ever sees the stand-in trade list it gives a nitwit.
+	dofile(core.get_modpath("living_villages") .. "/nitwit.lua")(def)
+
 	local original_box = table.copy(def.initial_properties.collisionbox)
 	local original_anim = table.copy(def.animation)
 	local original_child_anim = table.copy(def._child_animations)
