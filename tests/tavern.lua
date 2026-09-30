@@ -59,6 +59,8 @@ local gopaths = {}
 local def = {
 	on_activate = function() end,
 	do_custom = function() end,
+	get_staticdata = function() return "" end,
+	set_animation = function() end,
 	gopath = function(self, target, callback)
 		table.insert(gopaths, {self = self, target = target, callback = callback})
 		self.state = "gowp"

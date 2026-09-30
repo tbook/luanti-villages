@@ -8,6 +8,8 @@ local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
 local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
+-- Only for its status line: this copy's reservation table is never used.
+local seat = dofile(core.get_modpath("villages") .. "/seat.lua")
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
@@ -551,6 +553,7 @@ local function show(player, villager)
 			or villager._villages_tavern_target and ("heading to " .. pos_string(villager._villages_tavern_target))
 			or "none"),
 		"Tavern route: " .. route_status(villager._villages_tavern_route),
+		"Tavern seat: " .. seat.status(villager),
 		"",
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
