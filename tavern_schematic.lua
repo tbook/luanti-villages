@@ -27,7 +27,10 @@ local function furnish(schematic)
 		return true
 	end
 	-- The stock tavern has two fence-and-pressure-plate tables. Replace them
-	-- with furniture so the plates have solid support and players can sit.
+	-- with furniture so the plates have solid support and players can sit,
+	-- and lengthen each into the open floor beside it to seat four (#20):
+	-- eight seats and four plates, leaving the door aisle (z 5) and the floor
+	-- in front of the jukebox clear for the keeper.
 	local changes = {
 		{4, 2, 3, "mcl_fences:fence", "mcl_decor:table_wooden", 0},
 		{5, 2, 7, "mcl_fences:fence", "mcl_decor:table_wooden", 0},
@@ -37,6 +40,14 @@ local function furnish(schematic)
 		{4, 2, 4, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["-z"]},
 		{4, 2, 7, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["+x"]},
 		{6, 2, 7, "mcl_stairs:stair_wood", "mcl_decor:chair_wooden", CHAIR_FACING["-x"]},
+		{5, 2, 3, "air", "mcl_decor:table_wooden", 0},
+		{5, 3, 3, "air", "mcl_itemframes:plate", 1},
+		{5, 2, 2, "air", "mcl_decor:chair_wooden", CHAIR_FACING["+z"]},
+		{5, 2, 4, "air", "mcl_decor:chair_wooden", CHAIR_FACING["-z"]},
+		{5, 2, 6, "air", "mcl_decor:table_wooden", 0},
+		{5, 3, 6, "air", "mcl_itemframes:plate", 1},
+		{4, 2, 6, "air", "mcl_decor:chair_wooden", CHAIR_FACING["+x"]},
+		{6, 2, 6, "air", "mcl_decor:chair_wooden", CHAIR_FACING["-x"]},
 	}
 	for _, change in ipairs(changes) do
 		local cell = schematic.data[index(size, change[1], change[2], change[3])]
