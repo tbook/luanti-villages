@@ -43,6 +43,7 @@ minetest.register_lbm = function() end
 loadstring = function() return function() return schematic end end
 settlements = {schematic_table = {{name = "tavern", mts = "stock.mts"}}}
 dofile("tavern_schematic.lua")
-assert(settlements.schematic_table[1].mts == "/test/villages/schematics/tavern_furnished.mts",
-	"generator must receive a schematic filename")
+assert(settlements.schematic_table[1].mts == schematic,
+	"generator must receive the furnished in-memory schematic table, not a stale checked-in file")
+assert(type(settlements.schematic_table[1].mts) == "table")
 print("tavern schematic tests passed")

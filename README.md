@@ -44,10 +44,11 @@ that can follow ordinary stairs and wooden doors. Iron doors remain
 impassable.
 
 Newly generated taverns have two tables with plates and chairs, furnished by
-substituting a checked-in schematic for the stock tavern's layout at
-generation time. Existing, already-generated taverns are not refurnished.
-This is asset placement only; there is no tavern keeper or dinner service
-yet (tracked in #35).
+modifying the stock tavern's schematic in memory at generation time, so
+furnishing tracks whatever the installed VoxeLibre's own tavern layout
+currently is rather than a separately maintained copy. Existing,
+already-generated taverns are not refurnished. This is asset placement only;
+there is no tavern keeper or dinner service yet (tracked in #35).
 
 This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
 
@@ -67,8 +68,3 @@ plains, profession, and tier-badge textures. Mineclonia's
 `mobs_mc/LICENSE-media.md` lists textures not otherwise named there under the
 MIT License. The source game and its attribution are available at
 https://git.minetest.land/Mineclonia/Mineclonia.
-
-`schematics/tavern_furnished.mts` is a modification of VoxeLibre's
-`mcl_villages` tavern schematic. Its original schematic is credited to
-MysticTempest in VoxeLibre's `mcl_villages/README.txt` and is licensed
-CC BY-SA 4.0; this modified schematic is also CC BY-SA 4.0.

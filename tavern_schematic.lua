@@ -1,5 +1,9 @@
--- Furnish only newly generated taverns. The village generator serializes its
--- schematic filename, so the furnished version is a checked-in .mts asset.
+-- Furnish only newly generated taverns. Re-derive the furnished layout from
+-- the stock schematic every time rather than swapping in a checked-in .mts:
+-- the placement code accepts an in-memory schematic table just as well as a
+-- filename (mcl_structures.place_schematic re-serializes either the same
+-- way), so there is no stale copy to fall out of sync if VoxeLibre changes
+-- the stock tavern layout in some other cell.
 local core = minetest
 local unpack = table.unpack or unpack
 
@@ -47,7 +51,7 @@ for _, building in ipairs(settlements.schematic_table) do
 		})
 		local schematic = serialized and loadstring(serialized .. " return schematic")()
 		if schematic and furnish(schematic) then
-			building.mts = core.get_modpath("villages") .. "/schematics/tavern_furnished.mts"
+			building.mts = schematic
 		else
 			core.log("warning", "[villages] stock tavern layout changed; furniture was not added")
 		end
