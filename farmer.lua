@@ -49,7 +49,7 @@ return function(def)
 	local original_custom = def.do_custom
 	def.do_custom = function(self, dtime)
 		local result = original_custom(self, dtime)
-		if result == false or not common.is_work_time() or not valid_farmer(self) then return result end
+		if result == false or not common.is_work_time(self) or not valid_farmer(self) then return result end
 
 		local now = core.get_gametime()
 		if self._villages_farm_target then

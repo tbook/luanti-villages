@@ -708,27 +708,27 @@ local function install(def)
 		local destination
 		local no_jobsite_candidate = false
 		local now = core.get_gametime()
-		if self._bed and same_pos(target, self._bed) and is_home_time() then
+		if self._bed and same_pos(target, self._bed) and is_home_time(self) then
 			destination = {
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
 			}
-		elseif self._jobsite and same_pos(target, self._jobsite) and is_work_time()
+		elseif self._jobsite and same_pos(target, self._jobsite) and is_work_time(self)
 			and has_claimed_jobsite(self) then
 			destination = {
 				pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 			}
 		elseif self._villages_farm_target and same_pos(target, self._villages_farm_target)
-			and is_work_time() and has_farm_target(self) then
+			and is_work_time(self) and has_farm_target(self) then
 			destination = {
 				pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
 			}
 		elseif self._villages_fish_target and same_pos(target, self._villages_fish_target)
-			and is_work_time() and has_fish_target(self) then
+			and is_work_time(self) and has_fish_target(self) then
 			destination = {
 				pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
 				cardinal_only = true, raised_ok = true, candidate_filter = unoccupied_candidates,
 			}
-		elseif not self._jobsite and not is_home_time() then
+		elseif not self._jobsite and not is_home_time(self) then
 			local node = core.get_node_or_nil(target)
 			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
 				local route = self._villages_job_search_route
@@ -830,7 +830,7 @@ local function install(def)
 			self._villages_fish_target = nil
 			return result
 		end
-		if not is_home_time() then
+		if not is_home_time(self) then
 			cancel_route(self, "_villages_bed_route")
 		else
 			-- VoxeLibre only schedules activity every five seconds. Start a bed trip
@@ -854,7 +854,7 @@ local function install(def)
 			if recover_stalled_route(self, bed_destination) or recover_route(self, bed_destination) then return result end
 		end
 
-		local working = is_work_time()
+		local working = is_work_time(self)
 		if not working then
 			cancel_route(self, "_villages_job_route")
 			cancel_route(self, "_villages_farm_route")
@@ -880,7 +880,7 @@ local function install(def)
 			claimed = has_fish_target,
 		}
 		if working and (recover_stalled_route(self, fish_destination) or recover_route(self, fish_destination)) then return result end
-		if self._jobsite or is_home_time() then
+		if self._jobsite or is_home_time(self) then
 			cancel_route(self, "_villages_job_search_route")
 		else
 			local search_route = self._villages_job_search_route

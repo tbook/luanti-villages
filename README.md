@@ -47,8 +47,17 @@ Newly generated taverns have two tables with plates and chairs, furnished by
 modifying the stock tavern's schematic in memory at generation time, so
 furnishing tracks whatever the installed VoxeLibre's own tavern layout
 currently is rather than a separately maintained copy. Existing,
-already-generated taverns are not refurnished. This is asset placement only;
-there is no tavern keeper or dinner service yet (tracked in #35).
+already-generated taverns are not refurnished.
+
+An unemployed adult villager claims any free jukebox (a tavern's, or one a
+player placed) and becomes its tavern keeper: a brown-aproned villager that
+sells bread, baked potatoes, cooked fish, mushroom stew and pumpkin pie
+through the ordinary trade window, unlocking tiers as it is traded with. A
+keeper opens the tavern at 14:00 and stays until 18:30, sleeping last in the
+village. VoxeLibre cannot register new professions yet (#35), so a keeper is
+a butcher underneath; a keeper that loses its jukebox after trading keeps its
+menu and looks for another jukebox, never a smoker. Dinner service is not
+built yet (#16).
 
 For play testing, `/villages_goto` (requires `teleport`) teleports you above
 the nearest tavern seen generating in this world. If none is known yet, it
