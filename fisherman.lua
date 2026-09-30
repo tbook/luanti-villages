@@ -472,7 +472,7 @@ return function(def)
 				-- these flipped, and that action must be left alone, not
 				-- immediately stomped by hold_still and then orphaned by
 				-- end_fishing_session restoring a now-stale prior order.
-				if self.following or not common.is_work_time()
+				if self.following or not common.is_work_time(self)
 					or not (self._villages_fish_target and common.is_surface_water(self._villages_fish_target)) then
 					end_fishing_session(self)
 				else
@@ -488,7 +488,7 @@ return function(def)
 					-- above is undone again before this tick ever renders.
 					return false
 				end
-			elseif common.is_work_time() and self.state ~= "gowp" then
+			elseif common.is_work_time(self) and self.state ~= "gowp" then
 				if self._villages_fish_target then
 					local route = self._villages_fish_route
 					if route and route.status == "retry" and core.get_gametime() >= route.retry_at then

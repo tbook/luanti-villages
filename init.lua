@@ -14,6 +14,7 @@ local is_suffocating = common.is_suffocating
 -- therefore run from here, at ordinary top-level load time, rather than
 -- from a dofile inside that callback like the other behavior modules.
 local install_fisherman = dofile(core.get_modpath("villages") .. "/fisherman.lua")
+local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
 local MODEL = "villages_villager.b3d"
 local BASE = "villages_villager_base.png^villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
@@ -54,6 +55,12 @@ local animation = {
 
 local function skin(self)
 	local texture = BASE
+	-- A keeper is a butcher underneath (keeper.lua), so it needs its own look
+	-- ahead of the profession lookup rather than the butcher's apron.
+	if self._villages_keeper and not self.child then
+		local tier = math.max(1, math.min(5, self._max_trade_tier or 1))
+		return texture .. "^" .. keeper.OVERLAY .. "^villages_villager_badge_" .. badges[tier] .. ".png"
+	end
 	-- _villages_fisherman is never transiently cleared, unlike _profession:
 	-- fisherman.lua's guard (#70) restores a jobsite-less fisherman's
 	-- _profession only after vanilla's own do_custom (which this file's
@@ -447,7 +454,7 @@ core.register_on_mods_loaded(function()
 				tostring(self._id), tostring(node_name), pos_string(self.object:get_pos())))
 		end
 		local bed, node = claimed_bed(self)
-		if self.order == "sleep" and is_sleep_time() and bed
+		if self.order == "sleep" and is_sleep_time(self) and bed
 			and vector.distance(self.object:get_pos(), bed) < 2
 			and not occupied_by_other(self, bed) then
 			begin_sleep(self, bed, node)
@@ -458,7 +465,7 @@ core.register_on_mods_loaded(function()
 	def.do_custom = function(self, dtime)
 		if self._villages_sleeping then
 			local bed, node = claimed_bed(self)
-			if self.order ~= "sleep" or not is_sleep_time() or not bed
+			if self.order ~= "sleep" or not is_sleep_time(self) or not bed
 				or vector.distance(self.object:get_pos(), bed) >= 1 then
 				wake(self)
 			else
@@ -484,12 +491,14 @@ core.register_on_mods_loaded(function()
 			end
 		end
 
-		local result = original_custom(self, dtime)
+		-- Vanilla's get_activity() takes no villager, so name this one for it:
+		-- a keeper keeps different hours from everyone else (#22).
+		local result = common.as_villager(self, original_custom, self, dtime)
 		if result == false then return false end
 		tick_visual(self)
 
 		local bed, node = claimed_bed(self)
-		if self.order == "sleep" and is_sleep_time() and bed
+		if self.order == "sleep" and is_sleep_time(self) and bed
 			and vector.distance(self.object:get_pos(), bed) < 2
 			and not occupied_by_other(self, bed) then
 			begin_sleep(self, bed, node)
@@ -512,6 +521,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
+	keeper.install(def)
 	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
 end)
 

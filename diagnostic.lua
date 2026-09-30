@@ -7,6 +7,7 @@ local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
+local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
 local BIRTH_RADIUS = 24
 local BIRTH_HEIGHT = 12
 local BIRTH_INTERVAL_DAYS = 2
@@ -126,12 +127,12 @@ local function sleep_status(villager, bed_ok)
 	if route and route.status == "travelling" then return "travelling to bed" end
 	if route and route.status == "retry" then return "waiting to retry bed route" end
 	if not bed_ok then return "no valid claimed bed" end
-	if not is_home_time() then return "waiting for evening" end
+	if not is_home_time(villager) then return "waiting for evening" end
 	if villager.order ~= "sleep" then return "evening, but no sleep order" end
 	local pos = villager.object and villager.object:get_pos()
 	local d = distance(pos, villager._bed)
 	if d and d >= 2 then return string.format("travelling to bed (%.1f nodes away)", d) end
-	if not is_sleep_time() then return "home, waiting for bedtime" end
+	if not is_sleep_time(villager) then return "home, waiting for bedtime" end
 	return "waiting to enter bed"
 end
 
@@ -191,7 +192,7 @@ local function work_status(villager, job_ok)
 	if route and route.status == "travelling" then return "travelling to jobsite" end
 	if route and route.status == "retry" then return "waiting to retry jobsite route" end
 	if not job_ok then return "no valid claimed jobsite" end
-	if not is_work_time() then return "waiting for work period" end
+	if not is_work_time(villager) then return "waiting for work period" end
 	local pos = villager.object and villager.object:get_pos()
 	local d = distance(pos, villager._jobsite)
 	if d and d >= 2 then return string.format("travelling to jobsite (%.1f nodes away)", d) end
@@ -322,7 +323,7 @@ local function fisherman_status(villager)
 	if not villager._villages_fisherman then return "not a fisherman" end
 	if villager._villages_fish_session then return "fishing" end
 	if villager.following then return "not fishing: following a player" end
-	if not is_work_time() then return "not fishing: waiting for work period" end
+	if not is_work_time(villager) then return "not fishing: waiting for work period" end
 	local route = villager._villages_fish_route
 	if route and route.status == "travelling" then return "travelling to stand" end
 	if route and route.status == "retry" then
@@ -539,6 +540,8 @@ local function show(player, villager)
 		"Nearest fish candidate: "
 			.. (villager._villages_fisherman and nearest_fish_candidate(pos) or "n/a (not a fisherman)"),
 		"Barrel claim (hidden from vanilla by the profession guard): " .. barrel_status(villager),
+		"",
+		"Keeper: " .. keeper.status(villager),
 		"",
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,

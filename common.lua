@@ -99,14 +99,22 @@ end
 
 -- The villager day (#22), in game ticks (1000 ticks = 1 game hour). Every
 -- stage runs from its start until the next stage's start, wrapping at
--- midnight. This one table drives both this mod's own time checks and the
--- get_activity wrapper handed to VoxeLibre below.
+-- midnight. These tables drive both this mod's own time checks and the
+-- get_activity wrapper handed to VoxeLibre below. Tavern keepers (#15) open
+-- before dinner and close up after the last guest, so they sleep last.
 local SCHEDULE = {
 	{start = 5500, stage = "putter"},
 	{start = 7000, stage = "work"},
 	{start = 15500, stage = "tavern"},
 	{start = 17500, stage = "home"},
 	{start = 18500, stage = "sleep"},
+}
+local KEEPER_SCHEDULE = {
+	{start = 7000, stage = "putter"},
+	{start = 8000, stage = "free"},
+	{start = 14000, stage = "staff"},
+	{start = 18500, stage = "home"},
+	{start = 19000, stage = "sleep"},
 }
 
 local function is_thunder()
@@ -115,12 +123,14 @@ local function is_thunder()
 end
 
 -- tod is core.get_timeofday()'s 0..1 fraction; omit it for the current time.
+-- villager picks that villager's own timetable; omit it for the common one.
 -- A thunderstorm sends everyone to bed at any hour.
-local function stage_at(tod)
+local function stage_at(tod, villager)
 	if is_thunder() then return "sleep" end
+	local schedule = villager and villager._villages_keeper and KEEPER_SCHEDULE or SCHEDULE
 	local ticks = ((tod or core.get_timeofday()) * 24000) % 24000
-	local stage = SCHEDULE[#SCHEDULE].stage
-	for _, entry in ipairs(SCHEDULE) do
+	local stage = schedule[#schedule].stage
+	for _, entry in ipairs(schedule) do
 		if ticks < entry.start then break end
 		stage = entry.stage
 	end
@@ -131,28 +141,47 @@ end
 -- stage. It understands only "work", "sleep" and "gathering"; anything else
 -- makes it clear self.order and leave the villager to this mod. "sleep"
 -- during Home walks the villager to its bed, where is_sleep_time keeps it
--- standing until the Sleep stage lets it lie down.
+-- standing until the Sleep stage lets it lie down. A keeper's "free" hours
+-- are vanilla's own aimless wander, and staffing is its work at the jukebox.
 local vanilla_activity = {
 	putter = "putter",
 	work = "work",
 	tavern = "tavern",
 	home = "sleep",
 	sleep = "sleep",
+	free = "free",
+	staff = "work",
 }
+
+-- Vanilla calls get_activity() with no villager at all, so init.lua names
+-- the villager whose do_activity is running around that call.
+local current_villager
 
 return {
 	schedule_stage = stage_at,
 	-- Replacement for VoxeLibre's get_activity(tod), which villager.lua
 	-- declares without `local` and looks up as a global on every call.
-	get_activity = function(tod) return vanilla_activity[stage_at(tod)] end,
+	get_activity = function(tod) return vanilla_activity[stage_at(tod, current_villager)] end,
+	-- Runs fn(...) with get_activity answering for villager.
+	as_villager = function(villager, fn, ...)
+		local previous = current_villager
+		current_villager = villager
+		local result = fn(...)
+		current_villager = previous
+		return result
+	end,
 	-- Lying down in bed.
-	is_sleep_time = function() return stage_at() == "sleep" end,
+	is_sleep_time = function(villager) return stage_at(nil, villager) == "sleep" end,
 	-- Heading to, or staying at, the claimed bed.
-	is_home_time = function()
-		local stage = stage_at()
+	is_home_time = function(villager)
+		local stage = stage_at(nil, villager)
 		return stage == "home" or stage == "sleep"
 	end,
-	is_work_time = function() return stage_at() == "work" end,
+	-- At the jobsite: ordinary work, or a keeper staffing the tavern.
+	is_work_time = function(villager)
+		local stage = stage_at(nil, villager)
+		return stage == "work" or stage == "staff"
+	end,
 	is_workstation_node = function(name)
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
