@@ -17,6 +17,10 @@ local SEARCH_HEIGHT = 2
 local HOLD_SECONDS = 10
 -- A guest that cannot reach its chair in this long gives it up.
 local WALK_SECONDS = 20
+-- How long a guest passes over a chair it could not reach: the rest of the
+-- evening's dinner (the Tavern stage runs 15:30 to 17:30, 100 s of game time
+-- per in-game hour at the default speed).
+local UNREACHABLE_SECONDS = 200
 -- How often a guest with no seat looks for one again.
 local SEARCH_SECONDS = 5
 -- Close enough to the chair to sit down from.
@@ -156,7 +160,9 @@ function M.reserve(self, jukebox)
 	local best, best_distance
 	for _, chair in ipairs(chairs) do
 		local table_pos = seat_table(chair)
-		if table_pos and not held_by_other(chair, self._id) and not player_in(chair) then
+		local skipped = self._villages_seat_unreachable and self._villages_seat_unreachable[key(chair)]
+		if table_pos and not held_by_other(chair, self._id) and not player_in(chair)
+			and not (skipped and skipped > now()) then
 			local stand = approach(chair, table_pos)
 			local distance = vector.distance(pos, chair)
 			if stand and (not best or distance < best_distance) then
@@ -257,22 +263,34 @@ function M.hold_seat(self)
 	return true
 end
 
+-- Give up a chair the guest cannot get to, and pass over it when looking
+-- again, which it may do at once: the next nearest chair may be reachable.
+local function unreachable(self)
+	local seat = self._villages_seat
+	self._villages_seat_unreachable = self._villages_seat_unreachable or {}
+	self._villages_seat_unreachable[key(seat.chair)] = now() + UNREACHABLE_SECONDS
+	self._villages_seat_searched_at = nil
+	M.stand(self)
+	return false
+end
+
 -- Each tick while on the way to a reserved seat. Returns true while the
 -- guest is busy with its seat (walking or just sat), false once it has
 -- given the seat up.
 function M.approach_seat(self)
 	local seat = self._villages_seat
-	if not still_valid(self) or now() - seat.reserved_at > WALK_SECONDS then
+	if not still_valid(self) then
 		M.stand(self)
 		return false
 	end
+	if now() - seat.reserved_at > WALK_SECONDS then return unreachable(self) end
 	hold(self, seat.chair)
 	local pos = self.object:get_pos()
 	if pos and vector.distance(pos, seat.chair) <= REACH then return M.sit(self) end
-	if self.state ~= "gowp" then
-		self:gopath(seat.approach, function(entity)
-			if entity._villages_seat and not entity._villages_seated then M.sit(entity) end
-		end, true)
+	if self.state ~= "gowp" and not self:gopath(seat.approach, function(entity)
+		if entity._villages_seat and not entity._villages_seated then M.sit(entity) end
+	end, true) then
+		return unreachable(self)
 	end
 	return true
 end
@@ -300,6 +318,7 @@ function M.install(def)
 		end
 		self._villages_seated, self._villages_seat, self._villages_seat_box = nil, nil, nil
 		self._villages_seat_exit, self._villages_seat_chair, self._villages_seat_searched_at = nil, nil, nil
+		self._villages_seat_unreachable = nil
 		if self._id then release_all(self._id) end
 		return result
 	end
@@ -309,12 +328,12 @@ function M.install(def)
 	-- init.lua's own wrapper already saves the standing box.
 	def.get_staticdata = function(self)
 		local seated, seat, box = self._villages_seated, self._villages_seat, self._villages_seat_box
-		local searched = self._villages_seat_searched_at
+		local searched, skipped = self._villages_seat_searched_at, self._villages_seat_unreachable
 		self._villages_seated, self._villages_seat, self._villages_seat_box = nil, nil, nil
-		self._villages_seat_searched_at = nil
+		self._villages_seat_searched_at, self._villages_seat_unreachable = nil, nil
 		local saved = original_staticdata(self)
 		self._villages_seated, self._villages_seat, self._villages_seat_box = seated, seat, box
-		self._villages_seat_searched_at = searched
+		self._villages_seat_searched_at, self._villages_seat_unreachable = searched, skipped
 		return saved
 	end
 

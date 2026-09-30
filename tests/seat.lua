@@ -88,6 +88,7 @@ nodes[key(east)] = {name = "mcl_decor:chair_wooden", param2 = 1}
 nodes[key(lone)] = {name = "mcl_decor:chair_wooden", param2 = 0}
 
 local gopaths = {}
+local blocked
 local def = {
 	on_activate = function() end,
 	do_custom = function() end,
@@ -98,6 +99,7 @@ local def = {
 	end,
 	set_animation = function(self, name) self.animation_name = name end,
 	gopath = function(self, target, callback)
+		if blocked and vector.equals(target, blocked) then return false end
 		table.insert(gopaths, {self = self, target = target, callback = callback})
 		self.state = "gowp"
 		return true
@@ -223,9 +225,30 @@ assert(pos.y > -0.5 and vector.distance(pos, west) <= 1.5 and not (pos.x == exit
 	"on its feet beside the chair, not in the wall")
 assert(seat.reservations[key(west)] == nil)
 
--- Dying in the chair lets it go.
+-- A chair it cannot reach is given up at once and passed over: the guest
+-- walks to the other one instead of retrying the nearest all evening.
 time = 15600 / 24000
 day = day + 1
+local erin = villager("erin", {x = 1, y = -0.49, z = 2})
+-- carol's walled-off exit left one open square beside the west chair.
+seat.reservations[key(east)] = nil
+blocked = {x = 2, y = 0, z = 1}
+def.do_custom(erin, 0.1)
+assert(erin._villages_seat_unreachable["2,0,0"] and seat.reservations[key(west)] == nil, "unreachable chair let go")
+def.do_custom(erin, 0.1)
+assert(erin._villages_seat and vector.equals(erin._villages_seat.chair, east), "tries the other chair")
+assert(vector.equals(gopaths[#gopaths].target, {x = 5, y = 0, z = 0}))
+-- Timed out on the way: also passed over.
+erin._villages_seat.reserved_at = now - 21
+erin.state = "stand"
+def.do_custom(erin, 0.1)
+assert(erin._villages_seat == nil and erin._villages_seat_unreachable["4,0,0"], "timed out chair skipped")
+def.do_custom(erin, 0.1)
+assert(erin._villages_seat == nil, "neither is retried this evening")
+blocked = nil
+seat.stand(erin)
+
+-- Dying in the chair lets it go.
 local dave = villager("dave", {x = 1, y = -0.49, z = 1})
 def.do_custom(dave, 0.1)
 assert(dave._villages_seated)
