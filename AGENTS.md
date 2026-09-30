@@ -16,6 +16,7 @@ VoxeLibre's format, so removing the mod leaves a working world.
 | `planner.lua` | Limited A* search over walkable positions, including stairs and wooden doors |
 | `farmer.lua` | Farmer visits to crops near a claimed composter |
 | `fisherman.lua` | Water-based fisherman profession, the fishing loop, and the bobber and rod entities |
+| `nitwit.lua` | Keeps nitwits from being demoted to unemployed by VoxeLibre's jobsite check |
 | `keeper.lua` | Tavern keeper role, which is a butcher underneath and claims a jukebox, plus its menu and hours |
 | `tavern.lua` | The evening tavern visit and keeper takeover |
 | `seat.lua` | Chair reservation and the sitting pose |
