@@ -14,6 +14,9 @@ local SEARCH_HEIGHT = 16
 -- A villager this close to the jukebox is inside the tavern.
 local ARRIVE_DISTANCE = 4
 -- A villager not at the tavern by 17:00 goes home instead (#22).
+-- Skipping sets _villages_skip_tavern to the day, which turns the rest of
+-- that villager's Tavern stage into Home (common.lua), so navigation's own
+-- bed trip and vanilla's go_home take it there.
 local LEAVE_BY = 17000
 
 local function ticks()
@@ -80,7 +83,7 @@ visit = function(self)
 			self._villages_tavern_arrived = nil
 		elseif ticks() >= LEAVE_BY then
 			end_visit(self)
-			self._villages_tavern_day = day
+			self._villages_skip_tavern = day
 			return
 		end
 		local route = self._villages_tavern_route
@@ -90,11 +93,19 @@ visit = function(self)
 		end
 		return
 	end
-	if self._villages_tavern_day == day or ticks() >= LEAVE_BY then return end
+	if self._villages_tavern_day == day then return end
+	if ticks() >= LEAVE_BY then
+		self._villages_tavern_day = day
+		self._villages_skip_tavern = day
+		return
+	end
 	-- One decision a day: a village with no tavern skips straight to Home.
 	self._villages_tavern_day = day
 	local tavern = nearest_tavern(self._bed or vector.round(pos))
-	if not tavern then return end
+	if not tavern then
+		self._villages_skip_tavern = day
+		return
+	end
 	self._villages_tavern_target = tavern
 	return visit(self)
 end

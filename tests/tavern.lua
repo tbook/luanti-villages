@@ -121,8 +121,16 @@ dave._villages_tavern_route = {status = "travelling"}
 time = 17100 / 24000
 def.do_custom(dave, 0.1)
 assert(dave._villages_tavern_target == nil and dave.state == "stand", "abandons the trip")
+local common = dofile("common.lua")
+assert(common.schedule_stage(nil, dave) == "home" and common.is_home_time(dave), "and heads home")
+assert(common.get_activity() == "tavern" and common.as_villager(dave, common.get_activity) == "sleep",
+	"vanilla's go_home takes it to bed")
+assert(common.schedule_stage(nil, bob) == "tavern", "others stay at dinner")
 def.do_custom(dave, 0.1)
 assert(dave._villages_tavern_target == nil, "and does not start another today")
+day = day + 1
+assert(common.schedule_stage(nil, dave) == "tavern", "only for that day")
+day = day - 1
 -- Guests already inside stay until Home.
 def.do_custom(bob, 0.1)
 assert(bob._villages_tavern_arrived and bob.order == "stand")
@@ -138,5 +146,6 @@ local erin = villager("erin", {x = -500, y = 0, z = 0}, {_bed = {x = -500, y = 0
 local count = #gopaths
 def.do_custom(erin, 0.1)
 assert(#gopaths == count and erin._villages_tavern_target == nil and erin._villages_tavern_day == 4)
+assert(common.is_home_time(erin), "no tavern: straight to Home")
 
 print("tavern.lua: ok")
