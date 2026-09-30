@@ -816,7 +816,7 @@ do
 	local water = {x = 5, y = 0, z = 0}
 	place(water, "mcl_core:water_source")
 	spawned_bobbers = {}
-	local bobber = minetest.add_entity(water, "villages:bobber")
+	local bobber = minetest.add_entity(water, "living_villages:bobber")
 	local fisherman = {
 		_id = "f16", _villages_fisherman = true, _profession = "fisherman", state = "stand", following = true,
 		_villages_fish_target = water, _villages_fish_route = {status = "arrived"},
@@ -840,7 +840,7 @@ do
 	local water = {x = 5, y = 0, z = 0}
 	place(water, "mcl_core:water_source")
 	spawned_bobbers = {}
-	local bobber = minetest.add_entity(water, "villages:bobber")
+	local bobber = minetest.add_entity(water, "living_villages:bobber")
 	timeofday, now = 0.8, 1000
 	local fisherman = {
 		_id = "f17", _villages_fisherman = true, _profession = "fisherman", state = "stand",
@@ -863,7 +863,7 @@ do
 	local water = {x = 5, y = 0, z = 0}
 	place(water, "mcl_core:stone")
 	spawned_bobbers = {}
-	local bobber = minetest.add_entity(water, "villages:bobber")
+	local bobber = minetest.add_entity(water, "living_villages:bobber")
 	local fisherman = {
 		_id = "f18", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		_villages_fish_target = water,
@@ -884,7 +884,7 @@ do
 	local def = new_def(function() end)
 	dofile("fisherman.lua")(def)
 	spawned_bobbers = {}
-	local bobber = minetest.add_entity({x = 5, y = 0, z = 0}, "villages:bobber")
+	local bobber = minetest.add_entity({x = 5, y = 0, z = 0}, "living_villages:bobber")
 	local fisherman = {
 		_id = "f19", _villages_fisherman = true,
 		_villages_fish_session = {phase = "wait", phase_ends_at = 9999},
@@ -894,7 +894,7 @@ do
 	assert(bobber.removed)
 
 	-- No session in progress: deactivation must not touch an unrelated object.
-	local other_bobber = minetest.add_entity({x = 6, y = 0, z = 0}, "villages:bobber")
+	local other_bobber = minetest.add_entity({x = 6, y = 0, z = 0}, "living_villages:bobber")
 	local idle_fisherman = {_id = "f19b", _villages_fisherman = true, _villages_fish_bobber = other_bobber}
 	def.on_deactivate(idle_fisherman, false)
 	assert(not other_bobber.removed)
@@ -924,7 +924,7 @@ do
 	timeofday, now = 0.4, 1400
 	local water = {x = 5, y = 0, z = 0}
 	place(water, "mcl_core:stone")
-	local rod = minetest.add_entity({x = 4, y = 0, z = 0}, "villages:fishing_rod")
+	local rod = minetest.add_entity({x = 4, y = 0, z = 0}, "living_villages:fishing_rod")
 	local fisherman = {
 		_id = "f23", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		_villages_fish_target = water,
@@ -943,7 +943,7 @@ end
 do
 	local def = new_def()
 	dofile("fisherman.lua")(def)
-	local rod = minetest.add_entity({x = 5, y = 0, z = 0}, "villages:fishing_rod")
+	local rod = minetest.add_entity({x = 5, y = 0, z = 0}, "living_villages:fishing_rod")
 	local fisherman = {
 		_id = "f24", _villages_fisherman = true,
 		_villages_fish_session = {phase = "wait", phase_ends_at = 9999},
@@ -953,7 +953,7 @@ do
 	assert(rod.removed)
 
 	-- No session in progress: deactivation must not touch an unrelated object.
-	local other_rod = minetest.add_entity({x = 6, y = 0, z = 0}, "villages:fishing_rod")
+	local other_rod = minetest.add_entity({x = 6, y = 0, z = 0}, "living_villages:fishing_rod")
 	local idle_fisherman = {_id = "f24b", _villages_fisherman = true, _villages_fish_rod = other_rod}
 	def.on_deactivate(idle_fisherman, false)
 	assert(not other_rod.removed)

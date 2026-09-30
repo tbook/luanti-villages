@@ -1,4 +1,4 @@
--- Play-testing aid: /villages_goto teleports to a tavern, or to where a
+-- Play-testing aid: /living_villages_goto teleports to a tavern, or to where a
 -- village should generate, instead of flying around looking for one.
 --
 -- Two sources, best first:
@@ -39,7 +39,7 @@ local function record(settlement_info)
 	local known = load()
 	table.insert(known, entry)
 	save(KEY, known)
-	core.log("action", string.format("[villages] village generated at %s%s",
+	core.log("action", string.format("[living_villages] village generated at %s%s",
 		core.pos_to_string(entry.center),
 		entry.tavern and (", tavern at " .. core.pos_to_string(entry.tavern)) or ", no tavern"))
 end
@@ -152,7 +152,7 @@ local function tried_sites(known)
 	return tried
 end
 
-core.register_chatcommand("villages_goto", {
+core.register_chatcommand("living_villages_goto", {
 	params = "[any|new]",
 	description = "Teleport to the nearest known tavern, else the nearest untried village site"
 		.. " (\"any\": nearest known village; \"new\": skip known taverns)",
@@ -185,7 +185,7 @@ core.register_chatcommand("villages_goto", {
 		local target = vector.offset(site.center, 0, ARRIVAL_HEIGHT, 0)
 		player:set_pos(target)
 		return true, string.format("Teleported above a predicted village site at %s (%.0f nodes away)."
-			.. " VoxeLibre may still reject the ground; run /villages_goto again to see whether"
+			.. " VoxeLibre may still reject the ground; run /living_villages_goto again to see whether"
 			.. " a tavern generated, or to try the next site.",
 			core.pos_to_string(target), site.distance)
 	end,

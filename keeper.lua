@@ -20,15 +20,15 @@
 -- If #35 lands, the role becomes a registered profession and each of these
 -- workarounds a deletion.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
-local S = core.get_translator and core.get_translator("villages") or function(message) return message end
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local S = core.get_translator and core.get_translator("living_villages") or function(message) return message end
 local JUKEBOX = "mcl_jukebox:jukebox"
 local BASE_PROFESSION = "butcher"
 local CLAIM_RADIUS = 48
 local CLAIM_INTERVAL = 10
 local STAFF_DISTANCE = 3
 local STAFF_INTERVAL = 5
-local OVERLAY = "(villages_villager_profession_butcher.png^[multiply:#8a5a3a)"
+local OVERLAY = "(living_villages_villager_profession_butcher.png^[multiply:#8a5a3a)"
 
 -- The fixed menu. Prepared foods only; ingredient stock and farm supply are
 -- future work. Tiers unlock as players trade, as they do for any villager.
@@ -95,7 +95,7 @@ local function employ(self, pos)
 		self._villages_keeper = true
 	end
 	self._villages_keeper_target = nil
-	core.log("action", string.format("[villages] villager %s became keeper of the jukebox at %s",
+	core.log("action", string.format("[living_villages] villager %s became keeper of the jukebox at %s",
 		tostring(self._id), pos_string(pos)))
 	return true
 end
@@ -138,7 +138,7 @@ local function take_over(self, pos)
 	for _, field in ipairs(OLD_JOB_FIELDS) do self[field] = nil end
 	self._jobsite, self._profession, self._trades = nil, "unemployed", nil
 	employ(self, pos)
-	core.log("action", string.format("[villages] villager %s left %s%s to keep the tavern",
+	core.log("action", string.format("[living_villages] villager %s left %s%s to keep the tavern",
 		tostring(self._id), tostring(profession), previous and (" at " .. pos_string(previous)) or ""))
 	return true
 end
@@ -205,7 +205,7 @@ local function reconcile(self, jobsite_before)
 		-- villager would be (villager.lua remove_job), and may already have
 		-- taken another job in the same call.
 		self._villages_keeper = nil
-		core.log("action", string.format("[villages] villager %s is no longer a keeper",
+		core.log("action", string.format("[living_villages] villager %s is no longer a keeper",
 			tostring(self._id)))
 		return
 	end
@@ -222,7 +222,7 @@ end
 
 local function install(def)
 	if not core.registered_nodes[JUKEBOX] then
-		core.log("warning", "[villages] " .. JUKEBOX .. " is unavailable; no tavern keepers")
+		core.log("warning", "[living_villages] " .. JUKEBOX .. " is unavailable; no tavern keepers")
 		return
 	end
 	local original_activate = def.on_activate

@@ -1,7 +1,7 @@
 -- Keep VoxeLibre's villager AI, trades, and bed ownership. Add a sleeping pose
 -- adapted from Mineclonia and bed-limited village births.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_standing_space = common.is_standing_space
 local is_suffocating = common.is_suffocating
@@ -10,15 +10,15 @@ local is_suffocating = common.is_suffocating
 -- which is only valid during a mod's own normal load -- not from inside the
 -- core.register_on_mods_loaded callback below, where every mod has already
 -- finished loading and get_current_modname() no longer resolves to
--- "villages". fisherman.lua's own villages:bobber registration must
+-- "living_villages". fisherman.lua's own living_villages:bobber registration must
 -- therefore run from here, at ordinary top-level load time, rather than
 -- from a dofile inside that callback like the other behavior modules.
-local install_fisherman = dofile(core.get_modpath("villages") .. "/fisherman.lua")
-local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
--- Registers villages:meal, so it loads here for the same reason.
-local meal = dofile(core.get_modpath("villages") .. "/meal.lua")
-local MODEL = "villages_villager.b3d"
-local BASE = "villages_villager_base.png^villages_villager_plains.png"
+local install_fisherman = dofile(core.get_modpath("living_villages") .. "/fisherman.lua")
+local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
+-- Registers living_villages:meal, so it loads here for the same reason.
+local meal = dofile(core.get_modpath("living_villages") .. "/meal.lua")
+local MODEL = "living_villages_villager.b3d"
+local BASE = "living_villages_villager_base.png^living_villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
 -- A bed exit is the square a villager stepped into its bed from, so it is
 -- always adjacent to the bed. Anything further is a record left over from
@@ -61,7 +61,7 @@ local function skin(self)
 	-- ahead of the profession lookup rather than the butcher's apron.
 	if self._villages_keeper and not self.child then
 		local tier = math.max(1, math.min(5, self._max_trade_tier or 1))
-		return texture .. "^" .. keeper.OVERLAY .. "^villages_villager_badge_" .. badges[tier] .. ".png"
+		return texture .. "^" .. keeper.OVERLAY .. "^living_villages_villager_badge_" .. badges[tier] .. ".png"
 	end
 	-- _villages_fisherman is never transiently cleared, unlike _profession:
 	-- fisherman.lua's guard (#70) restores a jobsite-less fisherman's
@@ -72,10 +72,10 @@ local function skin(self)
 	local profession = self._villages_fisherman and "fisherman" or self._profession
 	local overlay = profession_overlay[profession]
 	if overlay then
-		texture = texture .. "^villages_villager_profession_" .. overlay .. ".png"
+		texture = texture .. "^living_villages_villager_profession_" .. overlay .. ".png"
 		if overlay ~= "nitwit" then
 			local tier = math.max(1, math.min(5, self._max_trade_tier or 1))
-			texture = texture .. "^villages_villager_badge_" .. badges[tier] .. ".png"
+			texture = texture .. "^living_villages_villager_badge_" .. badges[tier] .. ".png"
 		end
 	end
 	return texture
@@ -211,7 +211,7 @@ local function release_claims(loser, survivor)
 			if meta:get_string("villager") == loser._id then
 				meta:set_string("villager", "")
 				core.log("action", string.format(
-					"[villages] released %s %s held by removed duplicate villager %s",
+					"[living_villages] released %s %s held by removed duplicate villager %s",
 					field, pos_string(pos), tostring(loser._id)))
 			end
 		end
@@ -220,7 +220,7 @@ end
 
 local function remove_duplicate(loser, survivor, loser_pos, survivor_pos)
 	core.log("warning", string.format(
-		"[villages] removing duplicate villager %s at %s, keeping the copy at %s",
+		"[living_villages] removing duplicate villager %s at %s, keeping the copy at %s",
 		tostring(loser._id), pos_string(loser_pos), pos_string(survivor_pos)))
 	release_claims(loser, survivor)
 	loser.object:remove()
@@ -250,7 +250,7 @@ end
 core.register_on_mods_loaded(function()
 	local def = core.registered_entities["mobs_mc:villager"]
 	if not def then
-		core.log("warning", "[villages] mobs_mc:villager is unavailable")
+		core.log("warning", "[living_villages] mobs_mc:villager is unavailable")
 		return
 	end
 
@@ -297,7 +297,7 @@ core.register_on_mods_loaded(function()
 		local exit = usable_bed_exit(self)
 		if self._villages_bed_exit and not exit then
 			core.log("action", string.format(
-				"[villages] villager %s woke with no usable bed exit (%s); leaving it where it lies",
+				"[living_villages] villager %s woke with no usable bed exit (%s); leaving it where it lies",
 				tostring(self._id), pos_string(self._villages_bed_exit)))
 		end
 		self._villages_sleeping = nil
@@ -313,7 +313,7 @@ core.register_on_mods_loaded(function()
 		-- no such line is not (#84).
 		if exit then
 			core.log("action", string.format(
-				"[villages] villager %s left its bed for %s",
+				"[living_villages] villager %s left its bed for %s",
 				tostring(self._id), pos_string(exit)))
 			self.object:set_pos(exit)
 		end
@@ -417,7 +417,7 @@ core.register_on_mods_loaded(function()
 				pos_string(loaded), loaded.y - died_at.y)
 		end
 		core.log("action", string.format(
-			"[villages] villager %s died at %s: %s%s (standing in %s, order %s%s%s)",
+			"[living_villages] villager %s died at %s: %s%s (standing in %s, order %s%s%s)",
 			tostring(self._id), pos_string(died_at), tostring(cause),
 			detail, tostring(self.standing_in), tostring(self.order),
 			self._villages_sleeping and ", asleep" or "", since_load))
@@ -452,7 +452,7 @@ core.register_on_mods_loaded(function()
 		local suffocating, node_name = is_suffocating(activated_at)
 		if suffocating then
 			core.log("warning", string.format(
-				"[villages] villager %s activated already buried in %s at %s; it will suffocate",
+				"[living_villages] villager %s activated already buried in %s at %s; it will suffocate",
 				tostring(self._id), tostring(node_name), pos_string(self.object:get_pos())))
 		end
 		local bed, node = claimed_bed(self)
@@ -516,17 +516,17 @@ core.register_on_mods_loaded(function()
 	if get_activity then
 		get_activity = common.get_activity
 	else
-		core.log("warning", "[villages] VoxeLibre's get_activity is gone; villagers keep the vanilla schedule")
+		core.log("warning", "[living_villages] VoxeLibre's get_activity is gone; villagers keep the vanilla schedule")
 	end
 
-	dofile(core.get_modpath("villages") .. "/births.lua")(def)
-	dofile(core.get_modpath("villages") .. "/navigation.lua")(def)
-	dofile(core.get_modpath("villages") .. "/farmer.lua")(def)
+	dofile(core.get_modpath("living_villages") .. "/births.lua")(def)
+	dofile(core.get_modpath("living_villages") .. "/navigation.lua")(def)
+	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)
-	dofile(core.get_modpath("villages") .. "/tavern.lua")(def, meal)
-	dofile(core.get_modpath("villages") .. "/diagnostic.lua")(def)
+	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal)
+	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
 end)
 
-dofile(core.get_modpath("villages") .. "/tavern_schematic.lua")
-dofile(core.get_modpath("villages") .. "/village_index.lua")
+dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
+dofile(core.get_modpath("living_villages") .. "/village_index.lua")

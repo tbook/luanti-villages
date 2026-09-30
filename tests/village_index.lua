@@ -17,7 +17,7 @@ minetest = {
 	deserialize = function(v) return v ~= "" and v or nil end,
 	pos_to_string = function(p) return ("(%d,%d,%d)"):format(p.x, p.y, p.z) end,
 	log = function(_, m) table.insert(logs, m) end,
-	register_chatcommand = function(name, def) assert(name == "villages_goto"); command = def end,
+	register_chatcommand = function(name, def) assert(name == "living_villages_goto"); command = def end,
 	get_player_by_name = function() return player end,
 	get_mapgen_setting = function(name)
 		return ({seed = "1653956509573478210", chunksize = "5"})[name]

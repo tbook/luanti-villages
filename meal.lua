@@ -13,8 +13,8 @@
 -- which Luanti allows only then, and the plate holds are its own in-memory
 -- table.
 local core = minetest
-local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
-local ENTITY = "villages:meal"
+local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
+local ENTITY = "living_villages:meal"
 local PLATE = "mcl_itemframes:plate"
 -- A guest waits this long after sitting down before it is served.
 local WAIT_SECONDS = 3

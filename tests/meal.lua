@@ -186,7 +186,7 @@ now = now + 3
 def.do_custom(alice, 0.1)
 assert(alice._villages_meal and meals_shown() == 1, "served")
 local shown = entities[#entities]
-assert(shown.name == "villages:meal" and shown.props.wield_item == alice._villages_meal.item)
+assert(shown.name == "living_villages:meal" and shown.props.wield_item == alice._villages_meal.item)
 assert(shown.pos.x == 3 and math.abs(shown.pos.y - 0.58) < 1e-6, "on the plate")
 assert(stacks[key(plate)] == nil, "nothing put in the plate's inventory")
 assert(alice._villages_meal_day == day)

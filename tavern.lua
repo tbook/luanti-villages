@@ -4,9 +4,9 @@
 -- the rest take a seat at a table if one is free (seat.lua, #99) and are
 -- served dinner there while the keeper is on duty (meal.lua, #100).
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
-local keeper = dofile(core.get_modpath("villages") .. "/keeper.lua")
-local seat = dofile(core.get_modpath("villages") .. "/seat.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
+local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
 local JUKEBOX = "mcl_jukebox:jukebox"
 -- How far from its bed a villager looks for a tavern: its own village, not
 -- the next one over, and inside vanilla's 50-node leash, past which
@@ -135,7 +135,7 @@ end
 
 return function(def, shared_meal)
 	-- init.lua passes the copy it loaded, which registered the meal entity.
-	meal = shared_meal or dofile(core.get_modpath("villages") .. "/meal.lua")
+	meal = shared_meal or dofile(core.get_modpath("living_villages") .. "/meal.lua")
 	seat.install(def)
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom

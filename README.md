@@ -1,98 +1,106 @@
-# Villages
+# Living Villages
 
-Adds a visible sleeping pose and slow, bed-limited births to VoxeLibre
-villagers while leaving VoxeLibre's trading, professions, and bed ownership
-format in place. Install the repository as a directory named `villages` in
-Luanti's mods directory (or a world's `worldmods` directory). The `mcl_decor`
-mod is required for tavern furniture. Removing the mod restores the game's
-default villager behavior; existing child villagers, bed claims, and placed
-furniture remain in the world.
+Living Villages gives VoxeLibre villagers daily lives. Villagers sleep in their beds, have children
+when there's room, fish, keep taverns, and meet for dinner in the evening. The mod keeps
+VoxeLibre's own trading, professions, and bed-ownership format, so removing it returns the
+game's default villager behavior. Child villagers, bed claims, and placed furniture stay in the
+world.
 
-A village can produce a child when a valid bed is unclaimed, provided two
-nearby adults own beds and no nearby adult is bedless.
-Automatic births are limited to about one per two game days in a local area.
-Food-triggered breeding also needs a free bed, but does not wait for the slow
-birth timer. Player-owned beds do not count. Spawn eggs and zombie-villager
-curing remain unchanged.
+## Features
 
-Administrators with the `server` or `debug` privilege can use VoxeLibre's
-Lookup Tool on a villager to inspect its current AI, bed, jobsite, path,
-fisherman, and birth-timing state. Using it on a bed or workstation shows
-that node's pairing owner directly. Owner IDs are resolved to a nearby loaded
-villager where possible. The tool retains its normal lookup behavior for all
-other targets and players.
+### Sleep and births
 
-An unemployed, bedded villager with no reachable workstation becomes a
-fisherman automatically once a large enough body of water is near its bed;
-barrels are no longer required for this profession, though an existing or
-newly claimed barrel still grants it the normal way. Once a villager becomes
-a fisherman, whether by promotion or by barrel, it stays one for life: the
-profession is never revoked, even if the water or barrel that first granted
-it later becomes invalid. During work hours a fisherman walks to a stand at
-the water's edge and runs a cast/wait/reel cycle there; fishing produces no
-items and instead restocks the villager's locked trades within its current
-tier, since VoxeLibre only restocks trades at a jobsite and a fallback
-fisherman has none.
+- Villagers lie visibly in their claimed beds at night.
+- A village can have a child when a valid bed is unclaimed, as long as two nearby adults own
+  beds and no nearby adult is without one. Automatic births are limited to about one every two
+  game days in a local area.
+- Breeding with food also needs a free bed, but doesn't wait for the birth timer.
+- Beds owned by players don't count. Spawn eggs and curing zombie villagers work as before.
 
-[`docs/navigation-scenarios.md`](docs/navigation-scenarios.md) provides
-repeatable in-game scenarios for complex bed returns, first-job selection,
-reloads, following, shared doors, bounded-search failures, and fishing.
+### Fishermen
 
-For bed, jobsite, farm-plot, and fishing-spot trips, Villages first uses
-VoxeLibre's normal pathing and then falls back to a bounded route planner
-that can follow ordinary stairs and wooden doors. Iron doors remain
-impassable.
+- An unemployed villager that has a bed but can't reach a workstation becomes a fisherman
+  when there's enough water near its bed. It doesn't need a barrel, but claiming a barrel still
+  works the normal way.
+- A fisherman keeps the profession for life, even if its water or barrel goes away later.
+- During work hours it walks to a spot at the water's edge and casts, waits, and reels in.
+  Fishing produces no items. Instead it restocks the fisherman's locked trades within its
+  current tier.
 
-Newly generated taverns have two tables with plates and chairs, furnished by
-modifying the stock tavern's schematic in memory at generation time, so
-furnishing tracks whatever the installed VoxeLibre's own tavern layout
-currently is rather than a separately maintained copy. Existing,
-already-generated taverns are not refurnished.
+### Getting around
 
-An unemployed adult villager claims any free jukebox (a tavern's, or one a
-player placed) and becomes its tavern keeper: a brown-aproned villager that
-sells bread, baked potatoes, cooked fish, mushroom stew and pumpkin pie
-through the ordinary trade window, unlocking tiers as it is traded with. A
-keeper opens the tavern at 14:00 and stays until 18:30, sleeping last in the
-village. VoxeLibre cannot register new professions yet (#35), so a keeper is
-a butcher underneath; a keeper that loses its jukebox after trading keeps its
-menu and looks for another jukebox, never a smoker. From 15:30 every adult walks to the nearest tavern within
-48 nodes of its bed and stays until 17:30; one not there by 17:00 goes home
-instead. The first villager to reach a tavern with no keeper takes the job,
-leaving its old one, unless a player has traded with it. The other guests
-each take a free chair that faces a table, in any tavern including one a
-player built, and sit until 17:30; a guest never takes a chair a player is
-sitting in, gets up if a player takes its chair, and stands inside when no
-seat is free. While the keeper is at its jukebox, it serves each seated
-guest one meal from its menu an evening, shown on the plate on the guest's
-table; the guest eats it and the plate empties. The meal is only a display,
-nothing that can be taken, and a plate holding a player's item is never
-served on. A tavern with no keeper on duty serves no meals.
+For trips to a bed, workstation, farm plot, or fishing spot, villagers first use VoxeLibre's
+normal pathfinding. If that fails, they fall back to a limited route planner that can use
+ordinary stairs and wooden doors. Iron doors still block them.
 
-For play testing, `/villages_goto` (requires `teleport`) teleports you above
-the nearest tavern seen generating in this world. If none is known yet, it
-goes to the nearest untried site where VoxeLibre will attempt a village,
-predicted from the world seed; run it again once the village has generated
-to reach its tavern, or to move on to the next site. `/villages_goto any`
-goes to the nearest known village, and `/villages_goto new` skips known
-taverns to try another site. Each village is logged to `debug.txt` as it
-generates.
+### Taverns and dinner
 
-This initial port targets the installed VoxeLibre 0.92.3 (`mineclone2`).
+- **Furniture:** newly generated taverns get two tables with plates and chairs. The furniture
+  is added to the installed VoxeLibre version's own tavern layout when the tavern generates.
+  Taverns that already exist aren't refurnished.
+- **Keepers:** an unemployed adult that claims a free jukebox becomes a tavern keeper. The
+  jukebox can be a tavern's or one a player placed. A keeper wears a brown apron and sells
+  bread, baked potatoes, cooked fish, mushroom stew, and pumpkin pie through the ordinary
+  trade window. More of its menu unlocks as players trade with it. A keeper opens the tavern at
+  14:00, stays until 18:30, and is the last villager in the village to go to sleep.
+  - VoxeLibre can't register new professions, so a keeper is a butcher underneath.
+  - A keeper that loses its jukebox after trading keeps its menu and looks for another
+    jukebox, not a smoker.
+- **Evening visit:** from 15:30, every adult walks to the nearest tavern within 48 nodes of its
+  bed and stays until 17:30. An adult that hasn't arrived by 17:00 goes home instead.
+  - If a tavern has no keeper, the first villager to reach it takes the job and leaves its old
+    one, unless a player has traded with it.
+- **Seating:** guests each take a free chair that faces a table. This works in any tavern,
+  including ones players built. Guests never take a chair a player is sitting in, and they get
+  up if a player takes their chair. When no seat is free, a guest stands inside.
+- **Dinner:** while the keeper is at its jukebox, it serves each seated guest one meal from its
+  menu each evening. The meal appears on the plate at the guest's table, and the plate empties
+  as the guest eats. The meal is only for show and can't be taken. A keeper never serves on a
+  plate that holds a player's item, and a tavern with no keeper on duty serves no meals.
 
-## Attribution and licenses
+## Requirements
 
-The sleep-position, occupancy, pose, and wake-up behavior in `init.lua` is
-adapted from Mineclonia's `mobs_mc/villager.lua`. This mod's Lua code is
-licensed under GPL-3.0; see `LICENSE`.
+- [VoxeLibre](https://content.luanti.org/packages/wuzzy/mineclone2/) 0.92.3. Other versions
+  may work but haven't been tested.
+- These VoxeLibre mods, all included in the game: `mobs_mc`, `mcl_beds`, `mcl_villages`,
+  `mcl_decor`, and `mcl_itemframes`.
+- Optional: `doc_identifier` (the Lookup Tool) and `mcl_fishing`.
 
-`models/villages_villager.b3d` is Mineclonia's
-`mobs_mc/models/mobs_mc_villager.b3d`, created by 22i and licensed under
-GPL-3.0. Mineclonia's `mobs_mc/LICENSE-media.md` credits the model and links
-to its Blender source.
+## Installation
 
-The images in `textures/` are renamed copies of Mineclonia's villager base,
-plains, profession, and tier-badge textures. Mineclonia's
-`mobs_mc/LICENSE-media.md` lists textures not otherwise named there under the
-MIT License. The source game and its attribution are available at
-https://git.minetest.land/Mineclonia/Mineclonia.
+Put this repository in a directory named `living_villages` inside Luanti's `mods` directory, or
+inside a world's `worldmods` directory. Then enable it for your world.
+
+## Admin and testing tools
+
+- **Inspecting villagers:** players with the `server` or `debug` privilege can use VoxeLibre's
+  Lookup Tool on a villager to see its AI, bed, workstation, path, fishing, tavern, meal, and
+  birth-timing state. Using the tool on a bed or workstation shows which villager owns it. The
+  tool works normally on everything else.
+- **`/living_villages_goto`** (requires `teleport`): teleports you above the nearest tavern
+  that has generated in this world. If no tavern is known yet, it goes to the nearest untried
+  spot where VoxeLibre will try to generate a village, predicted from the world seed. Once the
+  village has generated, run the command again to reach its tavern, or to move on to the next
+  site.
+  - `/living_villages_goto any` goes to the nearest known village.
+  - `/living_villages_goto new` skips known taverns and tries another site.
+  - Each village is logged to `debug.txt` as it generates.
+- [`docs/navigation-scenarios.md`](docs/navigation-scenarios.md) has repeatable in-game test
+  scenarios for pathfinding and fishing.
+
+## Development
+
+The tests are plain Lua 5.1 scripts that stub the engine, and CI runs them on every push:
+
+```sh
+for t in tests/*.lua; do lua5.1 "$t"; done
+```
+
+[`AGENTS.md`](AGENTS.md) has a map of the code and the project's conventions.
+
+## License
+
+The code is licensed under GPL-3.0; see [`LICENSE`](LICENSE). The sleeping position, bed
+occupancy, pose, and wake-up behavior are adapted from Mineclonia's `mobs_mc/villager.lua`.
+The model and textures come from Mineclonia; see [`LICENSE-media.md`](LICENSE-media.md) for
+their licenses and credits.

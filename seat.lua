@@ -4,7 +4,7 @@
 -- guests too. Load this once (tavern.lua): the reservations are this file's
 -- own in-memory table.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 -- How far from the jukebox a chair still belongs to its tavern: the whole
 -- stock tavern (12 x 10) from anywhere in it, and a player-built room of a
@@ -25,7 +25,7 @@ local UNREACHABLE_SECONDS = 200
 local SEARCH_SECONDS = 5
 -- Close enough to the chair to sit down from.
 local REACH = 1.5
--- Sitting pose, from villages_villager.b3d: the leg bones pivot 5.85 units
+-- Sitting pose, from living_villages_villager.b3d: the leg bones pivot 5.85 units
 -- (0.585 nodes) above the feet and are 2.16 units thick, and the chair's
 -- seat top is level with the chair node's center (mcl_decor tpl_chair). With
 -- the thighs level, the villager's origin sits this far below the seat for

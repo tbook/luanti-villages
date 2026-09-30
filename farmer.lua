@@ -3,7 +3,7 @@
 -- a claimed composter anchors a bounded crop visit, while the villager keeps an
 -- implicit seed supply for immediate replanting.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local FARM_RADIUS = 8
 local FARM_INTERVAL = 5
 local crop_names = {}

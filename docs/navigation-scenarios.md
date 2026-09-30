@@ -168,7 +168,7 @@ must never be moved toward another bed's surroundings, and never end up inside
 a solid node. In variants 1 and 3 it may simply stand up in the bed itself and
 walk out; the debug log records `woke with no usable bed exit` for that case.
 A villager that disappears here is a regression: check the log for a
-`[villages] villager ... died` line, which names the cause.
+`[living_villages] villager ... died` line, which names the cause.
 
 ## Interpretation
 

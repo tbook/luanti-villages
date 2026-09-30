@@ -2,11 +2,11 @@
 -- game's bed claims and movement implementation, but direct trips to an open
 -- square beside a bed and retain enough state for useful diagnostics.
 local core = minetest
-local common = dofile(core.get_modpath("villages") .. "/common.lua")
+local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
-local planner = dofile(core.get_modpath("villages") .. "/planner.lua")
+local planner = dofile(core.get_modpath("living_villages") .. "/planner.lua")
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
 local NO_PROGRESS_SECONDS = 20
