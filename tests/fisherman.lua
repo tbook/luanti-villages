@@ -108,8 +108,10 @@ minetest = {
 	end,
 	serialize = serialize,
 	deserialize = function(text)
-		local chunk = (loadstring or load)("return " .. text)
-		return chunk and chunk()
+		local chunk = (loadstring or load)(text:match("^return") and text or ("return " .. text))
+		if not chunk then return nil end
+		local ok, value = pcall(chunk)
+		return ok and value or nil
 	end,
 }
 vector = {
@@ -139,6 +141,35 @@ local function new_def(custom, activate)
 		do_custom = custom or function() end,
 		on_activate = activate or function(self, staticdata, dtime) return "activated" end,
 	}
+end
+
+-- 1b. (#110) Vanilla sees a traded-looking trade list for a jobless untraded
+-- fisherman, so it is never demoted and get_a_job gets no chance to walk it
+-- to an arbitrary workstation; the real trades come back afterwards. A real
+-- traded list, or a fisherman with a jobsite, reaches vanilla untouched.
+do
+	local seen
+	local def = new_def(function(self) seen = self._trades end)
+	dofile("fisherman.lua")(def)
+	local f = {_id = "s1", _villages_fisherman = true, _profession = "fisherman", _trades = "untraded", _jobsite = nil}
+	def.do_custom(f, 0.1)
+	assert(seen ~= "untraded" and minetest.deserialize(seen)[1].traded_once)
+	assert(f._trades == "untraded")
+
+	local none = {_id = "s2", _villages_fisherman = true, _profession = "fisherman", _jobsite = nil}
+	def.do_custom(none, 0.1)
+	assert(minetest.deserialize(seen)[1].traded_once)
+	assert(none._trades == nil)
+
+	local real = "return {{traded_once = true, tier = 2}}"
+	local traded = {_id = "s3", _villages_fisherman = true, _profession = "fisherman", _trades = real, _jobsite = nil}
+	def.do_custom(traded, 0.1)
+	assert(seen == real and traded._trades == real)
+
+	local barrel = {x = 5, y = 0, z = 5}
+	local owned = {_id = "s4", _villages_fisherman = true, _profession = "fisherman", _trades = "untraded", _jobsite = barrel}
+	def.do_custom(owned, 0.1)
+	assert(seen == "untraded" and owned._trades == "untraded")
 end
 
 -- 1. An untraded fallback fisherman with no nearby workstation is knocked to

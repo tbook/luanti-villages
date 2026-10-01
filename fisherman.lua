@@ -13,6 +13,8 @@
 -- to distinguish a barrel fisherman from a fallback one.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+-- A trade list with one traded entry, in the form core.deserialize reads.
+local TRADED = "return {{traded_once = true}}"
 local FISH_SEARCH_RADIUS = 32
 -- Asymmetric vertically, matching navigation.lua's promotion search: a lake
 -- below the villager's own standing height is common, water above is rare.
@@ -305,6 +307,16 @@ end
 -- villager away from the water on any tick even though the walk fix above
 -- already holds it in place; re-derive facing from the route's own
 -- recorded stand every tick too, not just once on arrival.
+-- Mirrors mobs_mc/villager.lua's has_traded, on a serialized trade list.
+local function has_traded(serialized)
+	local trades = serialized and core.deserialize(serialized)
+	if type(trades) ~= "table" then return false end
+	for _, trade in pairs(trades) do
+		if trade.traded_once then return true end
+	end
+	return false
+end
+
 local function hold_still(self, turn_in_direction)
 	self.state = "stand"
 	self.order = "stand"
@@ -414,7 +426,17 @@ return function(def)
 			return original_custom(self, dtime)
 		end
 		local profession, trades, jobsite = self._profession, self._trades, self._jobsite
+		-- A fallback fisherman that has not traded is demoted by remove_job,
+		-- and in that same do_activity call get_a_job walks it toward the
+		-- nearest free workstation of any type (#110); the restore below
+		-- cannot cancel that path. Showing vanilla a traded-looking trade
+		-- list stops the demotion, so get_a_job only looks for barrels.
+		-- Only without a jobsite: with one, do_work may run unlock_trades,
+		-- which needs a real trade list.
+		local stand_in = not jobsite and not has_traded(trades)
+		if stand_in then self._trades = TRADED end
 		local result = original_custom(self, dtime)
+		if stand_in then self._trades = trades end
 
 		-- Fisherman is for life: always restore the profession and its
 		-- trades, whatever vanilla changed them to. An untraded fallback
