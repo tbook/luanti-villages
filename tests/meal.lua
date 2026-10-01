@@ -214,6 +214,9 @@ assert(not alice._villages_meal and meals_shown() == 0, "plate empties")
 now = now + 10
 def.do_custom(alice, 0.1)
 assert(not alice._villages_meal, "no second meal")
+assert(not alice._villages_seated and alice._villages_seat == nil, "done eating: gets up (#115)")
+def.do_custom(alice, 0.1)
+assert(not alice._villages_seated, "and does not sit again the same evening")
 
 -- No keeper, no meal; it resumes when the keeper returns.
 def.do_custom(bob, 0.1)
@@ -232,6 +235,8 @@ assert(not bob._villages_meal, "counted as the evening's meal")
 
 -- A player's plate is never served on.
 alice._villages_meal_day = nil
+def.do_custom(alice, 0.1)
+assert(alice._villages_seated, "sits again for a new evening's dinner")
 now = now + 5
 def.do_custom(alice, 0.1)
 assert(not alice._villages_meal, "plate holds a player's item")
@@ -260,6 +265,7 @@ day = day + 1
 now = now + 5
 def.do_custom(alice, 0.1)
 assert(alice._villages_seated)
+def.do_custom(alice, 0.1)
 now = now + 5
 def.do_custom(alice, 0.1)
 assert(alice._villages_meal, "served the next evening")
@@ -276,6 +282,7 @@ now = now + 5
 for _, guest in ipairs({alice, bob}) do
 	def.do_custom(guest, 0.1)
 	assert(guest._villages_seated)
+	def.do_custom(guest, 0.1)
 end
 now = now + 5
 def.do_custom(alice, 0.1)
