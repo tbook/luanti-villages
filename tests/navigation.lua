@@ -1091,6 +1091,11 @@ local function clear_pond()
 	water_sites, water_source_nodes = {}, {}
 end
 
+-- The promotion check staggers its first run after a gap by math.random();
+-- pin it to no delay so each case below evaluates on its first tick.
+local real_random = math.random
+math.random = function() return 0 end
+
 local promotion_def = {
 	on_activate = function() end,
 	do_custom = function() end,
@@ -1190,7 +1195,7 @@ assert(too_high_entity._profession == "unemployed", "a pond 3 above the bed must
 clear_pond()
 
 -- A reachable, unclaimed workstation suppresses promotion even beside
--- qualifying water, and the water search is never reached.
+-- qualifying water.
 water_scans = 0
 place_pond(5, 7, -1, 1, 0)
 jobsite_claimed = false
@@ -1208,10 +1213,61 @@ local workstation_entity = new_promotion_entity({
 promotion_def.do_custom(workstation_entity, 0.1)
 assert(workstation_entity._profession == "unemployed", "a reachable workstation must suppress promotion")
 assert(not workstation_entity._villages_fisherman)
-assert(water_scans == 0, "water must not be searched when a workstation is reachable")
+assert(water_scans == 1, "water is checked before the workstation search")
 engine_paths = nil
 search_sites = {}
 jobsite_claimed = true
+clear_pond()
+
+-- With no water near its bed, a villager never pays for the workstation
+-- search, which pathfinds to every free site in range (#113).
+water_scans = 0
+jobsite_claimed = false
+search_sites = {{x = 20, y = 0, z = 0}}
+local path_calls = 0
+local counted_find_path = minetest.find_path
+minetest.find_path = function(...)
+	path_calls = path_calls + 1
+	return counted_find_path(...)
+end
+local dry_entity = new_promotion_entity()
+promotion_def.do_custom(dry_entity, 0.1)
+assert(water_scans == 1, "the water is checked")
+assert(path_calls == 0, "no water means no workstation search")
+assert(dry_entity._profession == "unemployed")
+minetest.find_path = counted_find_path
+search_sites = {}
+jobsite_claimed = true
+
+-- The first work tick after a gap (night, or loading) does not send every
+-- eligible villager into the search at once: each gets its own offset (#113).
+water_scans = 0
+place_pond(5, 7, -1, 1, 0)
+local offsets = {0.1, 0.5, 0.9}
+local draw = 0
+math.random = function()
+	draw = draw + 1
+	return offsets[draw] or 0
+end
+local morning = {}
+for i = 1, 3 do
+	morning[i] = new_promotion_entity({_villages_fisherman_check = now - 3600})
+	promotion_def.do_custom(morning[i], 0.1)
+end
+assert(water_scans == 0, "no villager searches on the first tick back at work")
+local start = now
+local promoted_at = {}
+for _ = 1, 30 do
+	now = now + 1
+	for i = 1, 3 do
+		promotion_def.do_custom(morning[i], 0.1)
+		if not promoted_at[i] and morning[i]._profession == "fisherman" then promoted_at[i] = now - start end
+	end
+end
+assert(promoted_at[1] == 3 and promoted_at[2] == 15 and promoted_at[3] == 27,
+	"each villager's first check lands at its own offset: "
+	.. tostring(promoted_at[1]) .. ", " .. tostring(promoted_at[2]) .. ", " .. tostring(promoted_at[3]))
+math.random = function() return 0 end
 clear_pond()
 
 -- A bedless villager is never promoted, and never reaches the water search.
@@ -1285,5 +1341,7 @@ assert(not saved_fields._villages_fish_target,
 	"a trip target must not be written to staticdata")
 assert(travelling._villages_bed_route and travelling._villages_fish_target,
 	"the live villager must keep its trip state across a save")
+
+math.random = real_random
 
 print("navigation.lua: ok")
