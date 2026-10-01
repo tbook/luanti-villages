@@ -29,7 +29,13 @@ local WATER_ABOVE_BAND = 2
 local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
-local FISHERMAN_PROMOTION_INTERVAL = 5
+-- job_search_target pathfinds to every free workstation within 48 nodes, and
+-- falls back to the Lua planner for each one the engine cannot reach with
+-- headroom, so one search can take hundreds of milliseconds. At a few seconds'
+-- spacing, a village of unemployed villagers stalled the server for seconds at
+-- a time (#113). Spread out, and jittered so villagers do not line up.
+local FISHERMAN_PROMOTION_INTERVAL = 60
+local FISHERMAN_PROMOTION_JITTER = 30
 -- Shoreline stand routing (#72): how close another villager must be to a
 -- candidate stand to count as already occupying it. Matches the bed
 -- occupancy radius in init.lua's occupied_by_other.
@@ -540,7 +546,8 @@ end
 -- than the villager's live position so the decision is stable instead of
 -- flip-flopping as the villager wanders; a bedless villager is never
 -- promoted. Cooldown keeps both the reachability search (job_search_target
--- performs real pathfinding) and the water flood fill off the per-tick path.
+-- performs real pathfinding) and the water flood fill off the per-tick path,
+-- and the water is checked first so a villager with none skips the search.
 -- Fisherman is for life (#70): this never runs again once promoted, since
 -- _profession no longer reads "unemployed".
 local function evaluate_fisherman_promotion(self)
@@ -548,9 +555,12 @@ local function evaluate_fisherman_promotion(self)
 	local now = core.get_gametime()
 	if now < (self._villages_fisherman_check or 0) then return end
 	self._villages_fisherman_check = now + FISHERMAN_PROMOTION_INTERVAL
+		+ math.random() * FISHERMAN_PROMOTION_JITTER
 	if not has_claimed_bed(self) then return end
-	if job_search_target(self) then return end
+	-- Water first: it is the cheap test, and most villagers have none near
+	-- their bed, so they never pay for the workstation search.
 	if not qualifying_water(self._bed) then return end
+	if job_search_target(self) then return end
 	self._profession = "fisherman"
 	self._villages_fisherman = true
 end

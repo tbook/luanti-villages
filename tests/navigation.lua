@@ -1190,7 +1190,7 @@ assert(too_high_entity._profession == "unemployed", "a pond 3 above the bed must
 clear_pond()
 
 -- A reachable, unclaimed workstation suppresses promotion even beside
--- qualifying water, and the water search is never reached.
+-- qualifying water.
 water_scans = 0
 place_pond(5, 7, -1, 1, 0)
 jobsite_claimed = false
@@ -1208,11 +1208,31 @@ local workstation_entity = new_promotion_entity({
 promotion_def.do_custom(workstation_entity, 0.1)
 assert(workstation_entity._profession == "unemployed", "a reachable workstation must suppress promotion")
 assert(not workstation_entity._villages_fisherman)
-assert(water_scans == 0, "water must not be searched when a workstation is reachable")
+assert(water_scans == 1, "water is checked before the workstation search")
 engine_paths = nil
 search_sites = {}
 jobsite_claimed = true
 clear_pond()
+
+-- With no water near its bed, a villager never pays for the workstation
+-- search, which pathfinds to every free site in range (#113).
+water_scans = 0
+jobsite_claimed = false
+search_sites = {{x = 20, y = 0, z = 0}}
+local path_calls = 0
+local counted_find_path = minetest.find_path
+minetest.find_path = function(...)
+	path_calls = path_calls + 1
+	return counted_find_path(...)
+end
+local dry_entity = new_promotion_entity()
+promotion_def.do_custom(dry_entity, 0.1)
+assert(water_scans == 1, "the water is checked")
+assert(path_calls == 0, "no water means no workstation search")
+assert(dry_entity._profession == "unemployed")
+minetest.find_path = counted_find_path
+search_sites = {}
+jobsite_claimed = true
 
 -- A bedless villager is never promoted, and never reaches the water search.
 water_scans = 0
