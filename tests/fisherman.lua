@@ -108,8 +108,10 @@ minetest = {
 	end,
 	serialize = serialize,
 	deserialize = function(text)
-		local chunk = (loadstring or load)("return " .. text)
-		return chunk and chunk()
+		local chunk = (loadstring or load)(text:match("^return") and text or ("return " .. text))
+		if not chunk then return nil end
+		local ok, value = pcall(chunk)
+		return ok and value or nil
 	end,
 }
 vector = {
@@ -139,6 +141,66 @@ local function new_def(custom, activate)
 		do_custom = custom or function() end,
 		on_activate = activate or function(self, staticdata, dtime) return "activated" end,
 	}
+end
+
+-- 1b. (#110) Vanilla sees a traded-looking trade list for a jobless untraded
+-- fisherman, so it is never demoted and get_a_job gets no chance to walk it
+-- to an arbitrary workstation; the real trades come back afterwards. A real
+-- traded list reaches vanilla untouched.
+do
+	local seen
+	local def = new_def(function(self) seen = self._trades end)
+	dofile("fisherman.lua")(def)
+	local f = {_id = "s1", _villages_fisherman = true, _profession = "fisherman", _trades = "untraded", _jobsite = nil}
+	def.do_custom(f, 0.1)
+	assert(seen ~= "untraded" and minetest.deserialize(seen)[1].traded_once)
+	assert(f._trades == "untraded")
+
+	local none = {_id = "s2", _villages_fisherman = true, _profession = "fisherman", _jobsite = nil}
+	def.do_custom(none, 0.1)
+	assert(minetest.deserialize(seen)[1].traded_once)
+	assert(none._trades == nil)
+
+	local real = "return {{traded_once = true, tier = 2}}"
+	local traded = {_id = "s3", _villages_fisherman = true, _profession = "fisherman", _trades = real, _jobsite = nil}
+	def.do_custom(traded, 0.1)
+	assert(seen == real and traded._trades == real)
+
+	local barrel = {x = 5, y = 0, z = 5}
+	local owned = {_id = "s4", _villages_fisherman = true, _profession = "fisherman", _trades = "untraded", _jobsite = barrel}
+	def.do_custom(owned, 0.1)
+	assert(minetest.deserialize(seen)[1].traded_once and owned._trades == "untraded")
+end
+
+-- 1c. (#110) A barrel fisherman whose jobsite vanilla drops mid-call (fishing
+-- past RESETTLE_DISTANCE) is not demoted either, so get_a_job asks for no
+-- path to a workstation.
+do
+	local searches = {}
+	local function traded(self)
+		local t = self._trades and minetest.deserialize(self._trades)
+		for _, trade in pairs(type(t) == "table" and t or {}) do
+			if trade.traded_once then return true end
+		end
+		return false
+	end
+	local def = new_def(function(self)
+		self._jobsite = nil -- validate_jobsite -> remove_job
+		if not traded(self) then
+			self._profession = "unemployed"
+			self._trades = nil
+		end
+		if self._profession == "unemployed" or traded(self) then
+			-- get_a_job: a traded villager's search is its own jobsite type
+			searches[#searches + 1] = traded(self) and "own" or "any"
+		end
+	end)
+	dofile("fisherman.lua")(def)
+	local barrel = {x = 5, y = 0, z = 5}
+	local f = {_id = "s5", _villages_fisherman = true, _profession = "fisherman", _trades = "untraded", _jobsite = barrel}
+	def.do_custom(f, 0.1)
+	assert(f._profession == "fisherman" and f._trades == "untraded" and f._jobsite == nil)
+	assert(#searches == 1 and searches[1] == "own")
 end
 
 -- 1. An untraded fallback fisherman with no nearby workstation is knocked to
