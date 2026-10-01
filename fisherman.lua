@@ -14,7 +14,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 -- A trade list with one traded entry, in the form core.deserialize reads.
-local TRADED = "return {{traded_once = true}}"
+local TRADED = "return {{traded_once = true, tier = 0}}"
 local FISH_SEARCH_RADIUS = 32
 -- Asymmetric vertically, matching navigation.lua's promotion search: a lake
 -- below the villager's own standing height is common, water above is rare.
@@ -431,9 +431,11 @@ return function(def)
 		-- nearest free workstation of any type (#110); the restore below
 		-- cannot cancel that path. Showing vanilla a traded-looking trade
 		-- list stops the demotion, so get_a_job only looks for barrels.
-		-- Only without a jobsite: with one, do_work may run unlock_trades,
-		-- which needs a real trade list.
-		local stand_in = not jobsite and not has_traded(trades)
+		-- Also with a jobsite, which validate_jobsite may drop mid-call (a
+		-- barrel fisherman fishing past RESETTLE_DISTANCE). The entry has
+		-- tier 0 and nothing locked so do_work's unlock_trades, which reads
+		-- both, passes over it.
+		local stand_in = not has_traded(trades)
 		if stand_in then self._trades = TRADED end
 		local result = original_custom(self, dtime)
 		if stand_in then self._trades = trades end
