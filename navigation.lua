@@ -36,6 +36,9 @@ local WATER_POND_FILL_CAP = 32
 -- a time (#113). Spread out, and jittered so villagers do not line up.
 local FISHERMAN_PROMOTION_INTERVAL = 60
 local FISHERMAN_PROMOTION_JITTER = 30
+-- A villager that has not reached the check for this long has been away from
+-- work (night, or not yet loaded), so its overdue check is staggered.
+local PROMOTION_RESUME_GAP = 5
 -- Shoreline stand routing (#72): how close another villager must be to a
 -- candidate stand to count as already occupying it. Matches the bed
 -- occupancy radius in init.lua's occupied_by_other.
@@ -550,9 +553,21 @@ end
 -- and the water is checked first so a villager with none skips the search.
 -- Fisherman is for life (#70): this never runs again once promoted, since
 -- _profession no longer reads "unemployed".
+-- When each villager last reached the promotion check, kept out of the save.
+local promotion_seen = setmetatable({}, {__mode = "k"})
+
 local function evaluate_fisherman_promotion(self)
 	if not eligible_for_promotion(self) then return end
 	local now = core.get_gametime()
+	-- The check runs only at work time, so every deadline lapses overnight and
+	-- after a load; resuming them all at once would put every eligible villager
+	-- in the same tick's search. Spread the first check after a gap instead.
+	local seen = promotion_seen[self]
+	promotion_seen[self] = now
+	if not seen or now - seen > PROMOTION_RESUME_GAP then
+		self._villages_fisherman_check = math.max(self._villages_fisherman_check or 0,
+			now + math.random() * FISHERMAN_PROMOTION_JITTER)
+	end
 	if now < (self._villages_fisherman_check or 0) then return end
 	self._villages_fisherman_check = now + FISHERMAN_PROMOTION_INTERVAL
 		+ math.random() * FISHERMAN_PROMOTION_JITTER
