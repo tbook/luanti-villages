@@ -1,4 +1,9 @@
 -- Run with: lua tests/tavern.lua
+table.copy = table.copy or function(value)
+	local result = {}
+	for k, v in pairs(value) do result[k] = v end
+	return result
+end
 local time = 15600 / 24000
 local now, day = 0, 3
 local nodes, metas = {}, {}
@@ -22,12 +27,18 @@ minetest = {
 	get_timeofday = function() return time end,
 	get_gametime = function() return now end,
 	get_day_count = function() return day end,
-	get_item_group = function() return 0 end,
-	registered_nodes = {["mcl_jukebox:jukebox"] = {}},
+	get_item_group = function(name, group)
+		return (name == "chair" and group == "chair" or name == "table" and group == "table") and 1 or 0
+	end,
+	facedir_to_dir = function() return {x = 0, y = 0, z = 1} end,
+	registered_nodes = {
+		["mcl_jukebox:jukebox"] = {}, air = {walkable = false}, floor = {walkable = true},
+		chair = {walkable = false}, table = {walkable = true},
+	},
 	serialize = function(value) return value end,
 	deserialize = function(value) return value end,
 	log = function() end,
-	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
+	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or (pos.y == -1 and "floor" or "air"), param2 = 0} end,
 	get_meta = function(pos)
 		local k = key(pos)
 		metas[k] = metas[k] or {}
@@ -41,7 +52,7 @@ minetest = {
 		local found = {}
 		for k, name in pairs(nodes) do
 			local p = parse(k)
-			if name == names[1] and p.x >= minp.x and p.x <= maxp.x and p.z >= minp.z and p.z <= maxp.z then
+			if (name == names[1] or "group:" .. name == names[1]) and p.x >= minp.x and p.x <= maxp.x and p.z >= minp.z and p.z <= maxp.z then
 				table.insert(found, p)
 			end
 		end
@@ -67,6 +78,12 @@ local def = {
 		return true
 	end,
 }
+-- One seat.lua, so the test and tavern.lua share its reservations.
+local real_dofile, loaded = dofile, {}
+dofile = function(path)
+	loaded[path] = loaded[path] or real_dofile(path)
+	return loaded[path]
+end
 dofile("tavern.lua")(def)
 
 local function villager(id, pos, extra)
@@ -188,5 +205,35 @@ local count = #gopaths
 def.do_custom(erin, 0.1)
 assert(#gopaths == count and erin._villages_tavern_target == nil and erin._villages_tavern_day == 4)
 assert(common.is_home_time(erin), "no tavern: straight to Home")
+
+-- A guest that has finished its meal gets up and gives the chair back, and
+-- does not sit again that day (#115).
+time, day = 15600 / 24000, 5
+local chair, table_pos = {x = 21, y = 0, z = 2}, {x = 21, y = 0, z = 1}
+nodes[key(chair)], nodes[key(table_pos)] = "chair", "table"
+local seat = dofile("./seat.lua")
+local function diner(id)
+	local d = villager(id, {x = 21, y = 0, z = 3}, {_bed = {x = 30, y = 0, z = 0}, _villages_tavern_target = jukebox})
+	d.set_animation = function() end
+	d.set_yaw = function() end
+	d.collisionbox = {-0.3, 0, -0.3, 0.3, 1.8, 0.3}
+	d.object.set_bone_override = function() end
+	d.object.set_properties = function() end
+	d.object.set_acceleration = function() end
+	return d
+end
+local hal, ida = diner("hal"), diner("ida")
+mcl_mobs = {mob_class = {set_yaw = function() end}}
+assert(seat.reserve(hal, jukebox) and seat.sit(hal), "hal sits")
+hal.order = nil
+def.do_custom(hal, 0.1)
+assert(hal._villages_seated, "still eating or waiting: stays seated")
+hal._villages_meal_day = day
+def.do_custom(hal, 0.1)
+assert(not hal._villages_seated and not hal._villages_seat, "done eating: gets up")
+assert(seat.reserve(ida, jukebox), "the chair is free for the next guest")
+seat.stand(ida)
+def.do_custom(hal, 0.1)
+assert(not hal._villages_seat and not hal._villages_seated, "does not take a chair again")
 
 print("tavern.lua: ok")

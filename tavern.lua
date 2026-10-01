@@ -82,7 +82,9 @@ visit = function(self)
 			if not self._villages_tavern_arrived then arrive(self) end
 			-- A keeper stays on its feet; everyone else looks for a seat,
 			-- and stands if there is none.
-			if not self._villages_keeper and seat.reserve(self, jukebox) and seat.approach_seat(self) then
+			-- A guest that has eaten does not take a chair again (#115).
+			if not self._villages_keeper and self._villages_meal_day ~= day
+				and seat.reserve(self, jukebox) and seat.approach_seat(self) then
 				return
 			end
 			-- Stay put. Vanilla clears the order on every activity poll
@@ -178,7 +180,10 @@ return function(def, shared_meal)
 			if dining(self) and seat.hold_seat(self) then
 				self.order = "stand"
 				meal.tick(self, dtime, self._villages_tavern_target)
-				return false
+				-- Done eating: give the chair to a guest still waiting (#115).
+				if self._villages_meal or self._villages_meal_day ~= core.get_day_count() then
+					return false
+				end
 			end
 			meal.stand(self)
 			seat.stand(self)
