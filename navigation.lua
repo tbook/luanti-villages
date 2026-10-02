@@ -322,6 +322,32 @@ local function has_headroom(path)
 	return true
 end
 
+-- True when a route turns inside a wooden door's node. The planner refuses
+-- these (see turn_ok in plan_stair_route); VoxeLibre's own pathing and
+-- core.find_path know nothing of it, so the same route is checked here.
+local function path_turns_in_door(path, from)
+	local prev = from and vector.round(from)
+	for index, point in ipairs(path) do
+		local pos = vector.round(point.pos or point)
+		local following = path[index + 1]
+		following = following and vector.round(following.pos or following)
+		if prev and following and wooden_door_at(pos)
+			and (pos.x - prev.x == 0) ~= (following.x - pos.x == 0)
+			and (pos.x ~= prev.x or pos.z ~= prev.z) and (following.x ~= pos.x or following.z ~= pos.z) then
+			return true, pos
+		end
+		prev = pos
+	end
+	return false
+end
+
+local function legacy_route_turns_in_door(self)
+	local route = {}
+	if self.current_target and self.current_target.pos then table.insert(route, self.current_target) end
+	for _, waypoint in ipairs(self.waypoints or {}) do table.insert(route, waypoint) end
+	return path_turns_in_door(route, self.object:get_pos())
+end
+
 -- Returns false and the obstructing node when the legacy mover's route has
 -- the villager walk under something.
 local function legacy_route_has_headroom(self)
@@ -345,7 +371,7 @@ local function choose_approach(self, candidates)
 	local best_candidate, best_path, best_cost
 	for _, candidate in ipairs(candidates) do
 		local path = core.find_path(start, candidate, PATH_RANGE, 1, 4)
-		if path and not has_headroom(path) then path = nil end
+		if path and (not has_headroom(path) or path_turns_in_door(path)) then path = nil end
 		local cost = path and path_cost(path)
 		if cost and (not best_cost or cost < best_cost) then
 			best_candidate, best_path, best_cost = candidate, path, cost
@@ -891,8 +917,14 @@ local function install(def)
 		local started = original_gopath(self, candidate, arrived, true)
 		if started or self.state == PATHFINDING then
 			local clear, head = legacy_route_has_headroom(self)
-			if clear then return true end
-			log_overhang(self, candidate, head)
+			local turns, door = legacy_route_turns_in_door(self)
+			if clear and not turns then return true end
+			if turns then
+				core.log("action", string.format("[living_villages] villager %s: route to %s turns inside the door at %s; replanning",
+					tostring(self._id), core.pos_to_string(vector.round(candidate)), core.pos_to_string(door)))
+			else
+				log_overhang(self, candidate, head)
+			end
 			-- The legacy mover plans its own route, door stitching included, so
 			-- the preflight above cannot vouch for it. Take the planner's
 			-- instead, which keeps the whole villager clear.

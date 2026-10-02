@@ -507,6 +507,37 @@ assert(corner_route({["1:0"] = true, ["2:0"] = true, ["3:0"] = true}, {x = 3, y 
 minetest.get_node_or_nil = corner_node
 path_available = true
 
+-- VoxeLibre's own mover plans its own route, so a turn inside a door is
+-- caught after it starts and the trip is stopped rather than left to jam (#121).
+local legacy_corner_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function(self)
+		self.state = "gowp"
+		self.current_target = {pos = {x = 2, y = 0, z = 1}}
+		self.waypoints = {{pos = {x = 2, y = 0, z = 0}}, {pos = {x = 1, y = 0, z = 0}}}
+		return true
+	end,
+}
+dofile("navigation.lua")(legacy_corner_def)
+path_available = false
+local legacy_corner_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	if pos.x == 2 and pos.y == 0 and pos.z == 0 then
+		return {name = "mcl_doors:wooden_door_b_1", param2 = 1}
+	end
+	if pos.y == -1 then return {name = (pos.x == 1 and pos.z == 0) and "stone" or "air"} end
+	return legacy_corner_node(pos)
+end
+local legacy_corner_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {get_pos = function() return {x = 2, y = 0, z = 2} end, set_velocity = function() end},
+}
+assert(not legacy_corner_def.gopath(legacy_corner_entity, legacy_corner_entity._bed, nil, true))
+assert(legacy_corner_entity.state ~= "gowp", "a legacy route turning inside a door must be stopped")
+minetest.get_node_or_nil = legacy_corner_node
+path_available = true
+
 -- A waypoint's action fires when the mover leaves it for the next one. When
 -- the destination sits just past a door, the door is the second-to-last
 -- waypoint and the destination itself is last, so a close action attached to
