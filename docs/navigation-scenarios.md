@@ -198,6 +198,11 @@ door closed and once left open. With it closed, the villager must walk straight
 through without touching the door. With it open, the villager must close it
 before passing, and the door is shut again behind them.
 
+Known limitation: the planner will not turn inside a door's node (enter from one
+side and leave by another), because the leaf blocks one leg of the turn and
+which one depends on the hinge. A bed reachable only through such a corner
+doorway is treated as unreachable rather than approached and jammed.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.

@@ -86,4 +86,30 @@ local open_path = planner.find_path({x = 0, y = 1, z = 0}, low_roof_can_stand,
 	{range = 8, clear = low_roof_clear})
 assert(open_path and #open_path == 2)
 
+-- turn_ok vetoes a step by its previous, current and next positions, so a
+-- route can be refused a turn at one cell and take the long way round (#121).
+local turn_supports = {}
+for x = 0, 2 do for z = 0, 2 do turn_supports[x .. ":0:" .. z] = true end end
+local function turn_can_stand(pos)
+	return turn_supports[pos.x .. ":" .. (pos.y - 1) .. ":" .. pos.z] == true
+end
+local function no_turn_at_corner(prev, pos, next_pos)
+	if pos.x ~= 1 or pos.z ~= 0 then return true end
+	return (pos.x - prev.x == 0) == (next_pos.x - pos.x == 0)
+end
+local turn_goal = function(pos) return pos.x == 2 and pos.z == 1 end
+local direct = planner.find_path({x = 0, y = 1, z = 0}, turn_can_stand, turn_goal, {range = 8})
+assert(direct and #direct == 4)
+local turned = planner.find_path({x = 0, y = 1, z = 0}, turn_can_stand, turn_goal,
+	{range = 8, turn_ok = no_turn_at_corner})
+assert(turned and #turned == 4)
+for i = 2, #turned - 1 do
+	assert(no_turn_at_corner(turned[i - 1], turned[i], turned[i + 1]))
+end
+-- With the only way through being a turn at that cell, there is no route.
+turn_supports = {["0:0:0"] = true, ["1:0:0"] = true, ["1:0:1"] = true}
+local refused = planner.find_path({x = 0, y = 1, z = 0}, turn_can_stand,
+	function(pos) return pos.x == 1 and pos.z == 1 end, {range = 8, turn_ok = no_turn_at_corner})
+assert(refused == nil)
+
 print("planner.lua: ok")

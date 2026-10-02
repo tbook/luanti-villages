@@ -118,7 +118,9 @@ function planner.find_path(start, can_stand, goal, options)
 						and math.abs(next_pos.y - start.y) <= range
 						and math.abs(next_pos.z - start.z) <= range
 						and can_stand(next_pos)
-						and (not options.clear or options.clear(current.pos, next_pos, dy)) then
+						and (not options.clear or options.clear(current.pos, next_pos, dy))
+						and (not options.turn_ok or not current.parent
+							or options.turn_ok(nodes[current.parent].pos, current.pos, next_pos)) then
 						local next_key = key(next_pos)
 						if not closed[next_key] then
 							local g = current.g + 1 + math.abs(dy) * 0.25

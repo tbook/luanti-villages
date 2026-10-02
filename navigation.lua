@@ -398,6 +398,14 @@ local function plan_stair_route(self, candidates)
 		if dy <= 0 then return true end
 		return is_open({x = from_pos.x, y = from_pos.y + 2, z = from_pos.z}, true)
 	end
+	-- A door's leaf sits on one edge of its node, so it can clear one leg of a
+	-- turn made inside the doorway while blocking the other, whichever way it
+	-- swings. Routing does not model that, so a door must be crossed in a
+	-- straight line (#121).
+	local function turn_ok(prev, pos, next_pos)
+		if not wooden_door_at(pos) then return true end
+		return (pos.x - prev.x == 0) == (next_pos.x - pos.x == 0)
+	end
 	local targets = {}
 	for _, target in ipairs(candidates) do targets[target.x .. ":" .. target.y .. ":" .. target.z] = target end
 	-- Bed approaches share nearly all of their map search. Search them as one
@@ -417,6 +425,7 @@ local function plan_stair_route(self, candidates)
 		heuristic = distance_to_target,
 		distance = distance_to_target,
 		clear = clear,
+		turn_ok = turn_ok,
 	})
 	local report = {
 		start = vector.new(start), candidates = {}, status = status, searched = visited,

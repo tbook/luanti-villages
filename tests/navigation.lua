@@ -474,6 +474,39 @@ minetest.get_meta = saved_get_meta
 wooden_door = false
 path_available = true
 
+-- A door cannot be turned in: its leaf clears one leg of a turn while blocking
+-- the other, so a route needing that turn is refused, and a straight one is not (#121).
+local corner_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return false end,
+}
+dofile("navigation.lua")(corner_def)
+path_available = false
+local corner_node = minetest.get_node_or_nil
+local function corner_route(floor_cells, start)
+	minetest.get_node_or_nil = function(pos)
+		if pos.x == 2 and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_doors:wooden_door_b_1", param2 = 1}
+		end
+		if pos.y == -1 then
+			return {name = floor_cells[pos.x .. ":" .. pos.z] and "stone" or "air"}
+		end
+		return corner_node(pos)
+	end
+	local entity = {
+		_bed = {x = 0, y = 0, z = 0}, state = "stand",
+		object = {get_pos = function() return start end, set_velocity = function() end},
+	}
+	return corner_def.gopath(entity, entity._bed, nil, true)
+end
+assert(not corner_route({["1:0"] = true, ["2:0"] = true, ["2:1"] = true}, {x = 2, y = 0, z = 1}),
+	"a route turning inside a door must be refused")
+assert(corner_route({["1:0"] = true, ["2:0"] = true, ["3:0"] = true}, {x = 3, y = 0, z = 0}),
+	"a route straight through a door must still be planned")
+minetest.get_node_or_nil = corner_node
+path_available = true
+
 -- A waypoint's action fires when the mover leaves it for the next one. When
 -- the destination sits just past a door, the door is the second-to-last
 -- waypoint and the destination itself is last, so a close action attached to
