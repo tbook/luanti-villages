@@ -7,6 +7,7 @@ local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
 local planner = dofile(core.get_modpath("living_villages") .. "/planner.lua")
+local doors = dofile(core.get_modpath("living_villages") .. "/doors.lua")
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
 local NO_PROGRESS_SECONDS = 20
@@ -59,6 +60,16 @@ local function wooden_door_at(pos)
 		and core.get_item_group(node.name, "door_iron") == 0 then
 		return pos
 	end
+end
+
+-- What crossing a wooden door's cell by `entry` and out by `exit` takes (see
+-- doors.crossing), where `pos` is either half of the door. nil when there is
+-- no judgeable wooden door there.
+local function door_crossing(pos, entry, exit)
+	local node = wooden_door_at(pos) and core.get_node_or_nil(pos)
+	if not node then return nil end
+	return doors.crossing(node, core.registered_nodes[node.name],
+		doors.sides_toward(pos, entry), doors.sides_toward(pos, exit))
 end
 
 local function iron_door_at(pos)
@@ -406,6 +417,12 @@ local function plan_stair_route(self, candidates)
 		heuristic = distance_to_target,
 		distance = distance_to_target,
 		clear = clear,
+		-- A door's leaf can block a turn inside its cell even when it clears a
+		-- straight crossing, or the reverse (#121).
+		gate = wooden_door_at,
+		crossing = function(from_pos, door, to_pos)
+			return door_crossing(door, from_pos, to_pos) ~= false
+		end,
 	})
 	local report = {
 		start = vector.new(start), candidates = {}, status = status, searched = visited,
@@ -699,7 +716,7 @@ end
 local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
 	"_villages_fish_route", "_villages_job_search_route",
-	"_villages_farm_target", "_villages_fish_target",
+	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
 }
 
 local function install(def)
@@ -749,6 +766,43 @@ local function install(def)
 	end
 
 	def.do_pathfind_action = function(self, action)
+		if action and action.type == "door" and action.action == "open"
+			and action.target and wooden_door_at(action.target) then
+			-- The mover leaves its entry waypoint with the door cell and the
+			-- waypoint beyond it next. Vanilla would open a closed door and leave
+			-- an open one, whichever way its leaf lies (#121).
+			local entry = self.current_target and self.current_target.pos
+			-- The mover may fire a second open action from the door cell itself,
+			-- where the way the villager came in is no longer visible. Judge it
+			-- by the entry the first action saw, so the two never disagree.
+			if entry and entry.x == action.target.x and entry.z == action.target.z then
+				local seen = self._villages_door_entry
+				entry = seen and same_pos(seen.door, action.target) and seen.entry or nil
+				self._villages_door_entry = nil
+			elseif entry then
+				self._villages_door_entry = {door = vector.new(action.target), entry = vector.new(entry)}
+			end
+			local exit
+			for _, waypoint in ipairs(self.waypoints or {}) do
+				if waypoint.pos and (waypoint.pos.x ~= action.target.x or waypoint.pos.z ~= action.target.z) then
+					exit = waypoint.pos
+					break
+				end
+			end
+			local verdict = entry and exit and door_crossing(action.target, entry, exit)
+			if verdict == "keep" then return end
+			if verdict == "toggle" then
+				local open = doors.variant(core.get_node_or_nil(action.target).name)
+				return original_door_action(self, {
+					type = "door", action = open and "close" or "open", target = action.target,
+				})
+			end
+			if verdict == false then
+				-- Neither state of the door lets this route through.
+				self._villages_blocked_door = vector.new(action.target)
+				return
+			end
+		end
 		if action and action.type == "door" and action.action == "open"
 			and action.target and iron_door_at(action.target) then
 			-- The door changed after planning or was replaced with an iron door.

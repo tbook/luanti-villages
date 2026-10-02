@@ -6,6 +6,7 @@ local engine_paths = nil
 local support_available = true
 local support_node = "stone"
 local wooden_door = false
+local door_name, door_param2 = "mcl_doors:wooden_door_b_1", nil
 local iron_door = false
 local glass_pane = false
 local low_ceiling = false
@@ -60,7 +61,7 @@ minetest = {
 			return {name = "mcl_doors:iron_door_b_1"}
 		end
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
-			return {name = "mcl_doors:wooden_door_b_1"}
+			return {name = door_name, param2 = door_param2}
 		end
 		local water_node = water_source_nodes[pos.x .. ":" .. pos.y .. ":" .. pos.z]
 		if water_node then return {name = water_node} end
@@ -931,6 +932,66 @@ door_action_def.on_activate(door_entity)
 globalstep(0.1)
 assert(closed_action == close)
 wooden_door = false
+
+-- The door cell of #121 is entered from the north and left to the east, and the
+-- door was left open with its leaf along the east edge. Vanilla leaves an open
+-- door alone, and the villager pushes at the leaf; closing it swings the leaf
+-- to the south edge and clears the turn.
+local turn_actions = {}
+local turn_def = {
+	on_activate = function() end,
+	do_custom = function() return false end,
+	gopath = function() end,
+	do_pathfind_action = function(_, action) table.insert(turn_actions, action) end,
+}
+dofile("navigation.lua")(turn_def)
+local function door_walker(from, to)
+	return {
+		state = "gowp",
+		object = {set_velocity = function() end, get_pos = function() return from end},
+		current_target = {pos = from},
+		waypoints = {{pos = {x = 1, y = 0, z = 0}}, {pos = to}},
+	}
+end
+local open_door = {type = "door", action = "open", target = {x = 1, y = 0, z = 0}}
+wooden_door = true
+door_name, door_param2 = "mcl_doors:spruce_door_b_2", 3
+turn_def.do_pathfind_action(door_walker({x = 1, y = 0, z = -1}, {x = 2, y = 0, z = 0}), open_door)
+assert(#turn_actions == 1 and turn_actions[1].action == "close"
+	and turn_actions[1].target.x == 1, "an open door whose leaf blocks the turn must be closed")
+-- A straight crossing from the north is clear of that leaf, so it stays as it is.
+turn_actions = {}
+turn_def.do_pathfind_action(door_walker({x = 1, y = 0, z = -1}, {x = 1, y = 0, z = 1}), open_door)
+assert(#turn_actions == 0)
+-- A closed door in the way of a straight crossing is opened, as before.
+door_name, door_param2 = "mcl_doors:wooden_door_b_1", 0
+turn_def.do_pathfind_action(door_walker({x = 1, y = 0, z = -1}, {x = 1, y = 0, z = 1}), open_door)
+assert(#turn_actions == 1 and turn_actions[1].action == "open")
+-- The native mover fires a second open action from the door cell itself. It
+-- must keep the entry the first one saw, not read the entry as empty and swing
+-- a closed door's leaf onto the edge the villager is still coming in by.
+turn_actions = {}
+door_name, door_param2 = "mcl_doors:wooden_door_b_1", 0
+local native = door_walker({x = 0, y = 0, z = 0}, {x = 2, y = 0, z = 0})
+native.current_target = {pos = {x = 0, y = 0, z = 0}}
+turn_def.do_pathfind_action(native, open_door)
+native.current_target = table.remove(native.waypoints, 1)
+turn_def.do_pathfind_action(native, open_door)
+assert(#turn_actions == 0, "both actions must leave the door as the first chose")
+door_name, door_param2 = "mcl_doors:spruce_door_b_2", 3
+-- A route with no way through the door's cell in either state is reported
+-- blocked so that the villager replans, and the door is left alone.
+turn_actions = {}
+door_name, door_param2 = "mcl_doors:spruce_door_b_2", 3
+local diagonal = door_walker({x = 1, y = 0, z = -1}, {x = 0, y = 0, z = 1})
+diagonal.current_target.pos = {x = 2, y = 0, z = -1}
+turn_def.do_pathfind_action(diagonal, open_door)
+assert(#turn_actions == 0 and diagonal._villages_blocked_door)
+-- Without a route to judge by, the action is vanilla's.
+turn_def.do_pathfind_action({object = {set_velocity = function() end}}, open_door)
+assert(#turn_actions == 1 and turn_actions[1] == open_door)
+wooden_door = false
+door_name, door_param2 = "mcl_doors:wooden_door_b_1", nil
 
 -- A native gopath implementation may set its active state before returning a
 -- falsey value. That is still a successfully started route to callers.
