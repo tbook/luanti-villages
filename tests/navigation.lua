@@ -538,6 +538,45 @@ assert(legacy_corner_entity.state ~= "gowp", "a legacy route turning inside a do
 minetest.get_node_or_nil = legacy_corner_node
 path_available = true
 
+-- VoxeLibre's mover never closes an open door, so a straight legacy route through
+-- an open door whose leaf lies across it is stopped and handed to the planner,
+-- whose route closes the door; a closed door it opens itself is left alone (#121).
+local function legacy_door_route(is_open)
+	local def = {
+		on_activate = function() end,
+		do_custom = function() end,
+		gopath = function(self)
+			self.state = "gowp"
+			self.current_target = {pos = {x = 3, y = 0, z = 0}}
+			self.waypoints = {{pos = {x = 2, y = 0, z = 0}}, {pos = {x = 1, y = 0, z = 0}}}
+			return true
+		end,
+	}
+	dofile("navigation.lua")(def)
+	path_available = false
+	local node = minetest.get_node_or_nil
+	local saved_meta = minetest.get_meta
+	minetest.get_meta = function() return {get_int = function() return is_open and 1 or 0 end} end
+	minetest.get_node_or_nil = function(pos)
+		if pos.x == 2 and pos.y == 0 and pos.z == 0 then
+			return {name = "mcl_doors:wooden_door_b_1", param2 = 1}
+		end
+		if pos.y == -1 then return {name = (pos.z == 0 and pos.x >= 1) and "stone" or "air"} end
+		return node(pos)
+	end
+	local entity = {
+		_bed = {x = 0, y = 0, z = 0}, state = "stand",
+		object = {get_pos = function() return {x = 4, y = 0, z = 0} end, set_velocity = function() end},
+	}
+	def.gopath(entity, entity._bed, nil, true)
+	minetest.get_node_or_nil, minetest.get_meta = node, saved_meta
+	path_available = true
+	return entity
+end
+local open_door_entity = legacy_door_route(true)
+assert(open_door_entity._villages_bed_route.mode ~= "legacy", "an open blocking door must not stay on the legacy mover")
+assert(legacy_door_route(false)._villages_bed_route.mode == "legacy", "a closed door is opened by the legacy mover")
+
 -- A waypoint's action fires when the mover leaves it for the next one. When
 -- the destination sits just past a door, the door is the second-to-last
 -- waypoint and the destination itself is last, so a close action attached to

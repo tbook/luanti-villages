@@ -73,9 +73,13 @@ end
 -- Which hinge side a door has decides whether open or closed is the passable
 -- state, and VoxeLibre's open/close actions only act on the opposite state. So
 -- the action that clears the way is whichever one toggles the door as it stands.
-local function door_clearing_action(door)
+local function door_is_open(door)
 	local meta = core.get_meta and core.get_meta(door)
-	return meta and meta:get_int("is_open") == 1 and "close" or "open"
+	return meta and meta:get_int("is_open") == 1 or false
+end
+
+local function door_clearing_action(door)
+	return door_is_open(door) and "close" or "open"
 end
 
 local function door_is_in_use(door, ignored_object)
@@ -341,11 +345,35 @@ local function path_turns_in_door(path, from)
 	return false
 end
 
+-- VoxeLibre's mover only ever opens a closed door, so it pushes forever at an
+-- open door whose leaf lies across the route. Only the planner's route closes
+-- such a door.
+local function path_crosses_open_blocking_door(path, from)
+	local prev = from and vector.round(from)
+	for index, point in ipairs(path) do
+		local pos = vector.round(point.pos or point)
+		local following = path[index + 1]
+		following = following and vector.round(following.pos or following)
+		local door = wooden_door_at(pos)
+		if door and prev and following and door_is_open(door)
+			and door_blocks_travel(door, prev, following) then
+			return true, pos
+		end
+		prev = pos
+	end
+	return false
+end
+
 local function legacy_route_turns_in_door(self)
 	local route = {}
 	if self.current_target and self.current_target.pos then table.insert(route, self.current_target) end
 	for _, waypoint in ipairs(self.waypoints or {}) do table.insert(route, waypoint) end
-	return path_turns_in_door(route, self.object:get_pos())
+	local from = self.object:get_pos()
+	local turns, door = path_turns_in_door(route, from)
+	if turns then return "turns inside", door end
+	local blocked, blocked_door = path_crosses_open_blocking_door(route, from)
+	if blocked then return "crosses the open, blocking", blocked_door end
+	return false
 end
 
 -- Returns false and the obstructing node when the legacy mover's route has
@@ -371,7 +399,8 @@ local function choose_approach(self, candidates)
 	local best_candidate, best_path, best_cost
 	for _, candidate in ipairs(candidates) do
 		local path = core.find_path(start, candidate, PATH_RANGE, 1, 4)
-		if path and (not has_headroom(path) or path_turns_in_door(path)) then path = nil end
+		if path and (not has_headroom(path) or path_turns_in_door(path)
+			or path_crosses_open_blocking_door(path)) then path = nil end
 		local cost = path and path_cost(path)
 		if cost and (not best_cost or cost < best_cost) then
 			best_candidate, best_path, best_cost = candidate, path, cost
@@ -920,8 +949,10 @@ local function install(def)
 			local turns, door = legacy_route_turns_in_door(self)
 			if clear and not turns then return true end
 			if turns then
-				core.log("action", string.format("[living_villages] villager %s: route to %s turns inside the door at %s; replanning",
-					tostring(self._id), core.pos_to_string(vector.round(candidate)), core.pos_to_string(door)))
+				core.log("action", string.format("[living_villages] villager %s: route to %s %s the door at %s; replanning",
+					tostring(self._id), core.pos_to_string(vector.round(candidate)), turns, core.pos_to_string(door)))
+				-- core.find_path routes carry no door actions either.
+				engine_path = nil
 			else
 				log_overhang(self, candidate, head)
 			end
