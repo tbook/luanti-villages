@@ -86,4 +86,43 @@ local open_path = planner.find_path({x = 0, y = 1, z = 0}, low_roof_can_stand,
 	{range = 8, clear = low_roof_clear})
 assert(open_path and #open_path == 2)
 
+-- A gate cell can be entered and left only in some combinations (#121). The
+-- cell at (1,1) may be crossed straight along x, but not turned in, so a route
+-- from the north must go round it.
+--   z=0   . . #
+--   z=1   . G .
+--   z=2   . . .
+local floor = {}
+for x = 0, 2 do for z = 0, 2 do floor[x .. ":" .. z] = true end end
+floor["2:0"] = nil
+local function floor_can_stand(pos)
+	return pos.y == 1 and floor[pos.x .. ":" .. pos.z] == true
+end
+local function is_gate(pos) return pos.x == 1 and pos.z == 1 end
+local function straight_only(from, gate, to)
+	return from.z == gate.z and to.z == gate.z
+end
+local function at_east_side(pos) return pos.x == 2 and pos.z == 1 end
+local ungated = planner.find_path({x = 1, y = 1, z = 0}, floor_can_stand, at_east_side, {range = 8})
+assert(ungated and #ungated == 3 and ungated[2].x == 1 and ungated[2].z == 1)
+local gated = planner.find_path({x = 1, y = 1, z = 0}, floor_can_stand, at_east_side,
+	{range = 8, gate = is_gate, crossing = straight_only})
+assert(gated, "a route must exist round the gate")
+assert(#gated > 3, "the direct route turns inside the gate")
+for i, step in ipairs(gated) do
+	if step.x == 1 and step.z == 1 then
+		assert(gated[i - 1].z == 1 and gated[i + 1].z == 1, "the gate cannot be turned in")
+	end
+end
+-- The same cell is used for a straight crossing, and a goal reached through it
+-- is not lost to the state kept for another way in.
+local straight = planner.find_path({x = 0, y = 1, z = 1}, floor_can_stand, at_east_side,
+	{range = 8, gate = is_gate, crossing = straight_only})
+assert(straight and #straight == 3 and straight[2].x == 1 and straight[2].z == 1)
+-- With no way round, a forbidden turn leaves no route.
+floor["0:0"], floor["0:1"], floor["0:2"], floor["1:2"] = nil, nil, nil, nil
+local none_round, _, none_round_status = planner.find_path({x = 1, y = 1, z = 0}, floor_can_stand, at_east_side,
+	{range = 8, gate = is_gate, crossing = straight_only})
+assert(not none_round and none_round_status == "unreachable")
+
 print("planner.lua: ok")

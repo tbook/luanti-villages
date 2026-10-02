@@ -69,7 +69,11 @@ end
 -- is an optional extra check on the edge itself, not just its endpoints; the
 -- waypoint mover needs it for a rise, where jumping from `from_pos` swings a
 -- villager's head through `from_pos.y + 2`, a column `can_stand(to_pos)` never
--- looks at. The third return value is `found`, `unreachable`, or `search_limit`.
+-- looks at. `options.gate(pos)` marks a position whose crossing depends on how
+-- the route enters and leaves it (a door cell, #121), and `options.crossing(from,
+-- gate, to)` then says whether that entry and exit are allowed together. The
+-- search keeps one state per way into a gate for that reason. The third return
+-- value is `found`, `unreachable`, or `search_limit`.
 function planner.find_path(start, can_stand, goal, options)
 	options = options or {}
 	local range = options.range or 48
@@ -80,6 +84,13 @@ function planner.find_path(start, can_stand, goal, options)
 	-- villager must not hide the stair or descent below it.
 	local vertical_offsets = {0, 1, -1}
 	local open, nodes, closed = {}, {}, {}
+	local gate, crossing = options.gate, options.crossing
+	local function state_key(pos, from)
+		if from and gate and gate(pos) then
+			return key(pos) .. "<" .. (from.x - pos.x) .. ":" .. (from.z - pos.z)
+		end
+		return key(pos)
+	end
 	local start_key = key(start)
 	local start_node = {pos = copy(start), g = 0, f = 0}
 	nodes[start_key] = start_node
@@ -107,6 +118,8 @@ function planner.find_path(start, can_stand, goal, options)
 				}
 			end
 
+			local parent = current.parent and nodes[current.parent]
+			local gated = parent and crossing and gate(current.pos)
 			for _, direction in ipairs(directions) do
 				for _, dy in ipairs(vertical_offsets) do
 					local next_pos = {
@@ -118,8 +131,9 @@ function planner.find_path(start, can_stand, goal, options)
 						and math.abs(next_pos.y - start.y) <= range
 						and math.abs(next_pos.z - start.z) <= range
 						and can_stand(next_pos)
-						and (not options.clear or options.clear(current.pos, next_pos, dy)) then
-						local next_key = key(next_pos)
+						and (not options.clear or options.clear(current.pos, next_pos, dy))
+						and (not gated or crossing(parent.pos, current.pos, next_pos)) then
+						local next_key = state_key(next_pos, current.pos)
 						if not closed[next_key] then
 							local g = current.g + 1 + math.abs(dy) * 0.25
 							local known = nodes[next_key]

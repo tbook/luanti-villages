@@ -188,6 +188,21 @@ height. Villagers must climb to the door by the middle step, never pushing
 their heads into a post. A route that would pass under one is replanned before
 the villager sets off, so the diagnostic shows `mode planner` for that trip.
 
+## 16. A door whose cell is entered around a corner
+
+Build a wooden door in a one-node-wide passage whose far side bends: the cell
+south of the door is solid, so a villager coming from the north has to turn
+inside the door's cell and leave to the east (#121). Give a bed up a stair to
+the east. Leave the door open by hand, then try it closed, and send villagers
+to bed from the north and from the west.
+
+Expected result: every villager gets through and reaches the bed, whichever
+way the door was left. Those turning in from the north swing it to the state
+whose leaf lies against the south wall (for a door placed as one normally is,
+that is closed), and the door is shut again behind them. Nobody circles in
+front of the door or keeps pushing at its leaf. A door crossed in a straight
+line is still opened and closed as before.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.
