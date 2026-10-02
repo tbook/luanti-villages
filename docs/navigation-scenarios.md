@@ -188,6 +188,16 @@ height. Villagers must climb to the door by the middle step, never pushing
 their heads into a post. A route that would pass under one is replanned before
 the villager sets off, so the diagnostic shows `mode planner` for that trip.
 
+## 16. Door set in a wall with a block in front (#121)
+
+From above, with `1 2 3 / 4 5 6 / 7 8 9`: solid wall at 1, 3, 4; one-block-high
+steps at 7 and 8; a wooden door at 5 with a block above it; open floor at 2, 6,
+8 and 9. Closed, the door lies against 4 and leaves the way clear. Open, it
+lies against 2 and blocks it. Send a villager through from 8 to 2, once with the
+door closed and once left open. With it closed, the villager must walk straight
+through without touching the door. With it open, the villager must close it
+before passing, and the door is shut again behind them.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.

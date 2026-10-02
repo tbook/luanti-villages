@@ -58,6 +58,26 @@ local function iron_door_at(pos)
 		and core.get_item_group(node.name, "door_iron") > 0 and pos
 end
 
+-- A door's leaf is a thin slab on one side of its node, and opening it turns
+-- the slab a quarter turn. The leaf blocks a crossing when it lies across the
+-- travel axis; a closed door set beside the passage leaves it free, and
+-- opening that door would swing the leaf into the way (#121).
+local function door_blocks_travel(door, from, to)
+	local node = core.get_node_or_nil(door)
+	if not node then return true end
+	local leaf_on_z = (node.param2 or 0) % 2 == 0
+	local travel_on_z = math.abs(to.z - from.z) > math.abs(to.x - from.x)
+	return leaf_on_z == travel_on_z
+end
+
+-- Which hinge side a door has decides whether open or closed is the passable
+-- state, and VoxeLibre's open/close actions only act on the opposite state. So
+-- the action that clears the way is whichever one toggles the door as it stands.
+local function door_clearing_action(door)
+	local meta = core.get_meta and core.get_meta(door)
+	return meta and meta:get_int("is_open") == 1 and "close" or "open"
+end
+
 local function door_is_in_use(door, ignored_object)
 	for _, object in ipairs(core.get_objects_inside_radius(door, DOOR_USE_RADIUS)) do
 		if object ~= ignored_object then
@@ -572,8 +592,9 @@ local function start_engine_path(self, target, path, arrived, door_actions, rout
 	if door_actions then
 		for i = 2, #waypoints do
 			local door = wooden_door_at(waypoints[i].pos)
-			if door then
-				waypoints[i - 1].action = {type = "door", action = "open", target = vector.new(door)}
+			local after = waypoints[i + 1] or waypoints[i]
+			if door and door_blocks_travel(door, waypoints[i - 1].pos, after.pos) then
+				waypoints[i - 1].action = {type = "door", action = door_clearing_action(door), target = vector.new(door)}
 				if waypoints[i + 1] then
 					if i + 1 == #waypoints then
 						trailing_door = vector.new(door)

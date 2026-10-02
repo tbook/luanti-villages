@@ -6,6 +6,8 @@ local engine_paths = nil
 local support_available = true
 local support_node = "stone"
 local wooden_door = false
+-- Odd facedirs put the door leaf across an x-axis route, so it must be opened.
+local wooden_door_param2 = 1
 local iron_door = false
 local glass_pane = false
 local low_ceiling = false
@@ -60,7 +62,7 @@ minetest = {
 			return {name = "mcl_doors:iron_door_b_1"}
 		end
 		if wooden_door and pos.x == 1 and pos.y == 0 and pos.z == 0 then
-			return {name = "mcl_doors:wooden_door_b_1"}
+			return {name = "mcl_doors:wooden_door_b_1", param2 = wooden_door_param2}
 		end
 		local water_node = water_source_nodes[pos.x .. ":" .. pos.y .. ":" .. pos.z]
 		if water_node then return {name = water_node} end
@@ -403,6 +405,75 @@ minetest.get_node_or_nil = door_node
 wooden_door = false
 path_available = true
 
+-- A closed door whose leaf lies along the route is already passable; opening
+-- it would swing the leaf into the way, so the route must not open it (#121).
+local parallel_door_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return false end,
+}
+dofile("navigation.lua")(parallel_door_def)
+path_available = false
+wooden_door = true
+wooden_door_param2 = 0
+local parallel_door_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos)
+	if pos.y == -1 and pos.z ~= 0 then return {name = "air"} end
+	return parallel_door_node(pos)
+end
+local parallel_door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(parallel_door_def.gopath(parallel_door_entity, parallel_door_entity._bed, nil, true))
+local parallel_opens = parallel_door_entity.current_target.action ~= nil
+for _, waypoint in ipairs(parallel_door_entity.waypoints) do
+	if waypoint.action then parallel_opens = true end
+end
+assert(not parallel_opens, "a door with its leaf along the route must not be opened")
+minetest.get_node_or_nil = parallel_door_node
+wooden_door = false
+wooden_door_param2 = 1
+path_available = true
+
+-- An open door whose leaf lies across the route blocks it, and VoxeLibre only
+-- honours "close" on an open door, so the route must ask for that (#121).
+local blocking_door_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return false end,
+}
+dofile("navigation.lua")(blocking_door_def)
+path_available = false
+wooden_door = true
+local blocking_door_node = minetest.get_node_or_nil
+local saved_get_meta = minetest.get_meta
+minetest.get_meta = function() return {get_int = function() return 1 end} end
+minetest.get_node_or_nil = function(pos)
+	if pos.y == -1 and pos.z ~= 0 then return {name = "air"} end
+	return blocking_door_node(pos)
+end
+local blocking_door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(blocking_door_def.gopath(blocking_door_entity, blocking_door_entity._bed, nil, true))
+local clearing_action = blocking_door_entity.current_target.action
+for _, waypoint in ipairs(blocking_door_entity.waypoints) do
+	clearing_action = clearing_action or waypoint.action
+end
+assert(clearing_action and clearing_action.action == "close", "an open blocking door must be closed")
+minetest.get_node_or_nil = blocking_door_node
+minetest.get_meta = saved_get_meta
+wooden_door = false
+path_available = true
+
 -- A waypoint's action fires when the mover leaves it for the next one. When
 -- the destination sits just past a door, the door is the second-to-last
 -- waypoint and the destination itself is last, so a close action attached to
@@ -419,7 +490,7 @@ path_available = false
 local trailing_door_node = minetest.get_node_or_nil
 minetest.get_node_or_nil = function(pos)
 	if pos.y == -1 and pos.z ~= 0 then return {name = "air"} end
-	if pos.x == 2 and pos.y == 0 and pos.z == 0 then return {name = "mcl_doors:wooden_door_b_1"} end
+	if pos.x == 2 and pos.y == 0 and pos.z == 0 then return {name = "mcl_doors:wooden_door_b_1", param2 = wooden_door_param2} end
 	return trailing_door_node(pos)
 end
 local trailing_door_entity = {
