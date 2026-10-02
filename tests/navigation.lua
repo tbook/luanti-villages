@@ -967,6 +967,18 @@ assert(#turn_actions == 0)
 door_name, door_param2 = "mcl_doors:wooden_door_b_1", 0
 turn_def.do_pathfind_action(door_walker({x = 1, y = 0, z = -1}, {x = 1, y = 0, z = 1}), open_door)
 assert(#turn_actions == 1 and turn_actions[1].action == "open")
+-- The native mover fires a second open action from the door cell itself. It
+-- must keep the entry the first one saw, not read the entry as empty and swing
+-- a closed door's leaf onto the edge the villager is still coming in by.
+turn_actions = {}
+door_name, door_param2 = "mcl_doors:wooden_door_b_1", 0
+local native = door_walker({x = 0, y = 0, z = 0}, {x = 2, y = 0, z = 0})
+native.current_target = {pos = {x = 0, y = 0, z = 0}}
+turn_def.do_pathfind_action(native, open_door)
+native.current_target = table.remove(native.waypoints, 1)
+turn_def.do_pathfind_action(native, open_door)
+assert(#turn_actions == 0, "both actions must leave the door as the first chose")
+door_name, door_param2 = "mcl_doors:spruce_door_b_2", 3
 -- A route with no way through the door's cell in either state is reported
 -- blocked so that the villager replans, and the door is left alone.
 turn_actions = {}

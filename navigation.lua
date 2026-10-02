@@ -716,7 +716,7 @@ end
 local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
 	"_villages_fish_route", "_villages_job_search_route",
-	"_villages_farm_target", "_villages_fish_target",
+	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
 }
 
 local function install(def)
@@ -772,6 +772,16 @@ local function install(def)
 			-- waypoint beyond it next. Vanilla would open a closed door and leave
 			-- an open one, whichever way its leaf lies (#121).
 			local entry = self.current_target and self.current_target.pos
+			-- The mover may fire a second open action from the door cell itself,
+			-- where the way the villager came in is no longer visible. Judge it
+			-- by the entry the first action saw, so the two never disagree.
+			if entry and entry.x == action.target.x and entry.z == action.target.z then
+				local seen = self._villages_door_entry
+				entry = seen and same_pos(seen.door, action.target) and seen.entry or nil
+				self._villages_door_entry = nil
+			elseif entry then
+				self._villages_door_entry = {door = vector.new(action.target), entry = vector.new(entry)}
+			end
 			local exit
 			for _, waypoint in ipairs(self.waypoints or {}) do
 				if waypoint.pos and (waypoint.pos.x ~= action.target.x or waypoint.pos.z ~= action.target.z) then
