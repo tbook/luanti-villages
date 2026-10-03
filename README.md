@@ -33,6 +33,16 @@ For trips to a bed, workstation, farm plot, or fishing spot, villagers first use
 normal pathfinding. If that fails, they fall back to a limited route planner that can use
 ordinary stairs and wooden doors. Iron doors still block them.
 
+### Churches
+
+- **Pulpit:** `living_villages:pulpit` is a lectern with a purple texture that no profession
+  claims as a jobsite. Craft one from a lectern and a purple carpet. A pulpit marks a church, so
+  a player-built church works too. It is the mod's only node: if you remove the mod, placed
+  pulpits become unknown nodes.
+- **Furniture:** newly generated churches get a pulpit in place of the brewing stand and chairs
+  in place of the stair pews, all facing the pulpit. Churches that already exist aren't
+  refurnished.
+
 ### Taverns and dinner
 
 - **Furniture:** newly generated taverns get two tables with plates and chairs. The furniture

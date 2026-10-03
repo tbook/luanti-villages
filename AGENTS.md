@@ -3,7 +3,9 @@
 Living Villages (`living_villages`) is a Luanti mod that extends the villagers in VoxeLibre
 (game id `mineclone2`, version 0.92.3). It wraps VoxeLibre's villager entity definition from
 `mobs_mc` rather than replacing it. Trades, professions, and bed-ownership metadata stay in
-VoxeLibre's format, so removing the mod leaves a working world.
+VoxeLibre's format, so removing the mod leaves a working world with one exception: the
+pulpit is the mod's only node. Placed pulpits become unknown nodes and clerics who used one as
+their jobsite lose it, so vanilla demotes them.
 
 ## Code map
 
@@ -24,6 +26,8 @@ VoxeLibre's format, so removing the mod leaves a working world.
 | `seat.lua` | Chair reservation and the sitting pose |
 | `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
 | `tavern_schematic.lua` | Furnishes newly generated taverns by editing the stock schematic in memory |
+| `pulpit.lua` | The `living_villages:pulpit` node, a lectern clone that is no profession's jobsite |
+| `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |

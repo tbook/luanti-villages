@@ -17,6 +17,8 @@ local install_fisherman = dofile(core.get_modpath("living_villages") .. "/fisher
 local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
 -- Registers living_villages:meal, so it loads here for the same reason.
 local meal = dofile(core.get_modpath("living_villages") .. "/meal.lua")
+-- Registers living_villages:pulpit, likewise.
+dofile(core.get_modpath("living_villages") .. "/pulpit.lua")
 local MODEL = "living_villages_villager.b3d"
 local BASE = "living_villages_villager_base.png^living_villages_villager_plains.png"
 local SLEEP_BOX = {-0.25, 0, -0.25, 0.25, 0.3, 0.25}
@@ -536,4 +538,5 @@ core.register_on_mods_loaded(function()
 end)
 
 dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
+dofile(core.get_modpath("living_villages") .. "/church_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/village_index.lua")
