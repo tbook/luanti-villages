@@ -236,4 +236,22 @@ seat.stand(ida)
 def.do_custom(hal, 0.1)
 assert(not hal._villages_seat and not hal._villages_seated, "does not take a chair again")
 
+-- Holiday evening (#128): guests head for the tavern from 13:30, not 15:30,
+-- and the 17:00 leave-by is unchanged. Day 8 is a holiday; day 7 is not.
+time, day = 13400 / 24000, 8
+local jo = villager("jo", {x = 2, y = 0, z = 0}, {_bed = {x = 0, y = 0, z = 0}})
+count = #gopaths
+def.do_custom(jo, 0.1)
+assert(#gopaths == count and jo._villages_tavern_target == nil, "not before 13:30")
+time = 13600 / 24000
+assert(common.schedule_stage(nil, jo) == "tavern")
+def.do_custom(jo, 0.1)
+assert(#gopaths == count + 1 and vector.equals(jo._villages_tavern_target, jukebox), "holiday guests set out at 13:30")
+time = 17100 / 24000
+def.do_custom(jo, 0.1)
+assert(jo._villages_tavern_target == nil and jo._villages_skip_tavern == 8, "holiday leave-by is still 17:00")
+-- The same hour on an ordinary day is still the afternoon.
+day = 7
+assert(common.schedule_stage(13600 / 24000, villager("kay", {x = 0, y = 0, z = 0})) == "work")
+
 print("tavern.lua: ok")

@@ -1,6 +1,6 @@
 -- Run with: lua tests/keeper.lua
 local time = 10000 / 24000
-local now = 0
+local now, day = 0, 3
 local nodes, metas, logs, shown = {}, {}, {}, {}
 local function key(pos) return pos.x .. "," .. pos.y .. "," .. pos.z end
 
@@ -15,6 +15,7 @@ minetest = {
 	get_modpath = function() return "." end,
 	get_timeofday = function() return time end,
 	get_gametime = function() return now end,
+	get_day_count = function() return day end,
 	get_item_group = function() return 0 end,
 	registered_nodes = {["mcl_jukebox:jukebox"] = {}},
 	get_translator = function(domain)
@@ -124,6 +125,20 @@ time = 19500 / 24000
 alice.order = nil
 def.do_custom(alice, 0.1)
 assert(alice.order == nil, "no hold once service ends")
+
+-- Holiday hours (#128): the keeper staffs from 13:00, an hour before an
+-- ordinary day's 14:00, and still closes at 18:30.
+local schedule = dofile("common.lua")
+local function stage_at(ticks) return schedule.schedule_stage(ticks / 24000, alice) end
+day = 3
+assert(stage_at(13500) == "free", "ordinary day: not yet")
+assert(stage_at(14000) == "staff")
+day = 4
+assert(stage_at(12999) == "free", "holiday: not before 13:00")
+assert(stage_at(13000) == "staff" and stage_at(13500) == "staff", "holiday: open early")
+assert(stage_at(18400) == "staff", "holiday: open until 18:30")
+assert(stage_at(18600) == "home", "holiday: closed after 18:30")
+day = 3
 time = 10000 / 24000
 vanilla_custom = function() end
 
