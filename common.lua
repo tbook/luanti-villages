@@ -137,6 +137,47 @@ local KEEPER_SCHEDULE = {
 	{start = 19000, stage = "sleep"},
 }
 
+-- Holidays (#124) fall on every full moon and new moon, every 4 days. The
+-- holiday tables apply instead of the two above and share their wrap at
+-- midnight. "church" is the villagers' service and "pulpit" and "service" the
+-- cleric's; vanilla knows none of them, nor "bell", until their own issues
+-- give them behavior (#10).
+local HOLIDAY_SCHEDULE = {
+	{start = 5500, stage = "putter"},
+	{start = 7000, stage = "church"},
+	{start = 10500, stage = "bell"},
+	{start = 13500, stage = "tavern"},
+	{start = 17500, stage = "home"},
+	{start = 18500, stage = "sleep"},
+}
+local HOLIDAY_CLERIC_SCHEDULE = {
+	{start = 5500, stage = "pulpit"},
+	{start = 7000, stage = "service"},
+	{start = 10500, stage = "bell"},
+	{start = 13500, stage = "tavern"},
+	{start = 17500, stage = "home"},
+	{start = 18500, stage = "sleep"},
+}
+local HOLIDAY_KEEPER_SCHEDULE = {
+	{start = 7000, stage = "putter"},
+	{start = 8000, stage = "free"},
+	{start = 13000, stage = "staff"},
+	{start = 18500, stage = "home"},
+	{start = 19000, stage = "sleep"},
+}
+
+-- mcl_moon advances the phase at midday, so a day's morning reads one phase
+-- behind its evening. The evening's phase stands for the whole day, which keeps
+-- the church morning and the bell afternoon on the same holiday.
+local function is_holiday()
+	if mcl_moon and mcl_moon.get_moon_phase then
+		local phase = mcl_moon.get_moon_phase()
+		if core.get_timeofday() <= 0.5 then phase = phase + 1 end
+		return phase % 4 == 0
+	end
+	return core.get_day_count and core.get_day_count() % 4 == 0 or false
+end
+
 local function is_thunder()
 	return mcl_weather and mcl_weather.get_weather
 		and mcl_weather.get_weather() == "thunder" or false
@@ -147,7 +188,17 @@ end
 -- A thunderstorm sends everyone to bed at any hour.
 local function stage_at(tod, villager)
 	if is_thunder() then return "sleep" end
-	local schedule = villager and villager._villages_keeper and KEEPER_SCHEDULE or SCHEDULE
+	local schedule = SCHEDULE
+	if is_holiday() then
+		schedule = HOLIDAY_SCHEDULE
+		if villager and villager._villages_keeper then
+			schedule = HOLIDAY_KEEPER_SCHEDULE
+		elseif villager and villager._profession == "cleric" then
+			schedule = HOLIDAY_CLERIC_SCHEDULE
+		end
+	elseif villager and villager._villages_keeper then
+		schedule = KEEPER_SCHEDULE
+	end
 	local ticks = ((tod or core.get_timeofday()) * 24000) % 24000
 	local stage = schedule[#schedule].stage
 	for _, entry in ipairs(schedule) do
@@ -177,6 +228,10 @@ local vanilla_activity = {
 	sleep = "sleep",
 	free = "free",
 	staff = "work",
+	church = "church",
+	pulpit = "pulpit",
+	service = "service",
+	bell = "bell",
 }
 
 -- Vanilla calls get_activity() with no villager at all, so init.lua names
@@ -185,6 +240,7 @@ local current_villager
 
 return {
 	schedule_stage = stage_at,
+	is_holiday = is_holiday,
 	-- Replacement for VoxeLibre's get_activity(tod), which villager.lua
 	-- declares without `local` and looks up as a global on every call.
 	get_activity = function(tod) return vanilla_activity[stage_at(tod, current_villager)] end,
