@@ -548,6 +548,8 @@ local function show(player, villager)
 			.. (villager._villages_fisherman and nearest_fish_candidate(pos) or "n/a (not a fisherman)"),
 		"Barrel claim (hidden from vanilla by the profession guard): " .. barrel_status(villager),
 		"",
+		"Holiday: " .. (common.is_holiday() and "yes" or "no")
+			.. ", stage " .. common.schedule_stage(nil, villager),
 		"Keeper: " .. keeper.status(villager),
 		"Tavern visit: " .. (villager._villages_tavern_arrived and "at the tavern"
 			or villager._villages_tavern_target and ("heading to " .. pos_string(villager._villages_tavern_target))
