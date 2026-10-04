@@ -221,76 +221,90 @@ local function still(v, cell)
 	v.object:set_velocity({x = 0, y = 0, z = 0})
 	v.state = "stand"
 end
-local cleric = villager("cleric", at({x = 1, y = 2, z = 6}), "cleric")
-cleric._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "cleric"}
-local count = #gopaths
-def.do_custom(cleric, 0.1)
-assert(not cleric._villages_seat, "the cleric does not take a pew")
--- The pulpit is walkable, so a straight walk to the cell behind it would be
--- routed over its top. The way is planned once: the floor in front of the dais
--- edge at (8,3,5), the nearest edge along the dais with floor on the
--- congregation's side, then up that step and along the dais in one walk.
-local floor_leg, edge, behind_cell = {x = 7, y = 2, z = 5}, {x = 8, y = 3, z = 5}, {x = 9, y = 3, z = 8}
-local legs = cleric._villages_church.legs
-assert(#legs == 2 and vector.equals(legs[1], floor_leg) and vector.equals(legs[2], behind_cell)
-	and vector.equals(cleric._villages_church.edge, edge), "planned legs")
-assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, floor_leg), "first leg: " .. key(gopaths[#gopaths].target))
+local function cleric_named(name, pos)
+	local v = villager(name, pos, "cleric")
+	v._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
+	metas[key(pulpit)] = {villager = name}
+	return v
+end
 local function route(v)
 	local cells = {v.current_target.pos}
 	for _, waypoint in ipairs(v.waypoints) do cells[#cells + 1] = waypoint.pos end
 	return cells
 end
-local function walks(v, expected, message)
-	local walked = route(v)
-	assert(#walked == #expected, message .. ": " .. #walked .. " cells")
-	for i, cell in ipairs(expected) do assert(vector.equals(walked[i], cell), message .. ", cell " .. i) end
-	assert(vector.equals(v._target, behind_cell), message .. ": ends behind the pulpit")
-end
--- In the air near the floor leg is not there yet.
-cleric.object:set_pos({x = 7, y = 1.8, z = 5})
-cleric.object:set_velocity({x = 0, y = 2, z = 0})
-def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 1 and #gopaths == count + 1, "a jump does not finish a leg")
--- Standing on its level, a node short (where check_gowp stops a carpeted walk):
--- up the step and along the dais, cell by cell, as one walk. Not by the
--- pathfinder, which would leave the dais to cross the pulpit's top, and not a
--- walk that ends at the edge: check_gowp ends a walk within 1.8 nodes of its
--- end, which is mid-jump, and stops the mob dead in the air.
-count = #gopaths
-still(cleric, {x = 6, y = 2, z = 5})
-def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 2 and cleric.state == "gowp" and #gopaths == count, "second leg")
+local floor_leg, edge, behind_cell = {x = 7, y = 2, z = 5}, {x = 8, y = 3, z = 5}, {x = 9, y = 3, z = 8}
 local along = {{x = 9, y = 3, z = 5}, {x = 9, y = 3, z = 6}, {x = 9, y = 3, z = 7}, behind_cell}
-walks(cleric, {edge, along[1], along[2], along[3], along[4]}, "up the step and along the dais")
--- Mid-jump up the step: the walk is kept.
+local function chair_at(cell)
+	local node = nodes[key(cell)]
+	return type(node) == "table" and node.name == "mcl_decor:chair_wooden"
+end
+-- A route inside the church: one step at a time, on the floor and never on or
+-- into a chair, to the floor in front of the dais edge at (8,3,5), up that step,
+-- then along the dais to the cell behind the pulpit.
+local function walks_in(v, from, message)
+	local walked = route(v)
+	local last = from
+	local i = 1
+	while not vector.equals(walked[i], floor_leg) do
+		local cell = walked[i]
+		assert(cell.y == 2 and not chair_at(cell) and not chair_at({x = cell.x, y = 1, z = cell.z}),
+			message .. ": a chair at " .. key(cell))
+		assert(math.abs(cell.x - last.x) + math.abs(cell.z - last.z) == 1, message .. ": a step at " .. key(cell))
+		last, i = cell, i + 1
+		assert(walked[i], message .. ": never reaches the floor in front of the dais")
+	end
+	assert(math.abs(floor_leg.x - last.x) + math.abs(floor_leg.z - last.z) <= 1, message .. ": a step to the dais front")
+	assert(vector.equals(walked[i + 1], edge), message .. ": up the step at the dais edge")
+	for j, cell in ipairs(along) do assert(vector.equals(walked[i + 1 + j], cell), message .. ": along the dais " .. j) end
+	assert(#walked == i + 1 + #along and vector.equals(v._target, behind_cell), message .. ": ends behind the pulpit")
+end
+
+-- From inside the church (by the door) the cleric walks a route of its own, not
+-- the pathfinder's: that would cross the pews (chairs are walkable), the
+-- walkable pulpit's top, and end a walk mid-jump at the dais edge.
+local start = {x = 1, y = 2, z = 6}
+local cleric = cleric_named("cleric", at(start))
+local count = #gopaths
+def.do_custom(cleric, 0.1)
+assert(not cleric._villages_seat, "the cleric does not take a pew")
+assert(#gopaths == count and cleric.state == "gowp", "its own route")
+assert(vector.equals(cleric._villages_church.edge, edge) and vector.equals(cleric._villages_church.floor, floor_leg))
+walks_in(cleric, start, "from the door")
+-- Partway, and mid-jump up the step: the walk is kept.
 cleric.object:set_pos({x = 7.6, y = 2.6, z = 5})
 cleric.object:set_velocity({x = 1, y = 1.5, z = 0})
 def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 2 and #gopaths == count and cleric.state == "gowp", "the climb is not cut short")
--- If vanilla stops the walk at the top of the jump, beside the step (feet level
--- with the dais node but under its surface, not rising): not on the dais yet,
--- so the walk starts again from the floor rather than from the dais.
-cleric.object:set_pos({x = 7, y = 2.4, z = 5})
-cleric.object:set_velocity({x = 0, y = 0, z = 0})
-cleric.state = "stand"
-def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 1 and vector.equals(gopaths[#gopaths].target, floor_leg), "back to the floor in front of the step")
+assert(#gopaths == count and cleric.state == "gowp" and #route(cleric) > 4, "the climb is not cut short")
 -- Landed on the very edge of the dais, its center hanging past the edge cell
 -- over the floor in front: it is on the dais (a headless run landed here).
 still(cleric, edge)
 cleric.object:set_pos({x = 7.3, y = 2.51, z = 5})
 def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 2 and cleric.state == "gowp", "on the dais from the edge")
-walks(cleric, along, "walks the dais from the edge")
--- Knocked off the dais on the way: it plans the way up again.
-still(cleric, {x = 6, y = 2, z = 7})
+local walked = route(cleric)
+assert(cleric.state == "gowp" and #walked == #along, "walks the dais from the edge")
+for i, cell in ipairs(along) do assert(vector.equals(walked[i], cell), "dais cell " .. i) end
+-- At the top of a jump beside the step, if vanilla ever stopped there (feet
+-- level with the dais node but under its surface, not rising): not on the
+-- dais, so it does not walk the dais from mid-air.
+cleric.object:set_pos({x = 7, y = 2.4, z = 5})
+cleric.object:set_velocity({x = 0, y = 0, z = 0})
+cleric.state = "stand"
 def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 1 and vector.equals(gopaths[#gopaths].target, floor_leg), "back to the floor leg")
-still(cleric, floor_leg)
+assert(vector.equals(cleric._villages_church.goal, floor_leg), "the top of the jump is not the dais: back to the floor in front of it")
+-- Knocked off the dais among the pews: it walks back in from where it landed.
+still(cleric, {x = 4, y = 2, z = 9})
 def.do_custom(cleric, 0.1)
-assert(cleric._villages_church.leg == 2 and cleric.state == "gowp")
-walks(cleric, {edge, along[1], along[2], along[3], along[4]}, "and up again")
+walks_in(cleric, {x = 4, y = 2, z = 9}, "from the pews' aisle")
+-- Up on a pew (the playtest: stuck on a seat against its backrest, walking):
+-- it steps down to the floor beside the chair first.
+cleric.object:set_pos({x = 3, y = 2.51, z = 9})
+cleric.object:set_velocity({x = 0, y = 0, z = 0})
+cleric.state = "stand"
+def.do_custom(cleric, 0.1)
+walked = route(cleric)
+assert(walked[1].y == 2 and not chair_at(walked[1]) and math.abs(walked[1].x - 3) + math.abs(walked[1].z - 9) == 1,
+	"steps down off the chair")
+walks_in(cleric, {x = 3, y = 2, z = 9}, "after stepping down")
 -- A node short of its place, on the dais: lined up behind the pulpit, facing
 -- the pews, and held there.
 count = #gopaths
@@ -318,59 +332,39 @@ def.do_custom(cleric, 0.1)
 assert(not cleric._villages_church and cleric.order == nil, "putters")
 nodes[key(behind_cell)] = behind
 
--- Up on the dais sooner than planned (here, during the floor leg): once it is
--- standing there it walks the dais.
-local early = villager("early", at({x = 1, y = 2, z = 6}), "cleric")
-early._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "early"}
-def.do_custom(early, 0.1)
-assert(early._villages_church.leg == 1)
-early.object:set_pos({x = 8, y = 3.2, z = 5})
-early.object:set_velocity({x = 0, y = -1, z = 0})
-def.do_custom(early, 0.1)
-assert(early._villages_church.leg == 1, "not while landing")
-still(early, edge)
-def.do_custom(early, 0.1)
-assert(early._villages_church.leg == 2 and early.state == "gowp" and vector.equals(early._target, behind_cell), "walks the dais")
+-- From outside the church the pathfinder brings the cleric to the floor in
+-- front of the dais edge; the walk inside takes over once it is in.
+local outside = {x = 30, y = 1.51, z = 6}
+local away = cleric_named("away", outside)
+count = #gopaths
+def.do_custom(away, 0.1)
+assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, floor_leg), "the pathfinder, to get there")
+away.object:set_pos(at(start))
+def.do_custom(away, 0.1)
+assert(#gopaths == count + 1, "then its own route inside")
+walks_in(away, start, "taken over at the door")
 
 -- A cleric that sets out from the dais itself walks straight along it.
-local up = villager("up", at({x = 10, y = 3, z = 6}), "cleric")
-up._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "up"}
+local up = cleric_named("up", at({x = 10, y = 3, z = 6}))
 def.do_custom(up, 0.1)
-assert(#up._villages_church.legs == 1 and up.state == "gowp" and vector.equals(up._target, behind_cell), "already on the dais")
 local up_route = route(up)
+assert(up.state == "gowp" and vector.equals(up._target, behind_cell), "already on the dais")
 assert(vector.equals(up_route[#up_route], behind_cell) and up_route[1].y == 3, "walks the dais")
-
--- A walk under way keeps the route it was given, so a new plan (here, the
--- cleric's old walk was to the cell behind the pulpit) drops it and starts the
--- first leg.
-local turned = villager("turned", at({x = 1, y = 2, z = 6}), "cleric")
-turned._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "turned"}
-turned._villages_church = {role = "cleric", pulpit = pulpit, since = now, limit = 100, goal = behind_cell}
-turned.state = "gowp"
-count = #gopaths
-def.do_custom(turned, 0.1)
-assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, floor_leg), "walks the new first leg, not the old route")
+for _, cell in ipairs(up_route) do assert(cell.y == 3, "stays on the dais") end
 
 -- A cleric that runs out of time gives up where it is: nobody is moved to a
 -- place it did not walk to.
-local slow = villager("slow", at({x = 7, y = 2, z = 6}), "cleric")
-slow._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "slow"}
+local slow = cleric_named("slow", outside)
 def.do_custom(slow, 0.1)
 slow._villages_church.since = now - 1000
 slow.state = "stand"
 def.do_custom(slow, 0.1)
 local left = slow.object:get_pos()
-assert(not slow._villages_church and left.x == 7 and left.z == 6, "gave up, not moved")
+assert(not slow._villages_church and left.x == outside.x and left.z == outside.z, "gave up, not moved")
 
 -- While vanilla waits out an earlier failed route (ready_to_path) the villager
 -- waits too: that is not another failure.
-local settled = villager("settled", at({x = 1, y = 2, z = 6}), "cleric")
-settled._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "settled"}
+local settled = cleric_named("settled", outside)
 settled.ready_to_path = function() return false end
 count = #gopaths
 for _ = 1, 5 do def.do_custom(settled, 0.1) end
@@ -382,9 +376,7 @@ assert(#gopaths == count + 1, "then walks")
 -- Vanilla's player scan turns jumping off near a player (villager.lua
 -- stand_still). On the way to church it is turned back on, so a villager being
 -- watched can still climb; not while a player is trading with it.
-local watched = villager("watched", at({x = 1, y = 2, z = 6}), "cleric")
-watched._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-metas[key(pulpit)] = {villager = "watched"}
+local watched = cleric_named("watched", at(start))
 def.do_custom(watched, 0.1)
 assert(watched.state == "gowp")
 watched.jump = false

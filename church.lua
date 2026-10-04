@@ -295,21 +295,18 @@ local function walk_limit(self, pulpit)
 	return math.min(WALK_MAX, WALK_BASE + WALK_PER_NODE * distance)
 end
 
--- The dais: cells level with the cleric's place, of the same kind (the stock
--- church's purple carpet), joined to it, nearest first.
-local function dais_cells(stand)
-	local kind = core.get_node_or_nil(stand)
-	local found, order = {[key(stand)] = 0}, {stand}
+-- Cells joined to start on its level that pass keep(cell), each with its number
+-- of steps from start, and in the order found (nearest first).
+local function flood(start, reach, keep)
+	local found, order = {[key(start)] = 0}, {start}
 	local i = 1
 	while order[i] do
 		local cell = order[i]
 		i = i + 1
-		if found[key(cell)] < DAIS_REACH then
+		if found[key(cell)] < reach then
 			for _, side in ipairs(SIDES) do
 				local next_cell = {x = cell.x + side.x, y = cell.y, z = cell.z + side.z}
-				local node = core.get_node_or_nil(next_cell)
-				if not found[key(next_cell)] and node and kind and node.name == kind.name
-					and common.is_standing_space(next_cell, true) then
+				if not found[key(next_cell)] and keep(next_cell) then
 					found[key(next_cell)] = found[key(cell)] + 1
 					order[#order + 1] = next_cell
 				end
@@ -319,10 +316,33 @@ local function dais_cells(stand)
 	return found, order
 end
 
--- The dais cell a villager stands on: any cell under its 0.6-wide footprint, on
--- its level, nearest first. Its center may hang over the edge, past the last
--- dais cell (seen in a headless run), so rounding the center is not enough.
-local function dais_cell_at(cells, pos)
+-- The dais: cells level with the cleric's place, of the same kind (the stock
+-- church's purple carpet), joined to it.
+local function dais_cells(stand)
+	local kind = core.get_node_or_nil(stand)
+	return flood(stand, DAIS_REACH, function(cell)
+		local node = core.get_node_or_nil(cell)
+		return node and kind and node.name == kind.name and common.is_standing_space(cell, true)
+	end)
+end
+
+-- The church floor at the congregation's level, joined to cell, within the
+-- church: every cell a villager can stand in, but never a chair or the top of
+-- one. Chairs are walkable, so the pathfinder routes over the pews (a cleric was
+-- seen stuck on a seat against its backrest, legs walking).
+local function floor_cells(cell, pulpit)
+	return flood(cell, 2 * INSIDE, function(next_cell)
+		local dx, dz = next_cell.x - pulpit.x, next_cell.z - pulpit.z
+		return dx * dx + dz * dz <= INSIDE * INSIDE
+			and not is_chair(next_cell) and not is_chair({x = next_cell.x, y = next_cell.y - 1, z = next_cell.z})
+			and common.is_standing_space(next_cell, true)
+	end)
+end
+
+-- The cell of cells a villager stands on: any one under its 0.6-wide footprint,
+-- on its level, nearest first. Its center may hang over an edge (a cleric landed
+-- on the dais with its center past the edge cell), so rounding is not enough.
+local function cell_at(cells, pos)
 	local y = common.feet_node(pos)
 	local best, best_distance
 	for x = math.floor(pos.x + 0.5) - 1, math.floor(pos.x + 0.5) + 1 do
@@ -338,41 +358,44 @@ local function dais_cell_at(cells, pos)
 	return best
 end
 
--- The cleric's way to its place, worked out once when it sets out. The pulpit
--- is walkable, so the pathfinder's shortest way to the cell behind it runs over
--- its top, which no villager can climb. So unless the cleric is already on the
--- dais it goes in two legs: to the floor in front of a dais edge cell, then up
--- that one step (step.lua) and along the dais. The edge is the nearest one to
--- the place along the dais with the floor in front of it on the congregation's
--- side and room overhead to jump, and far enough from the place that
+-- A floor cell beside a villager standing on a chair, to step down to.
+local function off_chair(cells, pos)
+	local under = {x = math.floor(pos.x + 0.5), y = common.feet_node(pos) - 1, z = math.floor(pos.z + 0.5)}
+	if not is_chair(under) then return end
+	for _, side in ipairs(SIDES) do
+		local cell = {x = under.x + side.x, y = under.y, z = under.z + side.z}
+		if cells[key(cell)] then return cell end
+	end
+end
+
+-- The way up onto the dais: the edge cell nearest the cleric's place along the
+-- dais that has church floor in front of it on the congregation's side, with
+-- room overhead to jump, and that is at least 2.5 nodes from the place, so that
 -- check_gowp's 1.8-node arrival around the place cannot end the walk mid-jump.
--- Returns the legs, the dais cells, and the edge.
-local function plan(self, pulpit, stand, dir)
+-- Returns the dais cells, the edge and the floor cell in front of it.
+local function plan(pulpit, stand, dir)
 	local cells, order = dais_cells(stand)
-	local pos = self.object:get_pos()
-	if pos and standing_on_level(self, pos, stand) and dais_cell_at(cells, pos) then return {stand}, cells end
 	for _, edge in ipairs(order) do
-		local by_pulpit = math.abs(edge.x - pulpit.x) + math.abs(edge.z - pulpit.z) <= 1
 		local far = (edge.x - stand.x) ^ 2 + (edge.z - stand.z) ^ 2 >= 2.5 ^ 2
-		if far and not by_pulpit then
+		if far then
 			for _, side in ipairs(SIDES) do
 				local floor = {x = edge.x + side.x, y = edge.y - 1, z = edge.z + side.z}
 				local front = (floor.x - pulpit.x) * dir.x + (floor.z - pulpit.z) * dir.z > 0
-				if front and common.is_standing_space(floor, true)
+				if front and not is_chair(floor) and common.is_standing_space(floor, true)
 					and common.is_clear_node({x = floor.x, y = floor.y + 2, z = floor.z}) then
-					return {floor, stand}, cells, edge
+					return cells, edge, floor
 				end
 			end
 		end
 	end
-	return {stand}, cells
+	return cells
 end
 
--- The dais cells from cell to the cleric's place, one step at a time down the
--- flood fill's distances; nil off the dais.
-local function along_dais(cells, from)
+-- The cells from one to the start of a flood, one step at a time down its
+-- distances; nil if from is not in it.
+local function along(cells, from)
 	local path, here = {}, from
-	if not cells[key(here)] then return end
+	if not here or not cells[key(here)] then return end
 	while cells[key(here)] > 0 do
 		local next_cell
 		for _, side in ipairs(SIDES) do
@@ -389,16 +412,16 @@ local function along_dais(cells, from)
 	return path
 end
 
--- Walk along the dais to the cleric's place on these cells, not on a route of
--- the pathfinder's, which leaves the dais to cross the pulpit's top. From the
--- floor in front of the edge the first cell is the edge, up the step. The
--- waypoints are what gopath would set up (mcl_mobs/pathfinding.lua), so
--- check_gowp walks them and do_jump (step.lua) takes the step. There is one walk
--- for the step and the dais: a walk to the edge itself would end within
--- check_gowp's 1.8 nodes of it, which is mid-jump, and vanilla stops a mob dead
--- when a walk ends. Returns false once the church is given up, and "off" when
--- the cleric is neither on the dais nor in front of its edge.
-local function walk_dais(self, church, pos)
+-- Inside the church the cleric does not use the pathfinder, which routes over
+-- the pews, onto the walkable pulpit's top, and ends walks within check_gowp's
+-- 1.8 nodes of their target, which at the dais edge is mid-jump (vanilla stops a
+-- mob dead when a walk ends). From any church floor cell, the dais, or a chair
+-- it walks one route of its own: across the floor to the cell in front of the
+-- dais edge, up the step (step.lua), and along the dais to its place. The
+-- waypoints are what gopath sets up (mcl_mobs/pathfinding.lua), so check_gowp
+-- walks them. Returns false once the church is given up, and "outside" when the
+-- cleric is not in the church to walk it.
+local function walk_inside(self, church, pos)
 	if now() - church.since > church.limit then
 		skip(self, church.pulpit, "the walk took too long")
 		return false
@@ -406,14 +429,24 @@ local function walk_dais(self, church, pos)
 	if self.state == "gowp" and church.goal and same(church.goal, church.stand) then return true end
 	local v = self.object:get_velocity()
 	if v and math.abs(v.y) > 0.1 then return true end
-	local from = dais_cell_at(church.cells, pos)
-	local path = from and along_dais(church.cells, from)
-	local floor = church.legs[1]
-	if not from and church.edge and near(pos, floor, LEG_REACH) and on_level(pos, floor) then
-		path = along_dais(church.cells, church.edge)
-		if path then table.insert(path, 1, church.edge) end
+	local path
+	local on_dais = cell_at(church.cells, pos)
+	if on_dais then
+		path = along(church.cells, on_dais)
+	elseif church.floor_cells then
+		local from = cell_at(church.floor_cells, pos)
+		local down = not from and off_chair(church.floor_cells, pos)
+		local across = along(church.floor_cells, from or down)
+		local up = along(church.cells, church.edge)
+		if across and up then
+			path = {}
+			if down then path[1] = down end
+			for _, cell in ipairs(across) do path[#path + 1] = cell end
+			path[#path + 1] = church.edge
+			for _, cell in ipairs(up) do path[#path + 1] = cell end
+		end
 	end
-	if not path then return "off" end
+	if not path then return "outside" end
 	if #path == 0 then path = {church.stand} end
 	stop_walking(self)
 	local waypoints = {}
@@ -430,8 +463,7 @@ local function walk_dais(self, church, pos)
 	return true
 end
 
-local conduct
-function conduct(self, pulpit)
+local function conduct(self, pulpit)
 	if skipped(self, pulpit) then return leave(self) end
 	local cell, dir = cleric_stand(pulpit, self._id)
 	if not cell then
@@ -444,45 +476,29 @@ function conduct(self, pulpit)
 		or not church.stand or not same(church.stand, cell) then
 		leave(self)
 		church = {
-			role = "cleric", pulpit = pulpit, stand = cell, dir = dir, since = now(),
-			limit = walk_limit(self, pulpit) + CLIMB_SECONDS, leg = 1,
+			role = "cleric", pulpit = pulpit, stand = cell, since = now(),
+			limit = walk_limit(self, pulpit) + CLIMB_SECONDS,
 		}
-		church.legs, church.cells, church.edge = plan(self, pulpit, cell, dir)
+		church.cells, church.edge, church.floor = plan(pulpit, cell, dir)
+		if church.floor then church.floor_cells = floor_cells(church.floor, pulpit) end
 		self._villages_church = church
 	end
 	local pos = self.object:get_pos()
 	if not pos then return end
-	-- Up on the dais before its last leg (it climbed sooner than planned, say):
-	-- standing there, not mid-jump, it walks the dais from where it is.
-	if church.leg < #church.legs and standing_on_level(self, pos, cell) and dais_cell_at(church.cells, pos) then
-		church.leg = #church.legs
-	end
-	local target = church.legs[church.leg]
-	if church.leg == #church.legs then
-		if near(pos, cell, AT_PULPIT) and standing_on_level(self, pos, cell) then
-			-- Line up exactly behind the pulpit: the last cell or two of the dais
-			-- walk, on its own level.
-			if not near(pos, cell, 0.3) then self.object:set_pos({x = cell.x, y = pos.y, z = cell.z}) end
-			church.failures = nil
-			return hold_still(self, dir.x, dir.z)
-		end
-		local walking = walk_dais(self, church, pos)
-		if walking == "off" then
-			-- Off the dais (pushed, or it fell): plan the way up again from here.
-			church.legs, church.cells, church.edge = plan(self, pulpit, cell, dir)
-			church.leg = 1
-			return conduct(self, pulpit)
-		end
-		if not walking then return leave(self) end
-		return
-	elseif near(pos, target, LEG_REACH) and standing_on_level(self, pos, target) then
-		-- This leg is done only once the cleric stands on its level: mid-jump
-		-- up the step does not count.
-		church.leg = church.leg + 1
+	if near(pos, cell, AT_PULPIT) and standing_on_level(self, pos, cell) then
+		-- Line up exactly behind the pulpit: the last cell or two of the dais
+		-- walk, on its own level.
+		if not near(pos, cell, 0.3) then self.object:set_pos({x = cell.x, y = pos.y, z = cell.z}) end
 		church.failures = nil
-		return conduct(self, pulpit)
+		return hold_still(self, dir.x, dir.z)
 	end
-	if not walk(self, church, target, pos) then return leave(self) end
+	local walking = walk_inside(self, church, pos)
+	if walking == false then return leave(self) end
+	if walking == "outside" then
+		-- Not in the church yet: the pathfinder brings it to the floor in front
+		-- of the dais edge, and the walk inside takes over at the door.
+		if not walk(self, church, church.floor or cell, pos) then return leave(self) end
+	end
 end
 
 local function join(self, pos)
