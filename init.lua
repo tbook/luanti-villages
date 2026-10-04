@@ -528,6 +528,8 @@ core.register_on_mods_loaded(function()
 
 	dofile(core.get_modpath("living_villages") .. "/births.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/navigation.lua")(def)
+	-- Jumps up carpeted steps that vanilla's do_jump refuses (#126).
+	dofile(core.get_modpath("living_villages") .. "/step.lua").install(def)
 	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)

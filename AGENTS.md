@@ -15,6 +15,7 @@ their jobsite lose it, so vanilla demotes them.
 | `common.lua` | Shared helpers with no side effects: schedule stages, standing space, bed and jobsite lookups |
 | `births.lua` | Bed-limited births. The cooldown is stored in bed metadata |
 | `navigation.lua` | Trips to beds, jobsites, and targets. Uses VoxeLibre's pathing first, then falls back to `planner.lua` |
+| `step.lua` | Lets a villager on a planned route jump a full step topped with carpet, which vanilla's `do_jump` reads as a two-block stack |
 | `planner.lua` | Limited A* search over walkable positions, including stairs and wooden doors |
 | `doors.lua` | Which edge of its cell a door's leaf lies on, and which entries and exits of the cell that leaves free |
 | `farmer.lua` | Farmer visits to crops near a claimed composter |

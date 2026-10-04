@@ -286,9 +286,10 @@ return {
 	-- floor is only required under the center column, since standing with part
 	-- of the box over an edge is ordinary.
 	-- With thin_ok, carpet in the villager's own cell does not count against it.
+	-- Only there: carpet at head height still blocks.
 	is_standing_space = function(pos, thin_ok)
 		local feet = round(pos.y)
-		return box_is_clear(pos, feet, feet + HEIGHT_NODES - 1, thin_ok)
+		return box_is_clear(pos, feet, feet, thin_ok) and box_is_clear(pos, feet + 1, feet + HEIGHT_NODES - 1)
 			and is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
 	end,
 	-- The two halves of is_standing_space, for a villager partway over a step
