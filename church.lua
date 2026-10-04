@@ -27,10 +27,10 @@ local UNREACHABLE_SECONDS = 200
 -- Close enough to a standing place to be there.
 local AT_PLACE = 1.0
 -- The back of the church, measured from the pulpit along the way it faces: far
--- enough to leave the pews and the dais clear, and short of the far wall, where
--- the stock church has its doorway.
+-- enough to leave the dais clear, and short of the far wall, where the stock
+-- church has its doorway (it starts 6 from the pulpit, with a wall at 6).
 local BACK_MIN = 3
-local BACK_MAX = 6
+local BACK_MAX = 5
 local BACK_REACH = 8
 local FIELDS = {"_villages_church", "_villages_church_skipped", "_villages_church_checked"}
 
@@ -73,12 +73,25 @@ local function cleric_stand(pulpit, id)
 	}
 	for _, offset in ipairs(offsets) do
 		local cell = {x = pulpit.x + offset.x, y = pulpit.y, z = pulpit.z + offset.z}
-		if common.is_standing_space(cell) and not held_by_other(cell, id) then return cell, dir end
+		if common.is_standing_space(cell, true) and not held_by_other(cell, id) then return cell, dir end
 	end
 end
 
--- Free places to stand at the back of the church, best first: farthest from the
--- pulpit within the back, then nearest the middle.
+local SIDES = {{x = 1, z = 0}, {x = -1, z = 0}, {x = 0, z = 1}, {x = 0, z = -1}}
+
+-- Whether a chair is next to the cell, or under it (a chair is solid enough to
+-- stand on): someone standing there would be in the way of whoever sits down.
+local function beside_chair(cell)
+	for _, side in ipairs({SIDES[1], SIDES[2], SIDES[3], SIDES[4], {x = 0, z = 0, y = -1}}) do
+		local node = core.get_node_or_nil({x = cell.x + side.x, y = cell.y + (side.y or 0), z = cell.z + side.z})
+		if node and core.get_item_group(node.name, "chair") > 0 then return true end
+	end
+	return false
+end
+
+-- Free places to stand at the back of the church, best first: out of the way of
+-- the pews, then farthest from the pulpit within the back, then nearest the
+-- middle.
 local function back_places(pulpit, id)
 	local dir = audience(pulpit)
 	if not dir then return {} end
@@ -90,14 +103,18 @@ local function back_places(pulpit, id)
 				local depth = dx * dir.x + dz * dir.z
 				if depth >= BACK_MIN and depth <= BACK_MAX then
 					local cell = {x = x, y = y, z = z}
-					if not held_by_other(cell, id) and common.is_standing_space(cell) then
-						found[#found + 1] = {cell = cell, depth = depth, side = math.abs(dx * dir.z - dz * dir.x)}
+					if not held_by_other(cell, id) and common.is_standing_space(cell, true) then
+						found[#found + 1] = {
+							cell = cell, depth = depth, side = math.abs(dx * dir.z - dz * dir.x),
+							crowds = beside_chair(cell) and 1 or 0,
+						}
 					end
 				end
 			end
 		end
 	end
 	table.sort(found, function(a, b)
+		if a.crowds ~= b.crowds then return a.crowds < b.crowds end
 		if a.depth ~= b.depth then return a.depth > b.depth end
 		if a.side ~= b.side then return a.side < b.side end
 		if a.cell.x ~= b.cell.x then return a.cell.x < b.cell.x end

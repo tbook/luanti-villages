@@ -127,7 +127,7 @@ end
 local function approach(chair, table_pos)
 	for _, side in ipairs(SIDES) do
 		local pos = {x = chair.x + side.x, y = chair.y, z = chair.z + side.z}
-		if not vector.equals(pos, table_pos) and common.is_standing_space(pos) then return pos end
+		if not vector.equals(pos, table_pos) and common.is_standing_space(pos, true) then return pos end
 	end
 end
 
@@ -215,7 +215,7 @@ function M.sit(self)
 	local here = self.object:get_pos()
 	-- The square it sat down from is where it stands back up, if it came from
 	-- beside the chair; otherwise the square the seat was reserved with.
-	if here and vector.distance(here, seat.chair) <= REACH and common.is_standing_space(here) then
+	if here and vector.distance(here, seat.chair) <= REACH and common.is_standing_space(here, true) then
 		self._villages_seat_exit = copy(here)
 	else
 		self._villages_seat_exit = {x = seat.approach.x, y = seat.approach.y - 0.49, z = seat.approach.z}
@@ -256,11 +256,11 @@ end
 -- chair.
 function M.exit(self)
 	local exit, chair = self._villages_seat_exit, self._villages_seat_chair
-	if exit and common.is_standing_space(exit) then return exit end
+	if exit and common.is_standing_space(exit, true) then return exit end
 	if not chair then return self.object:get_pos() end
 	for _, side in ipairs(SIDES) do
 		local pos = {x = chair.x + side.x, y = chair.y, z = chair.z + side.z}
-		if common.is_standing_space(pos) then return {x = pos.x, y = pos.y - 0.49, z = pos.z} end
+		if common.is_standing_space(pos, true) then return {x = pos.x, y = pos.y - 0.49, z = pos.z} end
 	end
 	return {x = chair.x, y = chair.y + 0.01, z = chair.z}
 end

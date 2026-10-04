@@ -29,7 +29,10 @@ minetest = {
 	get_timeofday = function() return time end,
 	get_gametime = function() return now end,
 	get_day_count = function() return day end,
-	get_item_group = function(name, group) return (groups[name] or {})[group] or 0 end,
+	get_item_group = function(name, group)
+		if group == "carpet" and name:match("_carpet$") then return 1 end
+		return (groups[name] or {})[group] or 0
+	end,
 	facedir_to_dir = function(param2) return facedirs[param2 % 4] end,
 	registered_nodes = {
 		air = {walkable = false},
@@ -68,23 +71,38 @@ minetest = {
 	end,
 }
 
--- The furnished stock church (church_schematic.lua), in schematic
--- coordinates: floor at y 1, a dais at x 8 to 10, z 5 to 8, the pulpit on it at
--- (8,3,8) facing the pews to the west, and twelve chairs facing east.
-for x = 0, 12 do
-	for z = 0, 13 do nodes[key({x = x, y = 1, z = z})] = "mcl_core:stone" end
+-- The furnished stock church (church_schematic.lua), laid out from the real
+-- VoxeLibre fixture, in schematic coordinates: carpet over the whole floor, a
+-- dais at x 8 to 10, z 5 to 8, the pulpit on it at (8,3,8) facing the pews to the
+-- west, and twelve chairs facing east. Carpets are walkable slivers, so every
+-- cell a villager can stand in here is one.
+local stock = dofile("tests/fixtures/church_voxelibre_0_92_3.lua")
+local schematic = {size = stock.size, data = {}}
+for i, id in ipairs(stock.ids) do
+	schematic.data[i] = {name = stock.names[id + 1], prob = 255, param2 = stock.param2[i]}
 end
-for x = 8, 10 do
-	for z = 5, 8 do nodes[key({x = x, y = 2, z = z})] = "mcl_core:stone" end
+assert(dofile("church_schematic.lua")(schematic))
+for z = 0, stock.size.z - 1 do
+	for y = 0, stock.size.y - 1 do
+		for x = 0, stock.size.x - 1 do
+			local cell = schematic.data[z * stock.size.y * stock.size.x + y * stock.size.x + x + 1]
+			if cell.name ~= "air" then
+				nodes[key({x = x, y = y, z = z})] = {name = cell.name, param2 = cell.param2}
+				if cell.name:match("_carpet$") then
+					minetest.registered_nodes[cell.name] = {walkable = true,
+						collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}}
+				elseif not minetest.registered_nodes[cell.name] then
+					minetest.registered_nodes[cell.name] = {walkable = true}
+				end
+			end
+		end
+	end
 end
 local pulpit = {x = 8, y = 3, z = 8}
-nodes[key(pulpit)] = {name = "living_villages:pulpit", param2 = 3}
+assert(nodes[key(pulpit)].name == "living_villages:pulpit")
 local pews = {}
-for _, x in ipairs({3, 5}) do
-	for _, z in ipairs({3, 4, 5, 8, 9, 10}) do
-		nodes[key({x = x, y = 2, z = z})] = {name = "mcl_decor:chair_wooden", param2 = 3}
-		pews[key({x = x, y = 2, z = z})] = true
-	end
+for k, node in pairs(nodes) do
+	if node.name == "mcl_decor:chair_wooden" then pews[k] = true end
 end
 
 local seat = dofile("seat.lua")
@@ -128,11 +146,11 @@ end
 local function at(cell) return {x = cell.x, y = cell.y - 0.49, z = cell.z} end
 
 -- A chair counts as a pew only if the pulpit is ahead of it and the chair is
--- on the pulpit's audience side. A chair behind the dais, one turned away, and
--- one with no pulpit within reach are not seats.
-nodes[key({x = 11, y = 2, z = 8})] = {name = "mcl_decor:chair_wooden", param2 = 1}
-nodes[key({x = 4, y = 2, z = 3})] = {name = "mcl_decor:chair_wooden", param2 = 1}
-nodes[key({x = 4, y = 2, z = 13})] = {name = "mcl_decor:chair_wooden", param2 = 2}
+-- on the pulpit's audience side: one behind the dais, and one turned away, are
+-- not seats. (Twelve members fill the twelve real pews below, so a decoy that
+-- was taken would show up as a thirteenth.)
+nodes[key({x = 10, y = 2, z = 3})] = {name = "mcl_decor:chair_wooden", param2 = 1}
+nodes[key({x = 7, y = 2, z = 3})] = {name = "mcl_decor:chair_wooden", param2 = 1}
 
 local members = {}
 local function member(id)
@@ -164,22 +182,23 @@ assert(first._villages_seated, "sits")
 assert(near(first.target_yaw, -math.pi / 2), "faces +x, toward the pulpit")
 assert(def.do_custom(first, 0.1) == false and first.order == "stand", "seated members hold their pose")
 
--- The thirteenth finds the pews full and stands at the back, farthest from the
--- pulpit within the back and in line with it: (2,2,8), then the cells beside.
+-- The thirteenth finds the pews full and stands at the back, out of the way of
+-- the pews: the carpet in the central aisle, (4,2,7), then (4,2,6). Never the
+-- doorway beyond.
 local gopath_count = #gopaths
 local standee = member("standee")
 def.do_custom(standee, 0.1)
 assert(not standee._villages_seat and standee._villages_church.place, "stands")
-assert(vector.equals(standee._villages_church.place, {x = 2, y = 2, z = 8}), key(standee._villages_church.place))
-assert(#gopaths == gopath_count + 1 and vector.equals(gopaths[#gopaths].target, {x = 2, y = 2, z = 8}))
+assert(vector.equals(standee._villages_church.place, {x = 4, y = 2, z = 7}), key(standee._villages_church.place))
+assert(#gopaths == gopath_count + 1 and vector.equals(gopaths[#gopaths].target, {x = 4, y = 2, z = 7}))
 standee.state = "stand"
-standee.object:set_pos(at({x = 2, y = 2, z = 8}))
+standee.object:set_pos(at({x = 4, y = 2, z = 7}))
 def.do_custom(standee, 0.1)
-assert(standee.order == "stand" and near(standee.target_yaw, -math.pi / 2), "facing the pulpit at the back")
+assert(standee.order == "stand" and near(standee.target_yaw, (math.atan2 or math.atan)(-4, 1)), "facing the pulpit at the back")
 local second = member("standee2")
 def.do_custom(second, 0.1)
 assert(not vector.equals(second._villages_church.place, standee._villages_church.place), "a place of its own")
-assert(second._villages_church.place.x == 2, "still at the back")
+assert(second._villages_church.place.x == 4 and second._villages_church.place.z == 6, "the next cell out of the pews' way")
 
 -- A pew comes free and the member standing at the back takes it.
 seat.stand(members[2])
@@ -209,12 +228,16 @@ time = 6000 / 24000
 cleric.object:set_pos(at({x = 9, y = 3, z = 8}))
 def.do_custom(cleric, 0.1)
 assert(cleric.order == "stand", "waits at the pulpit for the service")
--- With the dais blocked behind the pulpit, it takes a side.
+-- The cell behind the pulpit is the only one the stock dais offers (the altar is
+-- beside it, and the other side is a step down). With it blocked there is
+-- nowhere to stand, and the cleric putters rather than walking into the pulpit.
+local behind = nodes[key({x = 9, y = 3, z = 8})]
 nodes[key({x = 9, y = 3, z = 8})] = "mcl_core:stone"
-cell = church.cleric_stand(pulpit, "cleric")
-assert(vector.equals(cell, {x = 8, y = 3, z = 7}) or vector.equals(cell, {x = 8, y = 3, z = 9}), "beside the pulpit")
-assert(cell.z == 7, "the side that is open")
-nodes[key({x = 9, y = 3, z = 8})] = nil
+assert(church.cleric_stand(pulpit, "cleric") == nil)
+cleric.state = "stand"
+def.do_custom(cleric, 0.1)
+assert(not cleric._villages_church and cleric.order == nil, "putters")
+nodes[key({x = 9, y = 3, z = 8})] = behind
 -- A cleric with no pulpit of its own sits with the others during the service.
 time = 8000 / 24000
 local stray = villager("stray", at({x = 1, y = 2, z = 6}), "cleric")
@@ -243,7 +266,7 @@ local held_place = second._villages_church.place
 def.do_custom(second, 0.1)
 assert(not church.standing[key(held_place)], "the hold on its place goes")
 local gone = church.back_places(pulpit, "someone")
-assert(gone[1].cell.z == 8 and gone[1].cell.x == 2, "its place is free again")
+assert(gone[1].cell.z == 7 and gone[1].cell.x == 4, "its place is free again")
 
 -- No church within reach: nothing to walk to, and the villager putters.
 time = 8000 / 24000
@@ -264,7 +287,7 @@ minetest.find_nodes_in_area = find
 local walker = villager("walker", at({x = 1, y = 2, z = 6}))
 -- Fill every pew so that it has to stand.
 for k2 in pairs(pews) do seat.reservations[k2] = {id = "other", until_time = now + 1000} end
-blocked = {x = 2, y = 2, z = 8}
+blocked = {x = 4, y = 2, z = 7}
 def.do_custom(walker, 0.1)
 assert(not walker._villages_church and walker.order == nil, "gave up")
 assert(walker._villages_church_skipped[key(pulpit)] > now, "passes the church over for a while")
