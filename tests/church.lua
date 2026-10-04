@@ -288,6 +288,20 @@ local placed = slow.object:get_pos()
 assert(slow._villages_church and placed.x == 9 and placed.z == 8 and slow.order == "stand", "stepped into its place")
 metas[key(pulpit)] = {villager = "cleric"}
 
+-- Stuck at the dais front on the leg that climbs onto it: after a few seconds
+-- the cleric is put on the dais, and goes on along the row.
+local stuck = villager("stuck", at({x = 9, y = 2, z = 4}), "cleric")
+stuck._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
+metas[key(pulpit)] = {villager = "stuck"}
+stuck._villages_church = {role = "cleric", pulpit = pulpit, since = now - 20, limit = 300, leg = 2}
+stuck.state = "stand"
+count = #gopaths
+def.do_custom(stuck, 0.1)
+local up = stuck.object:get_pos()
+assert(up.x == 9 and up.z == 5 and up.y > 2, "put up on the dais: " .. up.x .. "," .. up.y .. "," .. up.z)
+assert(stuck._villages_church.leg == 3 and #gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 8}), "and sent along the row")
+metas[key(pulpit)] = {villager = "cleric"}
+
 -- A cleric with no pulpit of its own sits with the others during the service.
 time = 8000 / 24000
 local stray = villager("stray", at({x = 1, y = 2, z = 6}), "cleric")

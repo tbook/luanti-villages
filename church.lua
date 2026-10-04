@@ -32,8 +32,11 @@ local UNREACHABLE_SECONDS = 200
 -- carpet counts as solid, so a villager sent to a carpeted place stops a node
 -- short of it.
 local AT_PLACE = 1.5
--- How near a cleric that has run out of time is put in its place.
+-- How near a cleric that has run out of time is put in its place, and how long
+-- each leg after the first gets: the step up onto the dais is exactly one node,
+-- which a villager clears only now and then.
 local TAKE_STEP = 4
+local LEG_SECONDS = 12
 -- Inside the church: close enough to the pulpit to look for a pew.
 local INSIDE = 9
 -- The back of the church, measured from the pulpit along the way it faces: far
@@ -232,11 +235,11 @@ end
 
 -- Walk to a standing place and stay there, looking along (look_x, look_z).
 -- Returns false once it has given the church up, and whether it is there.
-local function go_to(self, church, cell, look_x, look_z, exact)
+local function go_to(self, church, cell, look_x, look_z, exact, limit)
 	local pos = self.object:get_pos()
 	if not pos then return true end
 	if math.abs(pos.x - cell.x) <= AT_PLACE and math.abs(pos.z - cell.z) <= AT_PLACE
-		and math.abs(pos.y - (cell.y - 0.45)) < 1.5 then
+		and math.abs(pos.y - (cell.y - 0.45)) < 0.8 then
 		stop_walking(self)
 		-- The cleric's place is exactly behind the pulpit, which the walk only
 		-- gets near; take the last step. Carpet is a sixteenth of a node thick.
@@ -250,10 +253,10 @@ local function go_to(self, church, cell, look_x, look_z, exact)
 		self.order = "stand"
 		return true, true
 	end
-	if now() - church.since > church.limit then
-		-- The cleric's own cell sits up a step on the dais, which a villager can
-		-- take a long time to climb. Close enough, take the step for it.
-		if exact and math.abs(pos.x - cell.x) <= TAKE_STEP and math.abs(pos.z - cell.z) <= TAKE_STEP
+	if now() - church.since > (limit or church.limit) then
+		-- The dais is a step up, which a villager can take a long time to climb.
+		-- Close enough, take the step for it.
+		if math.abs(pos.x - cell.x) <= TAKE_STEP and math.abs(pos.z - cell.z) <= TAKE_STEP
 			and math.abs(pos.y - (cell.y - 0.45)) <= 2.5 then
 			stop_walking(self)
 			self.object:set_pos({x = cell.x, y = cell.y - 0.42, z = cell.z})
@@ -338,7 +341,7 @@ function conduct(self, pulpit)
 		if legs then target, exact = legs[church.leg], false end
 	end
 	church.target = target
-	local ok, there = go_to(self, church, target, dir.x, dir.z, exact)
+	local ok, there = go_to(self, church, target, dir.x, dir.z, exact, church.leg > 1 and LEG_SECONDS or nil)
 	if not ok then return leave(self) end
 	if there and not exact then
 		church.leg = church.leg + 1
