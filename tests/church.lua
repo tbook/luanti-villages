@@ -238,6 +238,19 @@ cleric.state = "stand"
 def.do_custom(cleric, 0.1)
 assert(not cleric._villages_church and cleric.order == nil, "putters")
 nodes[key({x = 9, y = 3, z = 8})] = behind
+-- gopath drops its last waypoint for a carpeted target, so a villager sent to
+-- a carpeted place arrives a node short of it. The cleric is not left there: it
+-- takes the last step to stand exactly behind the pulpit.
+nodes[key({x = 9, y = 3, z = 8})] = behind
+cleric.state = "stand"
+cleric.order = nil
+cleric.object:set_pos(at({x = 9, y = 3, z = 7}))
+def.do_custom(cleric, 0.1)
+local stood = cleric.object:get_pos()
+assert(cleric.order == "stand" and stood.x == 9 and stood.z == 8, "behind the pulpit, not beside it")
+assert(near(cleric.target_yaw, math.pi / 2), "facing the pews")
+assert(#gopaths == count + 1, "no second walk")
+
 -- A cleric with no pulpit of its own sits with the others during the service.
 time = 8000 / 24000
 local stray = villager("stray", at({x = 1, y = 2, z = 6}), "cleric")
@@ -267,6 +280,40 @@ def.do_custom(second, 0.1)
 assert(not church.standing[key(held_place)], "the hold on its place goes")
 local gone = church.back_places(pulpit, "someone")
 assert(gone[1].cell.z == 7 and gone[1].cell.x == 4, "its place is free again")
+
+-- A villager across the village does not give up after the 40 s a short walk
+-- gets: its allowance grows with the distance. And it walks in before looking
+-- for a pew, so the chair's own short timer starts inside the church.
+time = 8000 / 24000
+now = now + 6
+local far = villager("far", {x = -30, y = 1.51, z = 6})
+far._bed = {x = -30, y = 2, z = 6}
+for k2 in pairs(seat.reservations) do seat.reservations[k2] = nil end
+def.do_custom(far, 0.1)
+assert(not far._villages_seat and far._villages_church.place, "no chair reserved from a house across the village")
+assert(far._villages_church.limit > 100, "a long walk is allowed a long time")
+far.state = "stand"
+now = now + 100
+def.do_custom(far, 0.1)
+assert(far._villages_church, "still on its way after 100 s")
+far.object:set_pos(at({x = 1, y = 2, z = 6}))
+far.state = "stand"
+def.do_custom(far, 0.1)
+assert(far._villages_seat and far._villages_seat.kind == "pulpit", "takes a pew once inside")
+local logged
+local log = minetest.log
+minetest.log = function(_, text) logged = text end
+now = now + 1000
+local late = villager("late", {x = -30, y = 1.51, z = 6})
+late._bed = {x = -30, y = 2, z = 6}
+for k2 in pairs(pews) do seat.reservations[k2] = {id = "other", until_time = now + 1000} end
+def.do_custom(late, 0.1)
+now = now + 1000
+for k2 in pairs(pews) do seat.reservations[k2] = {id = "other", until_time = now + 1000} end
+late.state = "stand"
+def.do_custom(late, 0.1)
+assert(not late._villages_church and logged and logged:match("gave up the church"), logged)
+minetest.log = log
 
 -- No church within reach: nothing to walk to, and the villager putters.
 time = 8000 / 24000

@@ -21,11 +21,19 @@ local SEARCH_SECONDS = 5
 local HOLD_SECONDS = 10
 -- A villager that cannot get to its place in this long passes the church over
 -- for UNREACHABLE_SECONDS: the rest of the 3.5 hour service, at 100 s of game
--- time per in-game hour.
-local WALK_SECONDS = 40
+-- time per in-game hour. The walk may start anywhere in the village, so the
+-- allowance grows with the distance.
+local WALK_BASE = 40
+local WALK_PER_NODE = 2
+local WALK_MAX = 300
 local UNREACHABLE_SECONDS = 200
--- Close enough to a standing place to be there.
-local AT_PLACE = 1.0
+-- Close enough to a standing place to be there. gopath aims at the node above
+-- a solid target and drops the last waypoint (mcl_mobs/pathfinding.lua), and
+-- carpet counts as solid, so a villager sent to a carpeted place stops a node
+-- short of it.
+local AT_PLACE = 1.5
+-- Inside the church: close enough to the pulpit to look for a pew.
+local INSIDE = 9
 -- The back of the church, measured from the pulpit along the way it faces: far
 -- enough to leave the dais clear, and short of the far wall, where the stock
 -- church has its doorway (it starts 6 from the pulpit, with a wall at 6).
@@ -152,7 +160,9 @@ local function stop_walking(self)
 	end
 end
 
-local function skip(self, pulpit)
+local function skip(self, pulpit, why)
+	core.log("action", string.format("[living_villages] villager %s gave up the church at (%d,%d,%d): %s",
+		tostring(self._id), pulpit.x, pulpit.y, pulpit.z, why))
 	self._villages_church_skipped = self._villages_church_skipped or {}
 	self._villages_church_skipped[key(pulpit)] = now() + UNREACHABLE_SECONDS
 end
@@ -206,39 +216,56 @@ end
 
 -- Walk to a standing place and stay there, looking along (look_x, look_z).
 -- Returns false once it has given the church up.
-local function go_to(self, church, cell, look_x, look_z)
+local function go_to(self, church, cell, look_x, look_z, exact)
 	local pos = self.object:get_pos()
 	if not pos then return true end
-	if math.abs(pos.x - cell.x) < AT_PLACE and math.abs(pos.z - cell.z) < AT_PLACE
-		and math.abs(pos.y - (cell.y - 0.49)) < 1.5 then
+	if math.abs(pos.x - cell.x) <= AT_PLACE and math.abs(pos.z - cell.z) <= AT_PLACE
+		and math.abs(pos.y - (cell.y - 0.45)) < 1.5 then
 		stop_walking(self)
+		-- The cleric's place is exactly behind the pulpit, which the walk only
+		-- gets near; take the last step. Carpet is a sixteenth of a node thick.
+		if exact and (math.abs(pos.x - cell.x) > 0.3 or math.abs(pos.z - cell.z) > 0.3) then
+			self.object:set_pos({x = cell.x, y = cell.y - 0.42, z = cell.z})
+		end
 		face(self, look_x, look_z)
 		-- Stay put. Vanilla clears the order on every activity poll, so hold it
 		-- each tick (tavern.lua).
 		self.order = "stand"
 		return true
 	end
-	if now() - church.since > WALK_SECONDS then
-		skip(self, church.pulpit)
+	if now() - church.since > church.limit then
+		skip(self, church.pulpit, "the walk took too long")
 		return false
 	end
 	if self.state ~= "gowp" and not self:gopath(cell, function() end, true) then
-		skip(self, church.pulpit)
+		skip(self, church.pulpit, "no route")
 		return false
 	end
 	return true
+end
+
+-- How long the walk to the church may take from where the villager is now.
+local function walk_limit(self, pulpit)
+	local pos = self.object:get_pos()
+	local distance = pos and vector.distance(pos, pulpit) or 0
+	return math.min(WALK_MAX, WALK_BASE + WALK_PER_NODE * distance)
 end
 
 local function conduct(self, pulpit)
 	local church = self._villages_church
 	if not church or church.role ~= "cleric" or not same(church.pulpit, pulpit) then
 		leave(self)
-		church = {role = "cleric", pulpit = pulpit, since = now()}
+		church = {role = "cleric", pulpit = pulpit, since = now(), limit = walk_limit(self, pulpit)}
 		self._villages_church = church
 	end
 	if skipped(self, pulpit) then return leave(self) end
 	local cell, dir = cleric_stand(pulpit, self._id)
-	if not cell or not go_to(self, church, cell, dir.x, dir.z) then return leave(self) end
+	if not cell then
+		core.log("action", string.format("[living_villages] cleric %s has nowhere to stand at the pulpit at (%d,%d,%d)",
+			tostring(self._id), pulpit.x, pulpit.y, pulpit.z))
+		return leave(self)
+	end
+	if not go_to(self, church, cell, dir.x, dir.z, true) then return leave(self) end
 end
 
 local function join(self, pos)
@@ -255,12 +282,16 @@ local function join(self, pos)
 			self._villages_church_checked = now() + SEARCH_SECONDS
 			return
 		end
-		church = {role = "member", pulpit = pulpit, since = now()}
+		church = {role = "member", pulpit = pulpit, since = now(), limit = walk_limit(self, pulpit)}
 		self._villages_church = church
-		if seat.reserve(self, pulpit, "pulpit") and seat.approach_seat(self) then return end
 	end
-	-- No pew: stand at the back, and keep an eye out for one coming free.
-	if not church_seat(self) and seat.reserve(self, church.pulpit, "pulpit") then
+	-- Walk in to the back first, and look for a pew once inside, so that the
+	-- chair's own short walk is not timed from a house across the village. If
+	-- one is free the villager takes it; if not, or when the pews fill, it
+	-- stays standing and keeps an eye out for one coming free.
+	local at_church = pos.x and (pos.x - church.pulpit.x) ^ 2 + (pos.z - church.pulpit.z) ^ 2 <= INSIDE * INSIDE
+		and math.abs(pos.y - church.pulpit.y) <= 3
+	if at_church and not church_seat(self) and seat.reserve(self, church.pulpit, "pulpit") then
 		release_place(self)
 		if seat.approach_seat(self) then return end
 	end
