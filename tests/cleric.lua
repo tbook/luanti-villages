@@ -143,6 +143,36 @@ keeping._villages_keeper_target = {x = 1, y = 0, z = 0}
 def.do_custom(keeping, 0.1)
 assert(#gopaths == count)
 
+-- An unreachable nearest pulpit does not starve a reachable one, and is not
+-- retried straight away.
+local sealed, open = {x = 60, y = 0, z = 0}, {x = 70, y = 0, z = 0}
+nodes[key(sealed)] = "living_villages:pulpit"
+nodes[key(open)] = "living_villages:pulpit"
+metas[key(sealed)], metas[key(open)] = nil, nil
+nodes[key(free)], nodes[key(pulpit)] = nil, nil
+local base_gopath = def.gopath
+local attempted = {}
+def.gopath = function(self, target)
+	table.insert(attempted, target.x)
+	return target.x ~= sealed.x
+end
+local erin = villager("erin", {x = 55, y = 0, z = 0})
+erin._villages_job_search_route = {status = "retry"}
+now = now + 20
+def.do_custom(erin, 0.1)
+assert(attempted[1] == sealed.x and attempted[2] == open.x, "the reachable pulpit is tried after the sealed one")
+assert(erin._villages_job_search_route == nil, "the first failure's backoff does not block the next pulpit")
+now = now + 20
+def.do_custom(erin, 0.1)
+assert(attempted[3] == open.x and #attempted == 3, "the sealed pulpit is skipped on later polls")
+-- A busy pathfinder (nil, not false) is not a verdict on the pulpit.
+def.gopath = function(self, target) table.insert(attempted, target.x) end
+local frank = villager("frank", {x = 55, y = 0, z = 0})
+now = now + 20
+def.do_custom(frank, 0.1)
+assert(#attempted == 4 and attempted[4] == sealed.x, "a nil gopath stops the search without skipping")
+def.gopath = base_gopath
+
 -- Vanilla's verdicts are untouched: a cleric whose pulpit is gone is
 -- whatever vanilla made of it, and the claim is not kept.
 nodes[key(pulpit)] = nil

@@ -21,6 +21,7 @@ local PULPIT = "living_villages:pulpit"
 local PROFESSION = "cleric"
 local CLAIM_RADIUS = 48
 local CLAIM_INTERVAL = 10
+local UNREACHABLE_SECONDS = 60
 
 local function pos_string(pos)
 	if not pos then return "?" end
@@ -59,18 +60,22 @@ local function employ(self, pos)
 	return true
 end
 
-local function nearest_free_pulpit(pos)
+-- Free pulpits within reach, nearest first.
+local function free_pulpits(pos)
+	local found = {}
 	local sites = core.find_nodes_in_area(
 		vector.subtract(pos, CLAIM_RADIUS), vector.add(pos, CLAIM_RADIUS), {PULPIT})
-	local best, best_distance
 	for _, site in ipairs(sites) do
-		if unclaimed(site) then
-			local distance = vector.distance(pos, site)
-			if not best or distance < best_distance then best, best_distance = site, distance end
-		end
+		if unclaimed(site) then table.insert(found, {site = site, distance = vector.distance(pos, site)}) end
 	end
-	return best
+	table.sort(found, function(a, b) return a.distance < b.distance end)
+	return found
 end
+
+-- Pulpits a villager could not path to, so a sealed-off nearest one does not
+-- starve a reachable one. Kept here, not on the villager, so nothing extra is
+-- saved with it.
+local unreachable = {}
 
 local function seek_pulpit(self)
 	local now = core.get_gametime()
@@ -80,13 +85,24 @@ local function seek_pulpit(self)
 	if not pos then return end
 	local adjacent = core.find_node_near(pos, 1, {PULPIT})
 	if adjacent and employ(self, adjacent) then return end
-	local site = nearest_free_pulpit(pos)
-	if not site then return end
-	self:gopath(site, function(entity)
-		local here = entity.object:get_pos()
-		local near = here and core.find_node_near(here, 1, {PULPIT})
-		if near then employ(entity, near) end
-	end, true)
+	local skipped = unreachable[self._id] or {}
+	unreachable[self._id] = skipped
+	for _, candidate in ipairs(free_pulpits(pos)) do
+		local site = candidate.site
+		local key = core.hash_node_position and core.hash_node_position(site) or pos_string(site)
+		if (skipped[key] or 0) <= now then
+			local started = self:gopath(site, function(entity)
+				local here = entity.object:get_pos()
+				local near = here and core.find_node_near(here, 1, {PULPIT})
+				if near then employ(entity, near) end
+			end, true)
+			if started ~= false then return end
+			skipped[key] = now + UNREACHABLE_SECONDS
+			-- navigation.lua's failure backoff is per trip kind, not per
+			-- target, and would refuse the next pulpit too.
+			self._villages_job_search_route = nil
+		end
+	end
 end
 
 local function install(def)

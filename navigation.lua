@@ -6,6 +6,8 @@ local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
+-- A cleric's jobsite (cleric.lua), claimed by this mod rather than vanilla.
+local PULPIT = "living_villages:pulpit"
 local planner = dofile(core.get_modpath("living_villages") .. "/planner.lua")
 local doors = dofile(core.get_modpath("living_villages") .. "/doors.lua")
 local RETRY_SECONDS = 30
@@ -224,7 +226,7 @@ end
 local function has_claimed_jobsite(self)
 	if not self._jobsite or not self._id then return false end
 	local node = core.get_node_or_nil(self._jobsite)
-	if not node or not is_workstation_node(node.name) then return false end
+	if not node or not (is_workstation_node(node.name) or node.name == PULPIT) then return false end
 	return core.get_meta(self._jobsite):get_string("villager") == self._id
 end
 
@@ -857,7 +859,14 @@ local function install(def)
 			}
 		elseif not self._jobsite and not is_home_time(self) then
 			local node = core.get_node_or_nil(target)
-			if node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
+			if node and node.name == PULPIT and core.get_meta(target):get_string("villager") == "" then
+				-- cleric.lua picks the pulpit. Arrive beside it, not at vanilla's
+				-- open node above it, so the claim on arrival finds it adjacent.
+				destination = {
+					pos = target, site = target, route_field = "_villages_job_search_route",
+					kind = "pulpit", cardinal_only = true,
+				}
+			elseif node and is_workstation_node(node.name) and core.get_meta(target):get_string("villager") == "" then
 				local route = self._villages_job_search_route
 				if route and route.status == "retry" and now < route.retry_at then
 					stop(self)
