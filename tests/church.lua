@@ -216,14 +216,19 @@ metas[key(pulpit)] = {villager = "cleric"}
 local count = #gopaths
 def.do_custom(cleric, 0.1)
 -- The pathfinder would route a straight walk to the cell behind the pulpit over
--- the pulpit's top, so the cleric first walks to the far end of the dais row,
--- then along the row.
-assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 4}), "walks to the dais: " .. key(gopaths[#gopaths].target))
+-- the pulpit's top, which a villager cannot climb. So from the congregation's
+-- side the cleric goes in three legs: the floor beside the far end of the dais,
+-- up onto the dais there, then along the row.
+assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 7, y = 2, z = 5}), "first leg: " .. key(gopaths[#gopaths].target))
 assert(not cleric._villages_seat, "the cleric does not take a pew")
+cleric.object:set_pos(at({x = 7, y = 2, z = 5}))
 cleric.state = "stand"
-cleric.object:set_pos(at({x = 9, y = 3, z = 4}))
 def.do_custom(cleric, 0.1)
-assert(#gopaths == count + 2 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 8}), "then along the row")
+assert(#gopaths == count + 2 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 5}), "second leg: up onto the dais")
+cleric.object:set_pos(at({x = 9, y = 3, z = 5}))
+cleric.state = "stand"
+def.do_custom(cleric, 0.1)
+assert(#gopaths == count + 3 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 8}), "third leg: along the row")
 cleric.state = "stand"
 cleric.object:set_pos(at({x = 9, y = 3, z = 8}))
 def.do_custom(cleric, 0.1)
@@ -256,7 +261,21 @@ def.do_custom(cleric, 0.1)
 local stood = cleric.object:get_pos()
 assert(cleric.order == "stand" and stood.x == 9 and stood.z == 8, "behind the pulpit, not beside it")
 assert(near(cleric.target_yaw, math.pi / 2), "facing the pews")
-assert(#gopaths == count + 2, "no second walk")
+assert(#gopaths == count + 3, "no second walk")
+
+-- A walk under way keeps the route it was given, so when the cleric's next
+-- place differs (it started round the back and is now at the front) the old
+-- walk is dropped and a new one begun.
+local turned = villager("turned", at({x = 1, y = 2, z = 6}), "cleric")
+turned._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
+metas[key(pulpit)] = {villager = "turned"}
+time = 8000 / 24000
+turned._villages_church = {role = "cleric", pulpit = pulpit, since = now, limit = 100, goal = {x = 9, y = 3, z = 8}}
+turned.state = "gowp"
+count = #gopaths
+def.do_custom(turned, 0.1)
+assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 7, y = 2, z = 5}), "walks the new first leg, not the old route")
+metas[key(pulpit)] = {villager = "cleric"}
 
 -- A cleric with no pulpit of its own sits with the others during the service.
 time = 8000 / 24000

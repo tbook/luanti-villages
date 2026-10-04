@@ -252,6 +252,9 @@ local function go_to(self, church, cell, look_x, look_z, exact)
 		skip(self, church.pulpit, "the walk took too long")
 		return false
 	end
+	-- A walk already under way keeps its old route, so a new place needs a new one.
+	if church.goal and not same(church.goal, cell) then stop_walking(self) end
+	church.goal = cell
 	if self.state ~= "gowp" and not start_walk(self, church, cell) then
 		skip(self, church.pulpit, "no route")
 		return false
@@ -267,21 +270,31 @@ local function walk_limit(self, pulpit)
 end
 
 -- The cell behind the pulpit is next to the pulpit, and the pathfinder will
--- happily route over the top of it, which a villager cannot climb. Along the
--- dais, from the cleric's cell as far as it goes, is a cell reached without
--- touching the pulpit: go there first, then walk the row.
-local function dais_entry(stand, dir)
+-- happily route over the top of it, which a villager cannot climb (it did, in
+-- the first playtest: the cleric stopped against the dais). So a cleric coming
+-- from the congregation's side takes three legs, none of which is shorter
+-- across the pulpit: the floor beside the far end of the dais row, up onto the
+-- dais there, then along the row to the cell behind the pulpit.
+local function dais_legs(stand, dir)
 	local best, best_steps
 	for _, side in ipairs({{x = -dir.z, z = dir.x}, {x = dir.z, z = -dir.x}}) do
 		local steps, cell = 0, nil
 		while steps < 6 do
 			local next_cell = {x = stand.x + side.x * (steps + 1), y = stand.y, z = stand.z + side.z * (steps + 1)}
-			if not common.is_standing_space(next_cell, true) then break end
+			-- Stay on the dais: its cells are the same as the cleric's own (carpet
+			-- over wood), where the step beyond is a stair or the floor.
+			local here, there = core.get_node_or_nil(next_cell), core.get_node_or_nil(stand)
+			if not common.is_standing_space(next_cell, true) or not here or not there or here.name ~= there.name then break end
 			steps, cell = steps + 1, next_cell
 		end
 		if steps >= 2 and (not best_steps or steps > best_steps) then best, best_steps = cell, steps end
 	end
-	return best
+	if not best then return end
+	-- The pulpit is raised on its dais; the congregation's floor is a step down,
+	-- two cells in front of the row behind it.
+	local floor = {x = best.x + dir.x * 2, y = stand.y - 1, z = best.z + dir.z * 2}
+	if not common.is_standing_space(floor, true) then return end
+	return {floor, best}
 end
 
 local conduct
@@ -300,17 +313,22 @@ function conduct(self, pulpit)
 		return leave(self)
 	end
 	local target, exact = cell, true
-	-- Only from the congregation's side of the pulpit: from the dais itself the
-	-- row is the way.
+	-- From anywhere but the dais itself: the row is the way once on it, and
+	-- every other way in, whichever side of the church the cleric starts on,
+	-- ends at the pulpit's front.
 	local pos = self.object:get_pos()
-	if church.leg ~= "row" and pos and (pos.x - pulpit.x) * dir.x + (pos.z - pulpit.z) * dir.z > 0 then
-		local entry = dais_entry(cell, dir)
-		if entry then target, exact = entry, false end
+	church.leg = church.leg or 1
+	local on_dais = pos and math.abs(pos.y - (cell.y - 0.45)) < 0.8
+		and math.abs(pos.x - cell.x) <= 5 and math.abs(pos.z - cell.z) <= 5
+	if church.leg <= 2 and pos and not on_dais then
+		local legs = dais_legs(cell, dir)
+		if legs then target, exact = legs[church.leg], false end
 	end
+	church.target = target
 	local ok, there = go_to(self, church, target, dir.x, dir.z, exact)
 	if not ok then return leave(self) end
 	if there and not exact then
-		church.leg = "row"
+		church.leg = church.leg + 1
 		church.since = now()
 		return conduct(self, pulpit)
 	end
