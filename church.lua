@@ -214,8 +214,22 @@ local function leave(self)
 	end
 end
 
+-- Start a walk. VoxeLibre's gopath answers nothing both when there is no route
+-- and while it waits out an earlier failure (mcl_mobs/pathfinding.lua), and
+-- only a real failure sets _pf_last_failed. Returns false after two real
+-- failures, which gives the church up; a wait is not one.
+local function start_walk(self, church, cell)
+	local before = self._pf_last_failed
+	if self:gopath(cell, function() end, true) then return true end
+	if self.ready_to_path and self._pf_last_failed == before and not self:ready_to_path(true) then
+		return true
+	end
+	church.failures = (church.failures or 0) + 1
+	return church.failures < 2
+end
+
 -- Walk to a standing place and stay there, looking along (look_x, look_z).
--- Returns false once it has given the church up.
+-- Returns false once it has given the church up, and whether it is there.
 local function go_to(self, church, cell, look_x, look_z, exact)
 	local pos = self.object:get_pos()
 	if not pos then return true end
@@ -227,21 +241,22 @@ local function go_to(self, church, cell, look_x, look_z, exact)
 		if exact and (math.abs(pos.x - cell.x) > 0.3 or math.abs(pos.z - cell.z) > 0.3) then
 			self.object:set_pos({x = cell.x, y = cell.y - 0.42, z = cell.z})
 		end
+		church.failures = nil
 		face(self, look_x, look_z)
 		-- Stay put. Vanilla clears the order on every activity poll, so hold it
 		-- each tick (tavern.lua).
 		self.order = "stand"
-		return true
+		return true, true
 	end
 	if now() - church.since > church.limit then
 		skip(self, church.pulpit, "the walk took too long")
 		return false
 	end
-	if self.state ~= "gowp" and not self:gopath(cell, function() end, true) then
+	if self.state ~= "gowp" and not start_walk(self, church, cell) then
 		skip(self, church.pulpit, "no route")
 		return false
 	end
-	return true
+	return true, false
 end
 
 -- How long the walk to the church may take from where the villager is now.
@@ -251,7 +266,26 @@ local function walk_limit(self, pulpit)
 	return math.min(WALK_MAX, WALK_BASE + WALK_PER_NODE * distance)
 end
 
-local function conduct(self, pulpit)
+-- The cell behind the pulpit is next to the pulpit, and the pathfinder will
+-- happily route over the top of it, which a villager cannot climb. Along the
+-- dais, from the cleric's cell as far as it goes, is a cell reached without
+-- touching the pulpit: go there first, then walk the row.
+local function dais_entry(stand, dir)
+	local best, best_steps
+	for _, side in ipairs({{x = -dir.z, z = dir.x}, {x = dir.z, z = -dir.x}}) do
+		local steps, cell = 0, nil
+		while steps < 6 do
+			local next_cell = {x = stand.x + side.x * (steps + 1), y = stand.y, z = stand.z + side.z * (steps + 1)}
+			if not common.is_standing_space(next_cell, true) then break end
+			steps, cell = steps + 1, next_cell
+		end
+		if steps >= 2 and (not best_steps or steps > best_steps) then best, best_steps = cell, steps end
+	end
+	return best
+end
+
+local conduct
+function conduct(self, pulpit)
 	local church = self._villages_church
 	if not church or church.role ~= "cleric" or not same(church.pulpit, pulpit) then
 		leave(self)
@@ -265,7 +299,21 @@ local function conduct(self, pulpit)
 			tostring(self._id), pulpit.x, pulpit.y, pulpit.z))
 		return leave(self)
 	end
-	if not go_to(self, church, cell, dir.x, dir.z, true) then return leave(self) end
+	local target, exact = cell, true
+	-- Only from the congregation's side of the pulpit: from the dais itself the
+	-- row is the way.
+	local pos = self.object:get_pos()
+	if church.leg ~= "row" and pos and (pos.x - pulpit.x) * dir.x + (pos.z - pulpit.z) * dir.z > 0 then
+		local entry = dais_entry(cell, dir)
+		if entry then target, exact = entry, false end
+	end
+	local ok, there = go_to(self, church, target, dir.x, dir.z, exact)
+	if not ok then return leave(self) end
+	if there and not exact then
+		church.leg = "row"
+		church.since = now()
+		return conduct(self, pulpit)
+	end
 end
 
 local function join(self, pos)

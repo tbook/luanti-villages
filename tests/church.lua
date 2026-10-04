@@ -215,8 +215,15 @@ cleric._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
 metas[key(pulpit)] = {villager = "cleric"}
 local count = #gopaths
 def.do_custom(cleric, 0.1)
-assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 8}), "walks to the dais")
+-- The pathfinder would route a straight walk to the cell behind the pulpit over
+-- the pulpit's top, so the cleric first walks to the far end of the dais row,
+-- then along the row.
+assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 4}), "walks to the dais: " .. key(gopaths[#gopaths].target))
 assert(not cleric._villages_seat, "the cleric does not take a pew")
+cleric.state = "stand"
+cleric.object:set_pos(at({x = 9, y = 3, z = 4}))
+def.do_custom(cleric, 0.1)
+assert(#gopaths == count + 2 and vector.equals(gopaths[#gopaths].target, {x = 9, y = 3, z = 8}), "then along the row")
 cleric.state = "stand"
 cleric.object:set_pos(at({x = 9, y = 3, z = 8}))
 def.do_custom(cleric, 0.1)
@@ -249,7 +256,7 @@ def.do_custom(cleric, 0.1)
 local stood = cleric.object:get_pos()
 assert(cleric.order == "stand" and stood.x == 9 and stood.z == 8, "behind the pulpit, not beside it")
 assert(near(cleric.target_yaw, math.pi / 2), "facing the pews")
-assert(#gopaths == count + 1, "no second walk")
+assert(#gopaths == count + 2, "no second walk")
 
 -- A cleric with no pulpit of its own sits with the others during the service.
 time = 8000 / 24000
@@ -335,6 +342,8 @@ local walker = villager("walker", at({x = 1, y = 2, z = 6}))
 -- Fill every pew so that it has to stand.
 for k2 in pairs(pews) do seat.reservations[k2] = {id = "other", until_time = now + 1000} end
 blocked = {x = 4, y = 2, z = 7}
+def.do_custom(walker, 0.1)
+assert(walker._villages_church, "one failed route is not the end: vanilla answers nothing while it waits too")
 def.do_custom(walker, 0.1)
 assert(not walker._villages_church and walker.order == nil, "gave up")
 assert(walker._villages_church_skipped[key(pulpit)] > now, "passes the church over for a while")

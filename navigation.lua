@@ -107,9 +107,13 @@ if core.register_globalstep then
 	core.register_globalstep(flush_deferred_door_closes)
 end
 
-local function is_open(pos, allow_wooden_door)
+-- thin_ok is for the cell a villager's feet are in: a carpet there is a walkable
+-- sliver the villager stands on top of, and the church floor (#126) is laid with
+-- it. Carpet at head height still blocks.
+local function is_open(pos, allow_wooden_door, thin_ok)
 	local node = core.get_node_or_nil(pos)
 	if not node then return false end
+	if thin_ok and core.get_item_group(node.name, "carpet") > 0 then return true end
 	if core.get_item_group(node.name, "door") > 0 then
 		return allow_wooden_door and core.get_item_group(node.name, "door_iron") == 0
 	end
@@ -180,7 +184,7 @@ local function approaches(node_pos, cardinal_only, raised_ok)
 		if cardinal_only and index > 4 then break end
 		for _, dy in ipairs(heights) do
 			local pos = {x = node_pos.x + offset.x, y = node_pos.y + dy, z = node_pos.z + offset.z}
-			if is_open(pos) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
+			if is_open(pos, nil, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
 				and is_supported(pos) then
 				table.insert(result, pos)
 			end
@@ -366,7 +370,7 @@ local function nearest_walk_position(pos)
 		for y = origin.y - 2, origin.y + 2 do
 			for z = origin.z - 1, origin.z + 1 do
 				local candidate = {x = x, y = y, z = z}
-				if is_open(candidate, true) and is_open({x = x, y = y + 1, z = z}, true) and is_supported(candidate) then
+				if is_open(candidate, true, true) and is_open({x = x, y = y + 1, z = z}, true) and is_supported(candidate) then
 					local dx, dy, dz = x - pos.x, y - pos.y, z - pos.z
 					local distance = dx * dx + dy * dy + dz * dz
 					if not best_distance or distance < best_distance then
@@ -389,7 +393,7 @@ local function plan_stair_route(self, candidates)
 		}
 	end
 	local function can_stand(pos)
-		return is_open(pos, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
+		return is_open(pos, true, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
 	end
 	-- A rise is a jump: it swings the villager's head through the column one
 	-- above their current head, at `from_pos.y + 2`. `can_stand` never looks
@@ -901,7 +905,7 @@ local function install(def)
 			stop(self)
 			local candidates = approaches(target)
 			local cell = vector.round(target)
-			if is_open(cell, true) and is_open({x = cell.x, y = cell.y + 1, z = cell.z}, true)
+			if is_open(cell, true, true) and is_open({x = cell.x, y = cell.y + 1, z = cell.z}, true)
 				and is_supported(cell) then
 				candidates = {cell}
 			end
