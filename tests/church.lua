@@ -277,6 +277,17 @@ def.do_custom(turned, 0.1)
 assert(#gopaths == count + 1 and vector.equals(gopaths[#gopaths].target, {x = 7, y = 2, z = 5}), "walks the new first leg, not the old route")
 metas[key(pulpit)] = {villager = "cleric"}
 
+-- A cleric that runs out of time a few nodes from its cell is put in it rather
+-- than giving the church up.
+local slow = villager("slow", at({x = 7, y = 2, z = 6}), "cleric")
+slow._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
+metas[key(pulpit)] = {villager = "slow"}
+slow._villages_church = {role = "cleric", pulpit = pulpit, since = now - 500, limit = 100, leg = 3}
+def.do_custom(slow, 0.1)
+local placed = slow.object:get_pos()
+assert(slow._villages_church and placed.x == 9 and placed.z == 8 and slow.order == "stand", "stepped into its place")
+metas[key(pulpit)] = {villager = "cleric"}
+
 -- A cleric with no pulpit of its own sits with the others during the service.
 time = 8000 / 24000
 local stray = villager("stray", at({x = 1, y = 2, z = 6}), "cleric")

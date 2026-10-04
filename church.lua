@@ -32,6 +32,8 @@ local UNREACHABLE_SECONDS = 200
 -- carpet counts as solid, so a villager sent to a carpeted place stops a node
 -- short of it.
 local AT_PLACE = 1.5
+-- How near a cleric that has run out of time is put in its place.
+local TAKE_STEP = 4
 -- Inside the church: close enough to the pulpit to look for a pew.
 local INSIDE = 9
 -- The back of the church, measured from the pulpit along the way it faces: far
@@ -249,6 +251,17 @@ local function go_to(self, church, cell, look_x, look_z, exact)
 		return true, true
 	end
 	if now() - church.since > church.limit then
+		-- The cleric's own cell sits up a step on the dais, which a villager can
+		-- take a long time to climb. Close enough, take the step for it.
+		if exact and math.abs(pos.x - cell.x) <= TAKE_STEP and math.abs(pos.z - cell.z) <= TAKE_STEP
+			and math.abs(pos.y - (cell.y - 0.45)) <= 2.5 then
+			stop_walking(self)
+			self.object:set_pos({x = cell.x, y = cell.y - 0.42, z = cell.z})
+			face(self, look_x, look_z)
+			self.order = "stand"
+			church.failures = nil
+			return true, true
+		end
 		skip(self, church.pulpit, "the walk took too long")
 		return false
 	end
