@@ -407,6 +407,47 @@ end
 local places = church.back_places(pulpit, "someone")
 assert(places[1] and not vector.equals(places[1].cell, second._villages_church.place), "the held place is skipped")
 
+-- Final alignment is a short step along the dais, never through a wall.
+local dais_carpet = nodes[key({x = 9, y = 3, z = 7})]
+nodes[key({x = 9, y = 3, z = 7})] = "mcl_core:stone"
+local obstructed = cleric_named("obstructed", {x = 9, y = 2.58, z = 6.3})
+def.do_custom(obstructed, 0.1)
+assert(obstructed.object:get_pos().z == 6.3, "final alignment must not cross the wall at z=7")
+assert(obstructed.state == "gowp" and vector.equals(obstructed._target, behind_cell), "walks round it instead")
+local detour = route(obstructed)
+for _, c in ipairs(detour) do assert(not (c.x == 9 and c.z == 7), "through the wall") end
+nodes[key({x = 9, y = 3, z = 7})] = dais_carpet
+local unblocked = cleric_named("unblocked", {x = 9, y = 2.58, z = 6.3})
+def.do_custom(unblocked, 0.1)
+assert(unblocked.object:get_pos().z == 8 and unblocked.order == "stand", "and lined up when the dais is clear")
+metas[key(pulpit)] = {villager = "cleric"}
+
+-- Trading stops a church walk, for the cleric and for members: vanilla stands
+-- the villager when the trade opens, and it stays stopped until the trade
+-- closes, when it carries on. The time spent does not count against its walk.
+local function trade_walk(v, label)
+	count = #gopaths
+	def.do_custom(v, 0.1)
+	assert(v.state == "gowp", label .. " is walking")
+	v.state = "stand"
+	v.jump = false
+	v._trading_players = {singleplayer = true}
+	local before = v._villages_church.since
+	for _ = 1, 4 do
+		def.do_custom(v, 0.5)
+		assert(v.state == "stand", label .. " stays stopped while trading")
+		assert(v.jump == false, label .. " is not given back its jump while trading")
+	end
+	assert(v._villages_church.since > before and not v._villages_church.failures, label .. ": the pause is not counted")
+	v._trading_players = {}
+	def.do_custom(v, 0.1)
+	assert(v.state == "gowp", label .. " carries on once the trade closes")
+end
+trade_walk(cleric_named("trader", at(start)), "the cleric")
+metas[key(pulpit)] = {villager = "cleric"}
+local trading_member = villager("trading_member", at({x = 1, y = 2, z = 6}))
+trade_walk(trading_member, "a member")
+
 -- The end of the stage: seats go, and so do the walk and the hold on the pose.
 time = 10600 / 24000
 now = now + 6

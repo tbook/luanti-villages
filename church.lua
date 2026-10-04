@@ -485,12 +485,17 @@ local function conduct(self, pulpit)
 	end
 	local pos = self.object:get_pos()
 	if not pos then return end
-	if near(pos, cell, AT_PULPIT) and standing_on_level(self, pos, cell) then
-		-- Line up exactly behind the pulpit: the last cell or two of the dais
-		-- walk, on its own level.
-		if not near(pos, cell, 0.3) then self.object:set_pos({x = cell.x, y = pos.y, z = cell.z}) end
-		church.failures = nil
-		return hold_still(self, dir.x, dir.z)
+	if standing_on_level(self, pos, cell) then
+		-- There, or within a step of it: line up exactly behind the pulpit. Only
+		-- when the dais itself joins the two within a cell or two, so that a wall
+		-- or a pulpit between them is walked around, not snapped through.
+		local from = cell_at(church.cells, pos)
+		local close = from and along(church.cells, from)
+		if near(pos, cell, 0.3) or (near(pos, cell, AT_PULPIT) and close and #close <= 2) then
+			if not near(pos, cell, 0.3) then self.object:set_pos({x = cell.x, y = pos.y, z = cell.z}) end
+			church.failures = nil
+			return hold_still(self, dir.x, dir.z)
+		end
 	end
 	local walking = walk_inside(self, church, pos)
 	if walking == false then return leave(self) end
@@ -587,6 +592,17 @@ local function install(def, shared_seat)
 		end
 		local result = original_custom(self, dtime)
 		if result == false then return result end
+		-- Someone is trading with it: vanilla has stopped it (villager.lua
+		-- on_rightclick) and it stays stopped. The visit waits, and the time
+		-- spent does not count against its walk.
+		if role and trading(self) then
+			local church = self._villages_church
+			if church then
+				church.since = church.since + dtime
+				if church.place then hold_place(self, church.place) end
+			end
+			return result
+		end
 		if role == "cleric" then
 			conduct(self, pulpit)
 		elseif role then
