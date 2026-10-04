@@ -3,9 +3,11 @@
 -- copy to fall out of sync with VoxeLibre.
 --
 -- The stock church holds a brewing stand, the cleric's jobsite and an odd
--- centrepiece, on a purple-carpeted dais at its east end, and wooden stairs as
--- pews. The brewing stand becomes a pulpit, which no profession claims, and the
--- pews become chairs that face it.
+-- centrepiece, on a purple-carpeted dais at its east end, with an altar of two
+-- wood blocks and white carpet (x 8, z 6 to 7) in front of it, and wooden stairs
+-- as pews. The brewing stand goes, leaving carpet. A pulpit takes the carpet
+-- beside the altar, on the congregation's left, and the pews become chairs that
+-- face the altar. No profession claims a pulpit.
 local core = minetest
 local unpack = table.unpack or unpack
 
@@ -19,14 +21,19 @@ local CHAIR_FACING = {["-z"] = 0, ["-x"] = 1, ["+z"] = 2, ["+x"] = 3}
 
 -- The pulpit's mesh slopes its reading surface down toward -z at param2 0, so
 -- the reader stands on that side and the congregation, who see the high edge,
--- on +z. Each param2 step turns +z a quarter toward +x, so the pulpit at the
--- east end, with the pews to the west (-x), takes param2 3.
+-- on +z. Each param2 step turns +z a quarter toward +x, so a pulpit that faces
+-- the pews to the west (-x) takes param2 3.
 local PULPIT_PARAM2 = 3
 
 local function furnish(schematic)
 	local size = schematic.size
 	if size.x ~= 13 or size.y ~= 15 or size.z ~= 14 then return false end
-	local changes = {{10, 3, 6, "mcl_brewing:stand_000", "living_villages:pulpit", PULPIT_PARAM2}}
+	-- The congregation looks east (+x), so its left is +z: the pulpit stands
+	-- at z 8, beside the altar's z 7.
+	local changes = {
+		{10, 3, 6, "mcl_brewing:stand_000", "mcl_wool:purple_carpet", 0},
+		{8, 3, 8, "mcl_wool:purple_carpet", "living_villages:pulpit", PULPIT_PARAM2},
+	}
 	-- Two columns of pews either side of the central aisle, three seats each,
 	-- on both sides of the doorway at z 6 to 7.
 	for _, x in ipairs({3, 5}) do

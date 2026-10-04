@@ -39,8 +39,8 @@ ordinary stairs and wooden doors. Iron doors still block them.
   claims as a jobsite. Craft one from a lectern and a purple carpet. A pulpit marks a church, so
   a player-built church works too. It is the mod's only node: if you remove the mod, placed
   pulpits become unknown nodes.
-- **Furniture:** newly generated churches get a pulpit in place of the brewing stand and chairs
-  in place of the stair pews, all facing the pulpit. Churches that already exist aren't
+- **Furniture:** newly generated churches lose the brewing stand, get a pulpit beside the altar on the
+  congregation's left, and get chairs in place of the stair pews, all facing the altar. Churches that already exist aren't
   refurnished.
 
 ### Taverns and dinner
@@ -112,5 +112,6 @@ for t in tests/*.lua; do lua5.1 "$t"; done
 
 The code is licensed under GPL-3.0; see [`LICENSE`](LICENSE). The sleeping position, bed
 occupancy, pose, and wake-up behavior are adapted from Mineclonia's `mobs_mc/villager.lua`.
-The model and textures come from Mineclonia; see [`LICENSE-media.md`](LICENSE-media.md) for
+The villager model and textures come from Mineclonia, and the pulpit texture is a recolored
+VoxeLibre texture; see [`LICENSE-media.md`](LICENSE-media.md) for
 their licenses and credits.

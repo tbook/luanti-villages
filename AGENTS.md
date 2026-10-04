@@ -31,7 +31,7 @@ their jobsite lose it, so vanilla demotes them.
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |
-| `tests/*.lua` | Standalone tests, one per module, that stub the engine |
+| `tests/*.lua` | Standalone tests, one per module, that stub the engine. `tests/fixtures/` holds data extracted from VoxeLibre, such as the stock church |
 | `docs/navigation-scenarios.md` | Manual in-game test scenarios |
 
 ## Testing
