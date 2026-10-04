@@ -31,7 +31,7 @@ local function full_step(def, node)
 	for _, name in ipairs({"fence", "fence_gate", "wall"}) do
 		if group(node, name) then return false end
 	end
-	local box = def.collision_box
+	local box = def.collision_box or (def.drawtype == "nodebox" and def.node_box)
 	if box and box.type == "fixed" then
 		local top = -0.5
 		local fixed = type(box.fixed[1]) == "number" and {box.fixed} or box.fixed

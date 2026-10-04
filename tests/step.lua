@@ -16,7 +16,7 @@ minetest = {
 		["mcl_core:stone"] = {walkable = true},
 		["mcl_core:wood"] = {walkable = true},
 		["mcl_wool:purple_carpet"] = {walkable = true,
-			collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}},
+			drawtype = "nodebox", node_box = {type = "fixed", fixed = {{-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}}},
 		["mcl_fences:fence"] = {walkable = true,
 			collision_box = {type = "fixed", fixed = {{-0.125, -0.5, -0.125, 0.125, 1, 0.125}}}},
 		["mcl_stairs:slab_wood"] = {walkable = true,

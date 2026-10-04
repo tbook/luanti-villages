@@ -96,11 +96,16 @@ end
 
 local SIDES = {{x = 1, z = 0}, {x = -1, z = 0}, {x = 0, z = 1}, {x = 0, z = -1}}
 
--- Whether a chair is next to the cell, or under it (a chair is solid enough to
--- stand on): someone standing there would be in the way of whoever sits down.
+local function is_chair(pos)
+	local node = core.get_node_or_nil(pos)
+	return node and core.get_item_group(node.name, "chair") > 0
+end
+
+-- Whether a chair is next to the cell: someone standing there would be in the
+-- way of whoever sits down.
 local function beside_chair(cell)
-	for _, side in ipairs({SIDES[1], SIDES[2], SIDES[3], SIDES[4], {x = 0, z = 0, y = -1}}) do
-		local node = core.get_node_or_nil({x = cell.x + side.x, y = cell.y + (side.y or 0), z = cell.z + side.z})
+	for _, side in ipairs(SIDES) do
+		local node = core.get_node_or_nil({x = cell.x + side.x, y = cell.y, z = cell.z + side.z})
 		if node and core.get_item_group(node.name, "chair") > 0 then return true end
 	end
 	return false
@@ -120,7 +125,9 @@ local function back_places(pulpit, id)
 				local depth = dx * dir.x + dz * dir.z
 				if depth >= BACK_MIN and depth <= BACK_MAX then
 					local cell = {x = x, y = y, z = z}
-					if not held_by_other(cell, id) and common.is_standing_space(cell, true) then
+					-- A chair is solid enough to stand on; nobody stands on the pews.
+					local on_chair = is_chair({x = x, y = y - 1, z = z})
+					if not on_chair and not held_by_other(cell, id) and common.is_standing_space(cell, true) then
 						found[#found + 1] = {
 							cell = cell, depth = depth, side = math.abs(dx * dir.z - dz * dir.x),
 							crowds = beside_chair(cell) and 1 or 0,
@@ -223,21 +230,35 @@ local function leave(self)
 	end
 end
 
--- Start a walk. VoxeLibre's gopath answers nothing when there is no route,
--- while it waits out an earlier failure, and when the villager is already where
--- it is sent (mcl_mobs/pathfinding.lua). Only no route sets _pf_last_failed
--- (navigation.lua's own failures set it too). Returns false after two of those,
--- which gives the church up.
+-- Start a walk. VoxeLibre's gopath answers nothing while it waits out an
+-- earlier failure (ready_to_path, mcl_mobs/pathfinding.lua), so wait that out
+-- without asking; walk() does not ask when the villager is already there. Any
+-- other non-answer is a failure, and two give the church up.
 local function start_walk(self, church, cell)
-	local before = self._pf_last_failed
+	if self.ready_to_path and not self:ready_to_path(true) then return true end
 	if self:gopath(cell, function() end, true) then return true end
-	if self._pf_last_failed == before then return true end
 	church.failures = (church.failures or 0) + 1
 	return church.failures < 2
 end
 
 local function near(pos, cell, reach)
 	return math.abs(pos.x - cell.x) <= reach and math.abs(pos.z - cell.z) <= reach
+end
+
+-- Feet on the floor of cell's level: a villager standing on carpet in cell is
+-- 0.43 below its center, on a full block 0.49 below. Lower than that it is
+-- still climbing up into the level (at the top of a jump beside a step its feet
+-- are level with the step's node, but under its surface), higher it is in the
+-- air.
+local function on_level(pos, cell)
+	local rise = pos.y - cell.y
+	return rise >= -0.52 and rise <= -0.3
+end
+
+-- Standing, not mid-jump, on the floor of cell's level.
+local function standing_on_level(self, pos, cell)
+	local v = self.object:get_velocity()
+	return on_level(pos, cell) and not (v and math.abs(v.y) > 0.1)
 end
 
 -- Keep walking to cell. Returns false once the church is given up: out of time,
@@ -251,19 +272,12 @@ local function walk(self, church, cell, pos)
 	if church.goal and not same(church.goal, cell) then stop_walking(self) end
 	church.goal = cell
 	-- There already, and still settling from a jump: nothing to walk.
-	if pos and near(pos, cell, LEG_REACH) and common.feet_node(pos) == cell.y then return true end
+	if pos and near(pos, cell, LEG_REACH) and on_level(pos, cell) then return true end
 	if self.state ~= "gowp" and not start_walk(self, church, cell) then
 		skip(self, church.pulpit, "no route")
 		return false
 	end
 	return true
-end
-
--- Standing, not mid-jump, on the floor of cell's level: the node its feet are in
--- is cell's (carpet included).
-local function standing_on_level(self, pos, cell)
-	local v = self.object:get_velocity()
-	return common.feet_node(pos) == cell.y and not (v and math.abs(v.y) > 0.1)
 end
 
 -- Stay put, looking along (look_x, look_z). Vanilla clears the order on every
@@ -305,38 +319,53 @@ local function dais_cells(stand)
 	return found, order
 end
 
+-- The dais cell a villager stands on: any cell under its 0.6-wide footprint, on
+-- its level, nearest first. Its center may hang over the edge, past the last
+-- dais cell (seen in a headless run), so rounding the center is not enough.
+local function dais_cell_at(cells, pos)
+	local y = common.feet_node(pos)
+	local best, best_distance
+	for x = math.floor(pos.x + 0.5) - 1, math.floor(pos.x + 0.5) + 1 do
+		for z = math.floor(pos.z + 0.5) - 1, math.floor(pos.z + 0.5) + 1 do
+			local cell = {x = x, y = y, z = z}
+			local distance = math.max(math.abs(pos.x - x), math.abs(pos.z - z))
+			if cells[key(cell)] and distance <= 0.8 and on_level(pos, cell)
+				and (not best or distance < best_distance) then
+				best, best_distance = cell, distance
+			end
+		end
+	end
+	return best
+end
+
 -- The cleric's way to its place, worked out once when it sets out. The pulpit
 -- is walkable, so the pathfinder's shortest way to the cell behind it runs over
 -- its top, which no villager can climb. So unless the cleric is already on the
--- dais it goes in three legs: to the floor in front of a dais edge cell away
--- from the pulpit, up that one step (step.lua), then along the dais. The edge is
--- the nearest one to the place along the dais, with the floor in front of it on
--- the congregation's side and room overhead to jump.
+-- dais it goes in two legs: to the floor in front of a dais edge cell, then up
+-- that one step (step.lua) and along the dais. The edge is the nearest one to
+-- the place along the dais with the floor in front of it on the congregation's
+-- side and room overhead to jump, and far enough from the place that
+-- check_gowp's 1.8-node arrival around the place cannot end the walk mid-jump.
+-- Returns the legs, the dais cells, and the edge.
 local function plan(self, pulpit, stand, dir)
 	local cells, order = dais_cells(stand)
 	local pos = self.object:get_pos()
-	if pos then
-		local feet = {x = math.floor(pos.x + 0.5), y = common.feet_node(pos), z = math.floor(pos.z + 0.5)}
-		if cells[key(feet)] and standing_on_level(self, pos, stand) then return {stand}, cells end
-	end
+	if pos and standing_on_level(self, pos, stand) and dais_cell_at(cells, pos) then return {stand}, cells end
 	for _, edge in ipairs(order) do
 		local by_pulpit = math.abs(edge.x - pulpit.x) + math.abs(edge.z - pulpit.z) <= 1
-		if not same(edge, stand) and not by_pulpit then
+		local far = (edge.x - stand.x) ^ 2 + (edge.z - stand.z) ^ 2 >= 2.5 ^ 2
+		if far and not by_pulpit then
 			for _, side in ipairs(SIDES) do
 				local floor = {x = edge.x + side.x, y = edge.y - 1, z = edge.z + side.z}
 				local front = (floor.x - pulpit.x) * dir.x + (floor.z - pulpit.z) * dir.z > 0
 				if front and common.is_standing_space(floor, true)
 					and common.is_clear_node({x = floor.x, y = floor.y + 2, z = floor.z}) then
-					return {floor, edge, stand}, cells
+					return {floor, stand}, cells, edge
 				end
 			end
 		end
 	end
 	return {stand}, cells
-end
-
-local function feet_cell(pos)
-	return {x = math.floor(pos.x + 0.5), y = common.feet_node(pos), z = math.floor(pos.z + 0.5)}
 end
 
 -- The dais cells from cell to the cleric's place, one step at a time down the
@@ -361,17 +390,29 @@ local function along_dais(cells, from)
 end
 
 -- Walk along the dais to the cleric's place on these cells, not on a route of
--- the pathfinder's, which leaves the dais to cross the pulpit's top. The
+-- the pathfinder's, which leaves the dais to cross the pulpit's top. From the
+-- floor in front of the edge the first cell is the edge, up the step. The
 -- waypoints are what gopath would set up (mcl_mobs/pathfinding.lua), so
--- check_gowp walks them. Returns false once the church is given up, and "off"
--- when the cleric is not on the dais to walk it.
+-- check_gowp walks them and do_jump (step.lua) takes the step. There is one walk
+-- for the step and the dais: a walk to the edge itself would end within
+-- check_gowp's 1.8 nodes of it, which is mid-jump, and vanilla stops a mob dead
+-- when a walk ends. Returns false once the church is given up, and "off" when
+-- the cleric is neither on the dais nor in front of its edge.
 local function walk_dais(self, church, pos)
 	if now() - church.since > church.limit then
 		skip(self, church.pulpit, "the walk took too long")
 		return false
 	end
 	if self.state == "gowp" and church.goal and same(church.goal, church.stand) then return true end
-	local path = along_dais(church.cells, feet_cell(pos))
+	local v = self.object:get_velocity()
+	if v and math.abs(v.y) > 0.1 then return true end
+	local from = dais_cell_at(church.cells, pos)
+	local path = from and along_dais(church.cells, from)
+	local floor = church.legs[1]
+	if not from and church.edge and near(pos, floor, LEG_REACH) and on_level(pos, floor) then
+		path = along_dais(church.cells, church.edge)
+		if path then table.insert(path, 1, church.edge) end
+	end
 	if not path then return "off" end
 	if #path == 0 then path = {church.stand} end
 	stop_walking(self)
@@ -406,14 +447,14 @@ function conduct(self, pulpit)
 			role = "cleric", pulpit = pulpit, stand = cell, dir = dir, since = now(),
 			limit = walk_limit(self, pulpit) + CLIMB_SECONDS, leg = 1,
 		}
-		church.legs, church.cells = plan(self, pulpit, cell, dir)
+		church.legs, church.cells, church.edge = plan(self, pulpit, cell, dir)
 		self._villages_church = church
 	end
 	local pos = self.object:get_pos()
 	if not pos then return end
 	-- Up on the dais before its last leg (it climbed sooner than planned, say):
 	-- standing there, not mid-jump, it walks the dais from where it is.
-	if church.leg < #church.legs and church.cells[key(feet_cell(pos))] and standing_on_level(self, pos, cell) then
+	if church.leg < #church.legs and standing_on_level(self, pos, cell) and dais_cell_at(church.cells, pos) then
 		church.leg = #church.legs
 	end
 	local target = church.legs[church.leg]
@@ -428,7 +469,7 @@ function conduct(self, pulpit)
 		local walking = walk_dais(self, church, pos)
 		if walking == "off" then
 			-- Off the dais (pushed, or it fell): plan the way up again from here.
-			church.legs, church.cells = plan(self, pulpit, cell, dir)
+			church.legs, church.cells, church.edge = plan(self, pulpit, cell, dir)
 			church.leg = 1
 			return conduct(self, pulpit)
 		end

@@ -41,7 +41,9 @@ local workstation_search_node_names = {"group:cauldron"}
 for name in pairs(workstation_nodes) do table.insert(workstation_search_node_names, name) end
 
 local function collision_box_top(def)
-	local box = def and def.collision_box
+	-- A nodebox with no collision box of its own collides as its node box
+	-- (Luanti does this): a carpet is a sixteenth of a node thick, not a block.
+	local box = def and (def.collision_box or (def.drawtype == "nodebox" and def.node_box))
 	if not box or box.type ~= "fixed" then return 0.5 end
 	local fixed = box.fixed
 	if type(fixed) ~= "table" then return -0.5 end
