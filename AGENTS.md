@@ -23,11 +23,12 @@ their jobsite lose it, so vanilla demotes them.
 | `keeper.lua` | Tavern keeper role, which is a butcher underneath and claims a jukebox, plus its menu and hours |
 | `tavern.lua` | The evening tavern visit and keeper takeover |
 | `wander.lua` | Replaces vanilla's aimless walk with short, checked straight legs that stop short of walls |
-| `seat.lua` | Chair reservation and the sitting pose |
+| `seat.lua` | Chair reservation and the sitting pose, for dinner tables and church pews |
 | `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
 | `tavern_schematic.lua` | Furnishes newly generated taverns by editing the stock schematic in memory |
 | `cleric.lua` | Clerics claim free pulpits through the same node metadata vanilla uses and work there |
 | `pulpit.lua` | The `living_villages:pulpit` node, a lectern clone that is no profession's jobsite |
+| `church.lua` | The holiday church service: villagers take pews or stand at the back, and the cleric stands at the pulpit |
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |

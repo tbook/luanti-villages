@@ -203,6 +203,19 @@ that is closed), and the door is shut again behind them. Nobody circles in
 front of the door or keeps pushing at its leaf. A door crossed in a straight
 line is still opened and closed as before.
 
+## 17. Church service on a holiday
+
+Find a generated church with a pulpit and chairs (a holiday is every fourth
+day; `/time 7000` after the moon change gets there quickly). Several villagers
+and a cleric who has claimed the pulpit should live in the village. At 7:00:
+
+Expected result: villagers walk in and sit in the chairs, each facing the
+pulpit, no two in one chair. Once the twelve pews are taken the rest stand at
+the back of the church facing the pulpit, and sit if a chair frees. The cleric
+stands on the dais behind the pulpit, facing the pews. At 10:30 everyone gets
+up and leaves the seats. With no church in the village, or one sealed off from
+the villagers, they putter as on any morning.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.
