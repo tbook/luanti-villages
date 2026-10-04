@@ -26,6 +26,7 @@ their jobsite lose it, so vanilla demotes them.
 | `seat.lua` | Chair reservation and the sitting pose |
 | `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
 | `tavern_schematic.lua` | Furnishes newly generated taverns by editing the stock schematic in memory |
+| `cleric.lua` | Clerics claim free pulpits through the same node metadata vanilla uses and work there |
 | `pulpit.lua` | The `living_villages:pulpit` node, a lectern clone that is no profession's jobsite |
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
