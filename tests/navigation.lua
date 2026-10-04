@@ -715,6 +715,55 @@ minetest.get_node_or_nil = original_node
 search_sites = {}
 jobsite_claimed = true
 
+-- A cleric's pulpit (cleric.lua) is claimed by this mod, not vanilla, but trips
+-- to it get the same managed routes: a search trip arrives beside the pulpit,
+-- and the commute to a claimed one falls back to the planner when the legacy
+-- pathfinder fails (#125).
+local pulpit_claimed = false
+local pulpit_node, pulpit_meta = minetest.get_node_or_nil, minetest.get_meta
+minetest.get_node_or_nil = function(pos)
+	if pos.x == 40 and pos.y == 0 and pos.z == 0 then return {name = "living_villages:pulpit"} end
+	return pulpit_node(pos)
+end
+minetest.get_meta = function(pos)
+	if pos.x == 40 and pos.y == 0 and pos.z == 0 then
+		return {get_string = function(_, name)
+			return name == "villager" and pulpit_claimed and "villager-1" or ""
+		end}
+	end
+	return pulpit_meta(pos)
+end
+local pulpit_arrivals = 0
+local pulpit_seeker = {
+	_id = "villager-1", state = "stand",
+	object = {get_pos = function() return {x = 35, y = 0, z = 0} end, set_velocity = function() end},
+}
+assert(job_def.gopath(pulpit_seeker, {x = 40, y = 0, z = 0}, function() pulpit_arrivals = pulpit_arrivals + 1 end, true))
+assert(job_target and math.abs(job_target.x - 40) + math.abs(job_target.z) == 1 and job_target.y == 0,
+	"a pulpit trip ends on a cardinal neighbor, where the claim on arrival finds it")
+assert(pulpit_seeker._villages_job_search_route.status == "travelling")
+job_arrived(pulpit_seeker)
+assert(pulpit_arrivals == 1 and pulpit_seeker._villages_job_search_route.status == "arrived")
+
+local failing_def = {
+	on_activate = function() end,
+	do_custom = function() end,
+	gopath = function() return false end,
+}
+dofile("navigation.lua")(failing_def)
+path_available = false
+pulpit_claimed = true
+local pulpit_cleric = {
+	_id = "villager-1", _jobsite = {x = 40, y = 0, z = 0}, state = "stand",
+	object = {get_pos = function() return {x = 35, y = 0, z = 0} end, set_velocity = function() end},
+}
+assert(failing_def.gopath(pulpit_cleric, pulpit_cleric._jobsite, nil, true),
+	"the planner takes over when the legacy pathfinder fails")
+assert(pulpit_cleric._villages_job_route.status == "travelling" and pulpit_cleric._villages_job_route.mode == "planner")
+minetest.get_node_or_nil, minetest.get_meta = pulpit_node, pulpit_meta
+pulpit_claimed = false
+path_available = true
+
 -- If an accepted bed route stalls, planner recovery must retain the original
 -- caller's arrival callback just as it does for jobsites.
 jobsite_present = true

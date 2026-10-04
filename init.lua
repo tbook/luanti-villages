@@ -15,6 +15,7 @@ local is_suffocating = common.is_suffocating
 -- from a dofile inside that callback like the other behavior modules.
 local install_fisherman = dofile(core.get_modpath("living_villages") .. "/fisherman.lua")
 local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
+local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
 -- Registers living_villages:meal, so it loads here for the same reason.
 local meal = dofile(core.get_modpath("living_villages") .. "/meal.lua")
 -- Registers living_villages:pulpit, likewise.
@@ -530,6 +531,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)
+	cleric.install(def)
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
