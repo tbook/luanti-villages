@@ -69,6 +69,13 @@ info = s.create_site_plan()
 assert(churches(info) == 0 or info[2].name == "church")
 assert(#info > 1, "village still gets houses after the church fails to fit")
 
+-- Terrain that runs out before the give-up count must not leave a bare village:
+-- the plan is redone unforced.
+s = new_settlements({{x = 14, z = 0}, {x = -14, z = 0}, {x = 0, z = 14}})
+wrap(s)
+info = s.create_site_plan()
+assert(#info == 4 and info[2].name == "small_house", "short plan keeps its houses, got " .. #info)
+
 -- Plain check_distance calls outside a plan are untouched.
 assert(s.check_distance({}, {x = 0, z = 0}, 13))
 

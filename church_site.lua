@@ -7,10 +7,17 @@
 -- distance check, so the first position with room for a church gets one. After
 -- 60 failed fits (the first ring of positions around the belltower is too close
 -- for a church, so this is a few rings, not a few positions), it gives up and lets the plan
--- carry on as usual. The church's own max_num still stops a second one.
+-- carry on as usual, as it does if the plan ends without one. The church's own max_num still stops a second one.
 local core = minetest
 
 local GIVE_UP_AFTER = 60
+
+local function has_church(info)
+	for _, placed in ipairs(info) do
+		if placed.name == "church" then return true end
+	end
+	return false
+end
 
 local function wrap(settlements)
 	local church
@@ -28,14 +35,17 @@ local function wrap(settlements)
 		local ok, plan = pcall(create_site_plan, ...)
 		planning = false
 		if not ok then error(plan, 0) end
+		-- Terrain that runs out before 60 misses (a small island) leaves every
+		-- other building blocked for the whole plan, so plan again unforced.
+		if plan and misses < GIVE_UP_AFTER and not has_church(plan) then
+			return create_site_plan(...)
+		end
 		return plan
 	end
 
 	function settlements.check_distance(settlement_info, pos, hsize)
 		if planning and misses < GIVE_UP_AFTER then
-			for _, placed in ipairs(settlement_info) do
-				if placed.name == "church" then return check_distance(settlement_info, pos, hsize) end
-			end
+			if has_church(settlement_info) then return check_distance(settlement_info, pos, hsize) end
 			if hsize ~= church.hsize then return false end
 			local fits = check_distance(settlement_info, pos, hsize)
 			if not fits then misses = misses + 1 end
