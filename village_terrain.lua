@@ -165,6 +165,19 @@ function M.heights(area, surface_materials, engine)
 	end
 end
 
+-- Fill `fill` (default dirt) under y, down until the first solid node, at most
+-- as far as foundations go (20). Covers a hole under a building or a yard.
+function M.fill_below(x, z, y, fill, engine)
+	engine = engine or core
+	fill = fill or "mcl_core:dirt"
+	for fy = y - 1, y - DEFAULT_BELOW, -1 do
+		local pos = {x = x, y = fy, z = z}
+		local def = engine.registered_nodes[engine.get_node(pos).name]
+		if def and def.walkable and (def.liquidtype or "none") == "none" then break end
+		engine.swap_node(pos, {name = fill})
+	end
+end
+
 -- Set one column to `target_y` with `surface` on top, over a fill of `fill`
 -- (default dirt) that runs down until it meets ground. `top_y` is the column's
 -- current top (from heights). Above the target everything up to top_y becomes
@@ -172,17 +185,11 @@ end
 -- be loaded; see emerge.
 function M.set_column(x, z, top_y, target_y, surface, fill, engine)
 	engine = engine or core
-	fill = fill or "mcl_core:dirt"
 	for y = top_y, target_y + 1, -1 do
 		engine.swap_node({x = x, y = y, z = z}, {name = "air"})
 	end
 	engine.swap_node({x = x, y = target_y, z = z}, {name = surface})
-	for y = target_y - 1, target_y - DEFAULT_BELOW, -1 do
-		local pos = {x = x, y = y, z = z}
-		local def = engine.registered_nodes[engine.get_node(pos).name]
-		if def and def.walkable and (def.liquidtype or "none") == "none" then break end
-		engine.swap_node(pos, {name = fill})
-	end
+	M.fill_below(x, z, target_y, fill, engine)
 end
 
 local function lookup_path(path, root)
