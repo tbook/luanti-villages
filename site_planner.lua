@@ -108,11 +108,25 @@ function M.plan(maxp, minp, pr, env, config)
 		end
 		return false
 	end
+	-- find_surface refuses ground with leaves directly above it, so a column
+	-- under a canopy has no surface; terraform clears trees, so take the
+	-- ground below the leaves and trunks if it is a surface material.
+	local function ground_under_trees(x, z)
+		for y = start_y, start_y - config.water_scan, -1 do
+			local name = env.get_node({x = x, y = y, z = z}).name
+			local def = env.registered_nodes[name]
+			if def and def.walkable and not name:find("leaves", 1, true) and not name:find("tree", 1, true) then
+				if settlements.surface_mat[name] then return {x = x, y = y, z = z}, name end
+				return nil
+			end
+		end
+	end
 	local function sample(x, z)
 		local key = x .. "," .. z
 		local s = samples[key]
 		if s then return s end
 		local surface, material = find_surface({x = x, y = start_y, z = z})
+		if not surface then surface, material = ground_under_trees(x, z) end
 		if top_is_liquid(x, z) then
 			s = {reason = "water"}
 		elseif not surface then

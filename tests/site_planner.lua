@@ -33,6 +33,7 @@ end
 local registered = {
 	["air"] = {walkable = false},
 	["mcl_core:dirt_with_grass"] = {walkable = true},
+	["mcl_core:leaves"] = {walkable = true},
 	["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
 }
 
@@ -55,6 +56,7 @@ local function world(h, water)
 		return true
 	end
 	settlements.terraform = function() end
+	settlements.surface_mat = {["mcl_core:dirt_with_grass"] = true}
 	return {
 		settlements = settlements,
 		waits = waits,
@@ -207,6 +209,23 @@ end
 local lake = world(function() return 10 end, function(x, z) return x >= 3 and x <= 8 and z >= 0 and z <= 4 end)
 local failed, reason = plan(lake)
 assert(failed == false and reason:find("belltower", 1, true) and reason:find("water", 1, true), "belltower in water: " .. tostring(reason))
+
+-- Canopy: find_surface refuses ground with leaves above it, but the ground
+-- under the leaves still counts, so such columns don't reject the site.
+local canopy = world(function() return 10 end)
+local function covered(x, z) return (x + z) % 3 == 0 and not (x == 0 and z == 0) end
+local plain_find, plain_node = canopy.settlements.find_surface, canopy.get_node
+canopy.settlements.find_surface = function(pos, wait)
+	if covered(pos.x, pos.z) then return nil end
+	return plain_find(pos, wait)
+end
+canopy.get_node = function(pos)
+	if covered(pos.x, pos.z) and pos.y == 11 then return {name = "mcl_core:leaves"} end
+	return plain_node(pos)
+end
+planned = plan(canopy)
+assert(planned and planned[1].pos.y == 10, "ground under a canopy is a surface")
+assert(not planned.rejects)
 
 -- No surface at the center.
 failed, reason = plan(world(function() return nil end))
