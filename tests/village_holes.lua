@@ -9,7 +9,7 @@ local cfg = holes.config
 
 -- A grid of columns 0..W-1 by 0..W-1, flat at 10; `edit` changes it. The pad is a
 -- 2x2 protected block at the origin corner.
-local W = 20
+local W = 25
 local function grid(edit)
 	local g = {}
 	for x = 0, W - 1 do
@@ -39,23 +39,23 @@ local function trapped_columns(plan, g)
 	end
 	local out = 0
 	for x = 0, W - 1 do for z = 0, W - 1 do
-		if g[x][z].liquid then goto continue end
-		local seen, queue, head, free = {[x .. "," .. z] = true}, {{x, z}}, 1, false
-		while head <= #queue and not free do
-			local cx, cz = queue[head][1], queue[head][2]
-			head = head + 1
-			if cx == 0 or cz == 0 or cx == W - 1 or cz == W - 1 or (cx < 2 and cz < 2) then free = true end
-			for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
-				local nx, nz = cx + d[1], cz + d[2]
-				local nh = h(nx, nz)
-				if nh and not seen[nx .. "," .. nz] and not g[nx][nz].liquid and nh <= h(cx, cz) + 1 then
-					seen[nx .. "," .. nz] = true
-					queue[#queue + 1] = {nx, nz}
+		if not g[x][z].liquid then
+			local seen, queue, head, free = {[x .. "," .. z] = true}, {{x, z}}, 1, false
+			while head <= #queue and not free do
+				local cx, cz = queue[head][1], queue[head][2]
+				head = head + 1
+				if cx == 0 or cz == 0 or cx == W - 1 or cz == W - 1 or (cx < 2 and cz < 2) then free = true end
+				for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+					local nx, nz = cx + d[1], cz + d[2]
+					local nh = h(nx, nz)
+					if nh and not seen[nx .. "," .. nz] and not g[nx][nz].liquid and nh <= h(cx, cz) + 1 then
+						seen[nx .. "," .. nz] = true
+						queue[#queue + 1] = {nx, nz}
+					end
 				end
 			end
+			if not free then out = out + 1 end
 		end
-		if not free then out = out + 1 end
-		::continue::
 	end end
 	return out
 end
@@ -141,6 +141,21 @@ g = grid(function(g)
 end)
 plan = holes.plan(spec_of(g), cfg)
 assert(plan.left == 0 and trapped_columns(plan, g) == 0, "pillar in a pit")
+
+-- Nested rims: each round of filling exposes the next ring as the rim. Needs more
+-- rounds than the old limit of 4, and nothing may be left trapped.
+g = grid(function(g)
+	for x = 0, W - 1 do for z = 0, W - 1 do
+		local d = math.min(x, z, W - 1 - x, W - 1 - z)
+		g[x][z].y = d == 0 and 10 or (d % 2 == 0 and d <= 10) and 10 + d or 0
+	end end
+end)
+local none = function() return false end
+plan = holes.plan(spec_of(g, none), cfg)
+assert(plan.left == 0 and trapped_columns(plan, g) == 0, "nested rims are resolved")
+-- And when the round limit is hit, what is still trapped is reported, not hidden.
+plan = holes.plan(spec_of(g, none), {passes = 2, shallow = 3, lid = 3})
+assert(plan.left > 0, "unresolved columns are counted at the limit")
 
 -- area: bounding box of pads plus margin, `below` under the lowest pad.
 local area = holes.area({

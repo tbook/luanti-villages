@@ -23,7 +23,7 @@ M.config = {
 	below = 40, above = 24, -- under the lowest pad, over the highest
 	shallow = 3, -- a hole up to this deep is filled, a deeper one is capped
 	lid = 3, -- thickness of a cap
-	passes = 4, -- limit on plan rounds: raising ground can leave a pocket behind
+	passes = 30, -- limit on plan rounds: raising ground can leave a pocket behind, one ring at a time
 	structure_margin = 1, -- structures and the ground just around them are left alone
 }
 
@@ -61,7 +61,9 @@ function M.plan(spec, config)
 
 	local changes, order = {}, {}
 	local result = {regions = 0, capped = 0, filled = 0, skipped = 0, left = 0}
-	for _ = 1, config.passes do
+	-- One more round than the limit, to count what is still trapped. It changes nothing.
+	for pass = 1, config.passes + 1 do
+		local final = pass > config.passes
 		-- Walk backwards from the ways out: u reaches v when h(v) <= h(u) + 1.
 		local reached, queue, head = {}, {}, 1
 		for z = z0, z1 do
@@ -95,7 +97,7 @@ function M.plan(spec, config)
 
 		-- Group what is left into regions and deal with each.
 		local seen, raised = {}, false
-		result.left = 0
+		result.left, result.skipped = 0, 0
 		for z = z0, z1 do
 			for x = x0, x1 do
 				local i = index(x, z)
@@ -122,8 +124,8 @@ function M.plan(spec, config)
 							end
 						end
 					end
-					result.regions = result.regions + 1
-					if water or rim == math.huge then
+					if pass == 1 then result.regions = result.regions + 1 end
+					if water or rim == math.huge or final then
 						result.skipped = result.skipped + (water and 1 or 0)
 						result.left = result.left + #members
 					else
