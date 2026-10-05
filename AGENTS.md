@@ -39,6 +39,8 @@ their jobsite lose it, so vanilla demotes them.
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |
 | `tests/*.lua` | Standalone tests, one per module, that stub the engine. `tests/fixtures/` holds data extracted from VoxeLibre, such as the stock church |
 | `docs/navigation-scenarios.md` | Manual in-game test scenarios |
+| `docs/village-test-seeds.md` | Test seeds for the village terrain work (#133): seed, chunk, what each exercises, and the vanilla baseline numbers |
+| `tools/lv_probe/` | Headless village probe: generates a seed's villages on a throwaway world and measures them. Not loaded by the mod. See its README |
 
 ## Testing
 
