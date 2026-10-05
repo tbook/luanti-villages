@@ -1,3 +1,12 @@
 # Generate villages on smoothed, planned terrain. Turn off to fall back to
 # VoxeLibre's own village generation if something goes wrong.
 living_villages_smooth_villages (Smooth villages) bool true
+
+# Villagers wear grass they keep walking over into paths (#12).
+living_villages_natural_paths (Natural paths) bool true
+# Walks over one grass block before it becomes a path.
+living_villages_path_wear_up (Path wear threshold) float 12
+# A path made this way turns back to grass when its count fades below this.
+living_villages_path_wear_down (Path regrow threshold) float 4
+# Seconds for a block's count to fade by one (default: one game week).
+living_villages_path_decay_period (Path fade period) float 8400
