@@ -10,3 +10,6 @@ living_villages_path_wear_up (Path wear threshold) float 12
 living_villages_path_wear_down (Path regrow threshold) float 4
 # Seconds for a block's count to fade by one (default: one game week).
 living_villages_path_decay_period (Path fade period) float 8400
+# Keep VoxeLibre's generated paths between village buildings. Off leaves
+# villages as grass, and villagers wear their own paths (see above).
+living_villages_generated_paths (Generated village paths) bool false

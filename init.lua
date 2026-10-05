@@ -567,3 +567,12 @@ do
 	-- Terraform runs on the planner's levelled sites, so it goes in with it.
 	dofile(core.get_modpath("living_villages") .. "/village_smoothing.lua").install(globals)
 end
+
+-- Villages start without VoxeLibre's generated paths (#12): they wobble over
+-- the ground and ignore doors. paths.lua wears real ones where villagers walk.
+-- build_a_settlement looks settlements.paths up at the call, so replacing it
+-- here is enough.
+if rawget(_G, "settlements") and settlements.paths
+		and core.settings:get_bool("living_villages_generated_paths", false) == false then
+	settlements.paths = function() end
+end
