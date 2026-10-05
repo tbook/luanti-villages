@@ -9,10 +9,17 @@
 -- It also reserves the church (#132) before the random pick, which replaces
 -- church_site.lua's wrapper of create_site_plan, so install this after it.
 --
+-- A site whose footprint plus a margin overlaps a structure (a ruined portal, a
+-- pillager outpost; found by village_fragments.scan_structures, #141) is
+-- rejected, so the village wraps around it; a village whose center is inside
+-- one is not built.
+--
 -- The planning is plain functions of an `env` table (settlements, get_node,
--- registered_nodes, get_chunk_number, log) so tests can stub the engine.
+-- registered_nodes, get_chunk_number, log, and optionally scan) so tests can
+-- stub the engine.
 local core = minetest
 local terrain = dofile(core.get_modpath("living_villages") .. "/village_terrain.lua")
+local fragments = dofile(core.get_modpath("living_villages") .. "/village_fragments.lua")
 
 local M = {}
 
@@ -30,6 +37,9 @@ M.config = {
 	radius_jitter = 2, -- blocks
 	height_above = 50, -- samples start this far above the belltower's ground
 	water_scan = 150, -- how far down a column is searched for its top node
+	structure_margin = 4, -- a site stays this far from a structure
+	structure_tile = 16, -- structures are scanned in tiles this wide, as candidates reach them
+	structure_below = 20, structure_above = 40, -- each this far under and over the center's ground
 }
 
 local function shuffle(list, pr)
@@ -61,14 +71,16 @@ end
 -- Plans one village. `env` has: settlements (find_surface, check_distance,
 -- schematic_table), get_node, registered_nodes, get_chunk_number, log, and
 -- `wait` (false to never wait for unloaded chunks, as the dry-run command does).
+-- `scan(area, strict)` (optional) returns village_fragments.scan_structures'
+-- result for the area; without it structures are not avoided.
 -- Returns the settlement_info, or false and a reason, and then a report
--- {rejects = {reason = count}, center = pos}.
+-- {rejects = {reason = count}, structures = {node name = count}, center = pos}.
 function M.plan(maxp, minp, pr, env, config)
 	config = config or M.config
 	local settlements = env.settlements
 	local schematics = settlements.schematic_table
 	local wait = env.wait ~= false
-	local report = {rejects = {}, center = nil}
+	local report = {rejects = {}, structures = {}, center = nil}
 	local function reject(reason, detail)
 		report.rejects[reason] = (report.rejects[reason] or 0) + 1
 		env.log("verbose", "[living_villages] site rejected (" .. reason .. ")" .. (detail and (": " .. detail) or ""))
@@ -86,12 +98,59 @@ function M.plan(maxp, minp, pr, env, config)
 		chunks[number] = true
 		return settlements.find_surface(pos, first and wait or nil)
 	end
+	-- Makes sure the chunk holding pos is generated (the first look at a chunk waits
+	-- for it), so a structure scan of it is final.
+	local function ensure_chunk(pos)
+		if not chunks[env.get_chunk_number(pos)] then find_surface(pos) end
+	end
 
 	-- Samples start above the center's ground, or at the top of the chunk when
 	-- the center has none (water, or no surface material).
 	report.center = center
 	local center_surface = find_surface(center)
 	local start_y = center_surface and center_surface.y + config.height_above or center.y
+
+	-- Structures, scanned a tile at a time when a candidate first reaches it: the
+	-- village runs past the mapchunk VoxelManip can see, and the chunks beyond are
+	-- generated as the planning looks at them. Tiles span the center's ground (the
+	-- chunk's middle when the center has none) and what is under and over it.
+	local structures
+	if env.scan then
+		local ground = center_surface and center_surface.y or center.y - config.height_above
+		local size, tiles = config.structure_tile, {}
+		local function tile(tx, tz)
+			local key = tx .. "," .. tz
+			if not tiles[key] then
+				local x0, z0 = tx * size, tz * size
+				ensure_chunk({x = x0 + math.floor(size / 2), y = start_y, z = z0 + math.floor(size / 2)})
+				tiles[key] = env.scan({
+					minp = {x = x0, y = ground - config.structure_below, z = z0},
+					maxp = {x = x0 + size - 1, y = ground + config.structure_above, z = z0 + size - 1},
+				}, wait)
+			end
+			return tiles[key]
+		end
+		structures = {}
+		function structures.at(x, z)
+			return tile(math.floor(x / size), math.floor(z / size)).at(x, z)
+		end
+		function structures.find(x0, z0, x1, z1)
+			for tz = math.floor(z0 / size), math.floor(z1 / size) do
+				for tx = math.floor(x0 / size), math.floor(x1 / size) do
+					local name, x, y, z = tile(tx, tz).find(math.max(x0, tx * size), math.max(z0, tz * size),
+						math.min(x1, tx * size + size - 1), math.min(z1, tz * size + size - 1))
+					if name then return name, x, y, z end
+				end
+			end
+		end
+		local name, sy = structures.at(center.x, center.z)
+		if name then
+			env.log("action", "[living_villages] no village at " .. core.pos_to_string(center)
+				.. ": the center is inside a structure (" .. name .. " at y=" .. sy .. ")")
+			report.structures[name] = 1
+			return false, "center inside a structure (" .. name .. ")", report
+		end
+	end
 
 	-- One sample per column, found once: the surface y and material, or why
 	-- the column is not buildable. Water is the top of the column, which
@@ -139,6 +198,15 @@ function M.plan(maxp, minp, pr, env, config)
 	-- The floor and material for a building at (x, z), or nil and a reason.
 	local function evaluate(schem, x, z, rotation)
 		local box = terrain.footprint({pos = {x = x, z = z}, name = schem.name, rotat = rotation}, schematics)
+		if structures then
+			local m = config.structure_margin
+			local name, hx, hy, hz = structures.find(box.minp.x - m, box.minp.z - m, box.maxp.x + m, box.maxp.z + m)
+			if name then
+				report.structures[name] = (report.structures[name] or 0) + 1
+				return nil, "structure", schem.name .. " at " .. x .. "," .. z .. " is within " .. m
+					.. " of " .. name .. " at " .. hx .. "," .. hy .. "," .. hz
+			end
+		end
 		local xs = {box.minp.x, math.floor((box.minp.x + box.maxp.x) / 2), box.maxp.x}
 		local zs = {box.minp.z, math.floor((box.minp.z + box.maxp.z) / 2), box.maxp.z}
 		local low, high, sum, count, material
@@ -264,14 +332,16 @@ function M.plan(maxp, minp, pr, env, config)
 	if #plan < config.min_buildings then
 		env.log("action", "[living_villages] no village at " .. core.pos_to_string(hall) .. ": only "
 			.. #plan .. " of " .. config.min_buildings .. " buildings found sites (rejected: "
-			.. sorted_counts(report.rejects) .. ")")
+			.. sorted_counts(report.rejects) .. "; structures: " .. sorted_counts(report.structures) .. ")")
 		return false, "only " .. #plan .. " buildings", report
 	end
 	env.log("action", "[living_villages] village planned at " .. core.pos_to_string(hall) .. ": "
 		.. #plan .. " buildings" .. (has_church(plan) and ", church" or ", no church")
-		.. " (rejected: " .. sorted_counts(report.rejects) .. ")")
+		.. " (rejected: " .. sorted_counts(report.rejects) .. "; structures: " .. sorted_counts(report.structures) .. ")")
 	return plan, nil, report
 end
+
+local structure_test = fragments.structure_test(core)
 
 local function live_env(globals, wait)
 	return {
@@ -280,6 +350,7 @@ local function live_env(globals, wait)
 		registered_nodes = core.registered_nodes,
 		get_chunk_number = globals.mcl_vars.get_chunk_number,
 		log = core.log,
+		scan = function(area, strict) return fragments.scan_structures(area, structure_test, core, strict) end,
 		wait = wait,
 	}
 end
@@ -347,6 +418,7 @@ function M.register_command(globals)
 				lines[#lines + 1] = "No village: " .. tostring(why)
 			end
 			lines[#lines + 1] = "Rejected candidates: " .. sorted_counts(report.rejects)
+			lines[#lines + 1] = "Structure nodes that blocked sites: " .. sorted_counts(report.structures)
 			return plan and true or false, table.concat(lines, "\n")
 		end,
 	})
