@@ -92,18 +92,18 @@ nodes (`tools/lv_probe/survey.sh 2001 2030`). #139 quotes its yield against this
 | | Vanilla | #139 planner |
 |-|---------|--------------|
 | sites tried | 309 | 309 |
-| built | 265 (85.8%) | 231 (74.8%) |
-| plan failed | 39 (no surface at the center) | 73 (39 no surface at the center, 34 belltower site or too few sites: uneven, no surface, water) |
+| built | 265 (85.8%) | 281 (90.9%) |
+| plan failed | 39 (no surface at the center) | 23 (17 no belltower site within 32 blocks of the center, 6 fewer than 8 building sites) |
 | rejected as too uneven (`max_height_difference` 56) | 5 | 5 |
 | buildings per built village | 16 | 17.6 |
-| with a church | 43.8% | 98.7% |
-| with a tavern | 88.3% | 91.3% |
-| floor range, median | 8 | 7 |
+| with a church | 43.8% | 97.2% |
+| with a tavern | 88.3% | 90.4% |
+| floor range, median | 8 | 8 |
 | neighbor floor difference, median | 6 | 5 |
 | largest step between columns, median | 18 | 20 |
-| villages with at least one trapped column | 66.4% | 71.4% |
+| villages with at least one trapped column | 66.4% | 73.7% |
 
-The #139 column uses `max_spread` 4 (3 gave 72.8%). The church share for vanilla is plain VoxeLibre; #132 changed it for villages built with `living_villages`.
+The #139 column uses `max_spread` 4 (3 gave 72.8% built, before the belltower could move off a failed center site). The church share for vanilla is plain VoxeLibre; #132 changed it for villages built with `living_villages`.
 
 ## Repeatability
 
