@@ -549,4 +549,5 @@ end)
 
 dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_schematic.lua")
+dofile(core.get_modpath("living_villages") .. "/church_site.lua")
 dofile(core.get_modpath("living_villages") .. "/village_index.lua")

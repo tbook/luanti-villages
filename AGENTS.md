@@ -31,6 +31,7 @@ their jobsite lose it, so vanilla demotes them.
 | `pulpit.lua` | The `living_villages:pulpit` node, a lectern clone that is no profession's jobsite |
 | `church.lua` | The holiday church service: villagers take pews or stand at the back, and the cleric stands at the pulpit |
 | `bell.lua` | The holiday bell gathering: villagers walk to the village bell and drift about it in anchored `wander.lua` legs |
+| `church_site.lua` | Makes the church the first building a new village places, so most villages have one |
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
