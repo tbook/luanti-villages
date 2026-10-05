@@ -2,7 +2,8 @@
 -- settlements.terraform (mcl_villages/foundation.lua) fills straight down under
 -- each footprint and clears straight up, which leaves dirt towers and deep
 -- shafts. This replaces it, and runs the terraform steps in order: load the
--- area, clear whole trees (village_fragments.clear_trees, #141), then smooth.
+-- area, clear whole trees (village_fragments.clear_trees, #141), smooth, then fill
+-- the holes the smoothing leaves (village_holes.lua, #142).
 --
 -- Each building gets a pad, its footprint plus a flat yard at the site's height.
 -- Every column within `radius` of a pad is pulled toward an inverse-distance
@@ -15,6 +16,7 @@
 local core = minetest
 local terrain = dofile(core.get_modpath("living_villages") .. "/village_terrain.lua")
 local fragments = dofile(core.get_modpath("living_villages") .. "/village_fragments.lua")
+local holes = dofile(core.get_modpath("living_villages") .. "/village_holes.lua")
 
 local M = {}
 
@@ -28,11 +30,6 @@ M.config = {
 	structure_margin = 1, -- ground this close to a structure is left alone
 	block = 16,
 }
-
--- Under sand VoxeLibre builds foundations of sandstone.
-local FOUNDATION = {["mcl_core:sand"] = "mcl_core:sandstone"}
--- A snow layer cannot be the top of a column of dirt.
-local TOP = {["mcl_core:snow"] = "mcl_core:dirt_with_grass_snow"}
 
 local function round(v) return math.floor(v + 0.5) end
 
@@ -241,13 +238,12 @@ function M.apply(pads, targets, lookup, config, engine)
 			local target, was = targets.at(x, z), targets.was(x, z)
 			local pad = targets.pad(x, z)
 			if target and pad then
-				local surface = pads[pad].surface or "mcl_core:dirt_with_grass"
-				local fill = FOUNDATION[surface] or "mcl_core:dirt"
+				local surface, fill = terrain.materials(pads[pad].surface)
 				if target ~= was then
 					local column = lookup(x, z)
 					local top = math.max(column.y or was, was)
 					if target < was then top = math.max(top, was + config.cut_clear) end
-					terrain.set_column(x, z, top, target, TOP[surface] or surface, fill, engine)
+					terrain.set_column(x, z, top, target, surface, fill, engine)
 					stats.changed = stats.changed + 1
 					stats[target < was and "cut" or "filled"] = stats[target < was and "cut" or "filled"] + 1
 					stats.steepest = math.max(stats.steepest, math.abs(target - was))
@@ -314,6 +310,19 @@ function M.terraform(plan, pr, env, config)
 	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block, %d unloaded blocks skipped%s")
 		:format(stats.changed, stats.cut, stats.filled, stats.steepest, targets.violations, missing,
 			started and (", " .. math.floor((engine.get_us_time() - started) / 1000) .. " ms") or ""))
+
+	-- Then the holes the smoothing leaves: the gaps between buildings and where paths go.
+	local hole_area = holes.area(pads)
+	local hole_missing = M.load_area(hole_area, config, env)
+	local hole_started = engine.get_us_time and engine.get_us_time()
+	local plan, hole_reason = holes.run(pads, hole_area, env)
+	if plan then
+		engine.log("action", ("[living_villages] holes: %d capped, %d filled, %d with water left alone, %d columns still trapped, %d unloaded blocks skipped%s")
+			:format(plan.capped, plan.filled, plan.skipped, plan.left, hole_missing,
+				hole_started and (", " .. math.floor((engine.get_us_time() - hole_started) / 1000) .. " ms") or ""))
+	else
+		engine.log("warning", "[living_villages] holes not filled: " .. tostring(hole_reason))
+	end
 	return true
 end
 

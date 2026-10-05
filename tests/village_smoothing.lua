@@ -96,8 +96,8 @@ assert(stats.filled > 0 and map[key(1, 10, 1)] == "mcl_core:sand" and map[key(1,
 
 -- terraform on a fake map: flat ground at 14 and a structure block at (8,16,1).
 -- The structure and its neighbors are kept.
-local ids = {air = 1, ["mcl_core:dirt_with_grass"] = 2, struct = 3}
-local names = {"air", "mcl_core:dirt_with_grass", "struct"}
+local ids = {air = 1, ["mcl_core:dirt_with_grass"] = 2, struct = 3, ["mcl_core:dirt"] = 4}
+local names = {"air", "mcl_core:dirt_with_grass", "struct", "mcl_core:dirt"}
 local IGNORE = 99
 local world = {}
 local function at(x, y, z)
@@ -105,6 +105,10 @@ local function at(x, y, z)
 	local k = world[x .. "," .. y .. "," .. z]
 	if k then return k end
 	if x == 8 and y == 16 and z == 1 then return "struct" end
+	-- Blocks under the shaft floor are not generated yet.
+	if x >= 13 and x <= 14 and z >= 0 and z <= 2 and y < -20 then return "ignore" end
+	-- A shaft in the gap beyond the smoothing, down to a floor at -8.
+	if x >= 13 and x <= 14 and z >= 0 and z <= 2 and y > -8 and y <= 14 then return "air" end
 	return y <= 14 and "mcl_core:dirt_with_grass" or "air"
 end
 VoxelArea = {new = function(_, e)
@@ -155,7 +159,12 @@ assert(loads > 0)
 assert(world["8,16,1"] == nil, "structure block not removed")
 assert(world["8,14,1"] == nil and world["8,15,1"] == nil, "ground beside the structure untouched")
 assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air", "footprint cut to the pad")
+-- The ground beside it was smoothed to 12, so the lid is 10..12 with grass on top.
+assert(world["13,12,1"] == "mcl_core:dirt_with_grass" and world["13,11,1"] == "mcl_core:dirt"
+	and world["13,10,1"] == "mcl_core:dirt", "shaft capped at the rim")
+assert(world["13,9,1"] == nil and world["13,13,1"] == nil, "cavity left open under the lid")
 local joined = table.concat(logs, "\n")
+assert(joined:find("holes: 1 capped", 1, true), "reports the cap")
 assert(joined:find("unloaded blocks skipped", 1, true), "reports skipped blocks")
 
 -- An empty plan falls back to the original.
