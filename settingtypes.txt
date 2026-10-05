@@ -1,0 +1,3 @@
+# Generate villages on smoothed, planned terrain. Turn off to fall back to
+# VoxeLibre's own village generation if something goes wrong.
+living_villages_smooth_villages (Smooth villages) bool true
