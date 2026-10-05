@@ -37,6 +37,7 @@ their jobsite lose it, so vanilla demotes them.
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
 | `village_terrain.lua` | Shared pieces for the village terrain work (#133): village area, one-pass height lookup, emerge-first, column writes, and the installer that replaces `mcl_villages` generator steps. The `living_villages_smooth_villages` setting turns it off |
+| `site_planner.lua` | Replaces `settlements.create_site_plan` with a planner that approves only level sites (#139): footprint spread, neighbor floor difference, no water, rounded-up average floor, at least 8 buildings, church reserved first. Also the `/living_villages_plan` dry run. Install it after `church_site.lua` |
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |
 | `tests/*.lua` | Standalone tests, one per module, that stub the engine. `tests/fixtures/` holds data extracted from VoxeLibre, such as the stock church |
 | `docs/navigation-scenarios.md` | Manual in-game test scenarios |

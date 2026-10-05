@@ -31,6 +31,8 @@ local function footprint(entry, schematics)
 	end
 end
 
+M.footprint = footprint
+
 -- The box around every footprint of a plan, plus `margin` nodes on each side
 -- of x and z. Vertically it runs from `below` under the lowest building base
 -- to `above` over the highest (defaults: foundation depth, and what terraform
