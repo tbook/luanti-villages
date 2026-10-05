@@ -292,9 +292,11 @@ for _, entry in ipairs(planned) do assert(entry.name ~= "church") end
 -- Structures (#141): a site within the margin of one is rejected, and the log
 -- says which node blocked it. The scan is a stub keyed by column.
 local function with_structures(env, columns)
-	env.scan = function(area)
+	env.scan = function(area, strict)
 		env.scanned = (env.scanned or 0) + 1
-		env.scan_area = area
+		env.scan_strict = strict
+		env.scan_areas = env.scan_areas or {}
+		env.scan_areas[#env.scan_areas + 1] = area
 		local scan = {}
 		function scan.at(x, z) local c = columns[x .. "," .. z]; if c then return c.name, c.y end end
 		function scan.find(x0, z0, x1, z1)
@@ -314,7 +316,6 @@ assert(clear, "no structures, no change")
 local portal = with_structures(world(function() return 10 end), {["30,0"] = {name = "mcl_portals:portal_frame", y = 11}})
 logs = {}
 local around, _, sreport = plan(portal)
-assert(portal.scanned == 1, "one scan per village")
 assert(around, "the village wraps around the structure")
 assert(sreport.rejects.structure and sreport.rejects.structure > 0, "sites near it were rejected")
 assert(sreport.structures["mcl_portals:portal_frame"] == sreport.rejects.structure, "and the blocking node is counted")
@@ -329,11 +330,42 @@ for _, line in ipairs(logs) do
 	if line:find("village planned", 1, true) then assert(line:find("structures: mcl_portals:portal_frame=", 1, true), line) end
 end
 assert(logged_block, "the log says what blocked a site")
--- The scan covers the village area around the center's ground.
-local area = portal.scan_area
-assert(area.minp.x == -planner.config.structure_half and area.maxp.x == planner.config.structure_half)
-assert(area.minp.y == 10 - planner.config.structure_below and area.maxp.y == 10 + planner.config.structure_above,
-	"the scan is vertical about the ground, " .. area.minp.y .. " to " .. area.maxp.y)
+-- Tiles are scanned lazily and over the center's ground; a dry run is not strict.
+local tile = planner.config.structure_tile
+assert(portal.scanned > 1, "the scan is in tiles")
+local seen_tile = {}
+for _, area in ipairs(portal.scan_areas) do
+	assert(area.maxp.x - area.minp.x + 1 == tile and area.minp.x % tile == 0, "tiles lie on the grid")
+	assert(area.minp.y == 10 - planner.config.structure_below and area.maxp.y == 10 + planner.config.structure_above,
+		"the scan is vertical about the ground, " .. area.minp.y .. " to " .. area.maxp.y)
+	local key = area.minp.x .. "," .. area.minp.z
+	assert(not seen_tile[key], "each tile is scanned once")
+	seen_tile[key] = true
+end
+assert(portal.scan_strict == true, "a real plan treats unloaded columns as blocked")
+local dry_run = with_structures(world(function() return 10 end), {})
+dry_run.wait = false
+plan(dry_run)
+assert(dry_run.scan_strict == false, "a dry run can't wait for chunks, so it is not strict")
+
+-- A structure far from the center, beyond where the planner first scanned, still
+-- blocks a site after the belltower relocates: flat ground only at x >= 30 puts
+-- the hall at (32,0) and a house at x=94..102 (seed 66).
+local far = with_structures(world(function(x) return x >= 30 and 10 or nil end),
+	{["102,-3"] = {name = "mcl_core:cobble", y = 11}})
+local far_plan = plan(far, 66)
+assert(far_plan, "a village still forms")
+for _, entry in ipairs(far_plan) do
+	local x0, z0, x1, z1 = box(entry, far)
+	assert(not (102 >= x0 - margin and 102 <= x1 + margin and -3 >= z0 - margin and -3 <= z1 + margin),
+		entry.name .. " at " .. entry.pos.x .. "," .. entry.pos.z .. " cuts through the far structure")
+end
+local reached
+for _, area in ipairs(far.scan_areas) do
+	if area.minp.x <= 102 and area.maxp.x >= 102 and area.minp.z <= -3 and area.maxp.z >= -3 then reached = true end
+end
+assert(reached, "the tile holding the far structure was scanned")
+
 -- A center inside a structure builds no village.
 local inside = with_structures(world(function() return 10 end), {["0,0"] = {name = "mcl_core:cobble", y = 12}})
 logs = {}

@@ -21,10 +21,12 @@ M.config = {
 
 -- Natural nodes that are not ground content, so they are not structures: trunks,
 -- leaves, plants, liquids, snow and ice, and the odd natural block, by group or
--- by a substring of the name (matched as settlements.find_surface does).
+-- by a substring of the name (matched as settlements.find_surface does). Not the
+-- broad `deco_block` group: fences, walls and chests, which structures are
+-- full of, are in it too.
 local NATURAL_GROUPS = {"tree", "leaves", "leafdecay", "plant", "flora", "flower", "sapling",
-	"deco_block", "vines", "snow", "ice", "water", "lava"}
-local NATURAL_WORDS = {"bedrock", "kelp", "seagrass", "coral", "lily", "mushroom", "bamboo",
+	"vines", "snow", "ice", "water", "lava"}
+local NATURAL_WORDS = {"bedrock", "kelp", "seagrass", "coral", "lily", "mushroom", "mangrove", "propagule", "bamboo",
 	"vine", "cactus", "snow", "ice", "tree", "leaves", "obsidian"}
 
 -- Whether a node is part of a structure: its definition says it is not ground
@@ -62,8 +64,10 @@ end
 -- Read the area once, with a single VoxelManip pass, and return a map of its
 -- structure columns: at(x, z) -> name, y of the first structure node found in
 -- the column, and find(x0, z0, x1, z1) -> name, x, y, z of one in that
--- rectangle. Unloaded nodes count as no structure.
-function M.scan_structures(area, test, engine)
+-- rectangle. A column with unloaded nodes and no structure counts as a structure
+-- named "unloaded" when `strict` is set, because the planner can't call it clear;
+-- otherwise unloaded nodes count as no structure.
+function M.scan_structures(area, test, engine, strict)
 	engine = engine or core
 	test = test or M.structure_test(engine)
 	local vm = engine.get_voxel_manip()
@@ -82,14 +86,23 @@ function M.scan_structures(area, test, engine)
 	local columns, count = {}, 0
 	for z = area.minp.z, area.maxp.z do
 		for x = area.minp.x, area.maxp.x do
+			local unloaded
 			for y = area.maxp.y, area.minp.y, -1 do
 				local id = data[va:index(x, y, z)]
-				if is_structure(id) then
+				if id == engine.CONTENT_IGNORE then
+					unloaded = unloaded or y
+				elseif is_structure(id) then
 					columns[z] = columns[z] or {}
 					columns[z][x] = {name = engine.get_name_from_content_id(id), y = y}
 					count = count + 1
+					unloaded = nil
 					break
 				end
+			end
+			if unloaded and strict then
+				columns[z] = columns[z] or {}
+				columns[z][x] = {name = "unloaded", y = unloaded}
+				count = count + 1
 			end
 		end
 	end

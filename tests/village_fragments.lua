@@ -4,7 +4,7 @@ minetest = {get_modpath = function() return "." end}
 
 local names = {"air", "mcl_core:stone", "mcl_core:tree", "mcl_core:leaves", "mcl_core:water_source",
 	"mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:cobble", "mcl_nether:obsidian_x",
-	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x"}
+	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local registered = {
@@ -18,7 +18,8 @@ local registered = {
 	["mcl_core:bedrock"] = {is_ground_content = false},
 	["mcl_core:cobble"] = {is_ground_content = false},
 	["mcl_portals:portal_frame"] = {is_ground_content = false},
-	["mcl_chests:chest"] = {is_ground_content = false},
+	["mcl_chests:chest"] = {is_ground_content = false, groups = {deco_block = 1, container = 2}},
+	["mcl_fences:fence"] = {is_ground_content = false, groups = {deco_block = 1, fence = 1}},
 	["mcl_core:vine_x"] = {is_ground_content = false},
 }
 
@@ -98,10 +99,32 @@ for _, name in ipairs({"air", "mcl_core:stone", "mcl_core:dirt", "mcl_core:tree"
 		"mcl_core:water_source", "mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:vine_x", "unknown:node"}) do
 	assert(not test(name), name .. " is not a structure")
 end
-for _, name in ipairs({"mcl_core:cobble", "mcl_portals:portal_frame", "mcl_chests:chest"}) do
+for _, name in ipairs({"mcl_core:cobble", "mcl_portals:portal_frame", "mcl_chests:chest", "mcl_fences:fence"}) do
 	assert(test(name), name .. " is a structure")
 end
 assert(fragments.structure_test(e, {"cobble"})("mcl_core:cobble") == false, "extra whitelist words")
+
+-- Unloaded columns: clear unless strict, when they count as blocked.
+map = {}
+local ignoring = engine()
+local plain_get = ignoring.get_voxel_manip
+ignoring.get_voxel_manip = function()
+	local vm = plain_get()
+	local plain_data = vm.get_data
+	function vm:get_data()
+		local data = plain_data(vm)
+		local va = VoxelArea:new({MinEdge = {x = -20, y = 0, z = -20}, MaxEdge = {x = 20, y = 10, z = 20}})
+		-- everything at x >= 5 is unloaded
+		for z = -20, 20 do for y = 0, 10 do for x = 5, 20 do data[va:index(x, y, z)] = 99 end end end
+		return data
+	end
+	return vm
+end
+local loose = fragments.scan_structures(box(-20, 0, -20, 20, 10, 20), test, ignoring)
+assert(loose.count == 0 and loose.find(-20, -20, 20, 20) == nil, "unloaded is clear when not strict")
+local strict = fragments.scan_structures(box(-20, 0, -20, 20, 10, 20), test, ignoring, true)
+assert(strict.at(10, 0) == "unloaded" and strict.at(0, 0) == nil, "unloaded columns block when strict")
+assert(strict.find(-20, -20, 4, 20) == nil)
 
 -- Scan: finds structure columns in one read, and ignores natural nodes.
 map = {}
@@ -110,6 +133,7 @@ put(5, 3, 5, "mcl_core:water_source")
 put(10, 2, 10, "mcl_portals:portal_frame")
 put(10, 4, 10, "mcl_core:cobble")
 put(11, 4, 10, "mcl_chests:chest")
+reads = 0
 local scan = fragments.scan_structures(box(-20, 0, -20, 20, 10, 20), test, e)
 assert(reads == 1, "one VoxelManip pass")
 assert(scan.count == 2, "two structure columns, got " .. scan.count)

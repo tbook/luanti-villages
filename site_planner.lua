@@ -38,8 +38,8 @@ M.config = {
 	height_above = 50, -- samples start this far above the belltower's ground
 	water_scan = 150, -- how far down a column is searched for its top node
 	structure_margin = 4, -- a site stays this far from a structure
-	structure_half = 100, -- the structure scan covers this far from the center in x and z
-	structure_below = 20, structure_above = 40, -- and this far under and over the center's ground
+	structure_tile = 16, -- structures are scanned in tiles this wide, as candidates reach them
+	structure_below = 20, structure_above = 40, -- each this far under and over the center's ground
 }
 
 local function shuffle(list, pr)
@@ -71,8 +71,8 @@ end
 -- Plans one village. `env` has: settlements (find_surface, check_distance,
 -- schematic_table), get_node, registered_nodes, get_chunk_number, log, and
 -- `wait` (false to never wait for unloaded chunks, as the dry-run command does).
--- `scan(area)` (optional) returns village_fragments.scan_structures' result for
--- the area; without it structures are not avoided.
+-- `scan(area, strict)` (optional) returns village_fragments.scan_structures'
+-- result for the area; without it structures are not avoided.
 -- Returns the settlement_info, or false and a reason, and then a report
 -- {rejects = {reason = count}, structures = {node name = count}, center = pos}.
 function M.plan(maxp, minp, pr, env, config)
@@ -98,6 +98,11 @@ function M.plan(maxp, minp, pr, env, config)
 		chunks[number] = true
 		return settlements.find_surface(pos, first and wait or nil)
 	end
+	-- Makes sure the chunk holding pos is generated (the first look at a chunk waits
+	-- for it), so a structure scan of it is final.
+	local function ensure_chunk(pos)
+		if not chunks[env.get_chunk_number(pos)] then find_surface(pos) end
+	end
 
 	-- Samples start above the center's ground, or at the top of the chunk when
 	-- the center has none (water, or no surface material).
@@ -105,17 +110,39 @@ function M.plan(maxp, minp, pr, env, config)
 	local center_surface = find_surface(center)
 	local start_y = center_surface and center_surface.y + config.height_above or center.y
 
-	-- Structures, scanned once over the whole village area around the center's
-	-- ground (the chunk's middle when the center has none).
+	-- Structures, scanned a tile at a time when a candidate first reaches it: the
+	-- village runs past the mapchunk VoxelManip can see, and the chunks beyond are
+	-- generated as the planning looks at them. Tiles span the center's ground (the
+	-- chunk's middle when the center has none) and what is under and over it.
 	local structures
 	if env.scan then
 		local ground = center_surface and center_surface.y or center.y - config.height_above
-		structures = env.scan({
-			minp = {x = center.x - config.structure_half, y = ground - config.structure_below,
-				z = center.z - config.structure_half},
-			maxp = {x = center.x + config.structure_half, y = ground + config.structure_above,
-				z = center.z + config.structure_half},
-		})
+		local size, tiles = config.structure_tile, {}
+		local function tile(tx, tz)
+			local key = tx .. "," .. tz
+			if not tiles[key] then
+				local x0, z0 = tx * size, tz * size
+				ensure_chunk({x = x0 + math.floor(size / 2), y = start_y, z = z0 + math.floor(size / 2)})
+				tiles[key] = env.scan({
+					minp = {x = x0, y = ground - config.structure_below, z = z0},
+					maxp = {x = x0 + size - 1, y = ground + config.structure_above, z = z0 + size - 1},
+				}, wait)
+			end
+			return tiles[key]
+		end
+		structures = {}
+		function structures.at(x, z)
+			return tile(math.floor(x / size), math.floor(z / size)).at(x, z)
+		end
+		function structures.find(x0, z0, x1, z1)
+			for tz = math.floor(z0 / size), math.floor(z1 / size) do
+				for tx = math.floor(x0 / size), math.floor(x1 / size) do
+					local name, x, y, z = tile(tx, tz).find(math.max(x0, tx * size), math.max(z0, tz * size),
+						math.min(x1, tx * size + size - 1), math.min(z1, tz * size + size - 1))
+					if name then return name, x, y, z end
+				end
+			end
+		end
 		local name, sy = structures.at(center.x, center.z)
 		if name then
 			env.log("action", "[living_villages] no village at " .. core.pos_to_string(center)
@@ -323,7 +350,7 @@ local function live_env(globals, wait)
 		registered_nodes = core.registered_nodes,
 		get_chunk_number = globals.mcl_vars.get_chunk_number,
 		log = core.log,
-		scan = function(area) return fragments.scan_structures(area, structure_test, core) end,
+		scan = function(area, strict) return fragments.scan_structures(area, structure_test, core, strict) end,
 		wait = wait,
 	}
 end
