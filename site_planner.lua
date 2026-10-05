@@ -97,26 +97,18 @@ function M.plan(maxp, minp, pr, env, config)
 	-- the column is not buildable. Water is the top of the column, which
 	-- find_surface walks past to the bed.
 	local samples = {}
-	local function top_is_liquid(x, z)
-		for y = start_y, start_y - config.water_scan, -1 do
-			local def = env.registered_nodes[env.get_node({x = x, y = y, z = z}).name]
-			if def then
-				if (def.liquidtype or "none") ~= "none" then return true end
-				if def.walkable then return false end
-			end
-		end
-		return false
-	end
-	-- find_surface refuses ground with leaves directly above it, so a column
-	-- under a canopy has no surface; terraform clears trees, so take the
-	-- ground below the leaves and trunks if it is a surface material.
-	local function ground_under_trees(x, z)
+	-- The top of a column as terraform will find it: the first liquid or solid
+	-- node below the start, skipping leaves and trunks, which it clears.
+	-- Returns y, name and whether it is liquid; nil if the column is open.
+	local function column_top(x, z)
 		for y = start_y, start_y - config.water_scan, -1 do
 			local name = env.get_node({x = x, y = y, z = z}).name
 			local def = env.registered_nodes[name]
-			if def and def.walkable and not name:find("leaves", 1, true) and not name:find("tree", 1, true) then
-				if settlements.surface_mat[name] then return {x = x, y = y, z = z}, name end
-				return nil
+			if def then
+				if (def.liquidtype or "none") ~= "none" then return y, name, true end
+				if def.walkable and not name:find("leaves", 1, true) and not name:find("tree", 1, true) then
+					return y, name, false
+				end
 			end
 		end
 	end
@@ -125,13 +117,17 @@ function M.plan(maxp, minp, pr, env, config)
 		local s = samples[key]
 		if s then return s end
 		local surface, material = find_surface({x = x, y = start_y, z = z})
-		if not surface then surface, material = ground_under_trees(x, z) end
-		if top_is_liquid(x, z) then
+		local top_y, top_name, liquid = column_top(x, z)
+		if liquid then
 			s = {reason = "water"}
-		elseif not surface then
-			s = {reason = "no_surface"}
 		else
-			s = {y = surface.y, material = material}
+			-- find_surface refuses ground with leaves directly above it, so a
+			-- column under a canopy has no surface; take the ground below the
+			-- leaves if it is a surface material.
+			if not surface and top_y and settlements.surface_mat[top_name] then
+				surface, material = {y = top_y}, top_name
+			end
+			s = surface and {y = surface.y, material = material} or {reason = "no_surface"}
 		end
 		samples[key] = s
 		return s
@@ -307,6 +303,7 @@ function M.install(globals, engine)
 		needs = {
 			"settlements.find_surface", "settlements.check_distance", "settlements.terraform",
 			{"settlements.schematic_table", type = "table"},
+			{"settlements.surface_mat", type = "table"},
 			{"max_height_difference", type = "number"},
 			"mcl_vars.get_chunk_number",
 		},

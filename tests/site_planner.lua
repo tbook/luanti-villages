@@ -241,6 +241,32 @@ planned = plan(canopy)
 assert(planned and planned[1].pos.y == 10, "ground under a canopy is a surface")
 assert(not planned.rejects)
 
+-- Canopy over water: water under the leaves still rejects the site. Grass at
+-- y=10, water at 11-12 and leaves at 15 over the pond, as the reviewer reproduced.
+local flooded = world(function() return 10 end)
+local plain_flooded_node = flooded.get_node
+flooded.get_node = function(pos)
+	if pond(pos.x, pos.z) then
+		if pos.y == 11 or pos.y == 12 then return {name = "mcl_core:water_source"} end
+		if pos.y == 15 then return {name = "mcl_core:leaves"} end
+		if pos.y > 12 then return {name = "air"} end
+	end
+	return plain_flooded_node(pos)
+end
+local flooded_find = flooded.settlements.find_surface
+flooded.settlements.find_surface = function(pos, wait) -- grass under the leaves, as find_surface finds it past the water
+	return {x = pos.x, y = 10, z = pos.z}, "mcl_core:dirt_with_grass"
+end
+planned = assert(plan(flooded, 6))
+for _, entry in ipairs(planned) do
+	local x0, z0, x1, z1 = box(entry, flooded)
+	for _, x in ipairs({x0, math.floor((x0 + x1) / 2), x1}) do
+		for _, z in ipairs({z0, math.floor((z0 + z1) / 2), z1}) do
+			assert(not pond(x, z), "no flooded sample under a canopy: " .. entry.name)
+		end
+	end
+end
+
 -- No surface at the center.
 failed, reason = plan(world(function() return nil end))
 assert(failed == false and reason:find("belltower", 1, true) and reason:find("no_surface", 1, true))
@@ -296,6 +322,8 @@ expect_vanilla(function(gl) gl.max_height_difference = nil end, "max_height_diff
 expect_vanilla(function(gl) gl.mcl_vars = {} end, "get_chunk_number")
 expect_vanilla(function(gl) gl.settlements.schematic_table = {{name = "belltower"}} end, "declined")
 expect_vanilla(function(gl) gl.settlements.schematic_table = nil end, "schematic_table")
+expect_vanilla(function(gl) gl.settlements.surface_mat = nil end, "surface_mat")
+expect_vanilla(function(gl) gl.settlements.surface_mat = function() end end, "surface_mat")
 expect_vanilla(function(gl) gl.settlements = nil end, "settlements")
 
 print("site_planner ok")
