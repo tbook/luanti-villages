@@ -21,6 +21,7 @@
 -- workarounds a deletion.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local music = dofile(core.get_modpath("living_villages") .. "/music.lua")
 local S = core.get_translator and core.get_translator("living_villages") or function(message) return message end
 local JUKEBOX = "mcl_jukebox:jukebox"
 local BASE_PROFESSION = "butcher"
@@ -187,6 +188,7 @@ local function staff(self)
 	if not jukebox or not pos then return end
 	if vector.distance(pos, jukebox) < STAFF_DISTANCE then
 		self.order = "work"
+		music.tick(self, jukebox)
 		return
 	end
 	if self.order == "work" then self.order = nil end
