@@ -43,6 +43,7 @@ if [ -n "$chunk" ]; then label=$seed@$(echo "$chunk" | tr ',' '_'); fi
 if [ "$with_mod" = 1 ]; then label=$label-mod; fi
 world=$work/world_$label
 rm -rf "$world"
+rm -f "$results/$label.jsonl"
 mkdir -p "$world/worldmods" "$results"
 cp -R "$here/mod/lv_probe" "$world/worldmods/lv_probe"
 cp "$mod_root/village_index.lua" "$world/worldmods/lv_probe/village_index.lua"
@@ -103,7 +104,13 @@ while kill -0 "$server" 2> /dev/null; do
 		break
 	fi
 done
-wait "$server" 2> /dev/null || true
-
-if [ -f "$world/lv_probe.jsonl" ]; then cp "$world/lv_probe.jsonl" "$results/$label.jsonl"; fi
+status=0
+wait "$server" 2> /dev/null || status=$?
 grep -h "\[lv_probe\]\|ERROR\[" "$log" | sed 's/^[^[]*//' || true
+
+# Publish only a run that finished: the probe writes the marker after its last site.
+if [ ! -f "$world/lv_probe.done" ] || [ ! -f "$world/lv_probe.jsonl" ]; then
+	echo "run $label did not finish (server status $status); see $log" >&2
+	exit 1
+fi
+cp "$world/lv_probe.jsonl" "$results/$label.jsonl"

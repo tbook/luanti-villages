@@ -70,7 +70,7 @@ One JSON line per site, and `report.sh` prints the main columns.
 | `structures` | ruined portals, outposts and so on placed within 15 nodes of the village area |
 | `ms` | milliseconds in `create_site_plan`, `terraform`, `paths`, and until the last schematic was placed. The surroundings are generated beforehand, so this is the generator's own work |
 
-The area is the buildings' bounding box plus 8 nodes on each side. "Ground" is the topmost walkable
+The area is the buildings' bounding box plus 8 nodes on each side, scanned from 96 above the highest floor and raised in steps of 64 while any column is still solid at the top (`clipped_columns` in the result counts what the last scan found). "Ground" is the topmost walkable
 node in a column that is not a tree or leaves, so a ruined portal or an outpost counts as ground
 (`structures` says when one is near). #141 and #142 may sharpen the definitions of
 `traps` and `orphans`; if they do, change `metrics.lua` and the baselines in the catalog together.

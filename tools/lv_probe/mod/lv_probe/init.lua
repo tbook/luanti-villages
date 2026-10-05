@@ -70,7 +70,7 @@ end
 
 -- Reads the map once and returns the ground map, the columns with water over
 -- them, tree counts, and the data needed to find leaves without a trunk.
-local function read_terrain(area)
+local function scan_terrain(area)
 	local vm = core.get_voxel_manip()
 	local emin, emax = vm:read_from_map({x = area.x1, y = area.y1, z = area.z1},
 		{x = area.x2, y = area.y2, z = area.z2})
@@ -78,11 +78,13 @@ local function read_terrain(area)
 	local data = vm:get_data()
 	local ground, wet = {}, {}
 	local leaves, trunks, canopy_columns, unknown = {}, {}, 0, 0
-	local columns = 0
+	local columns, clipped = 0, 0
 	for x = area.x1, area.x2 do
 		ground[x] = {}
 		for z = area.z1, area.z2 do
 			columns = columns + 1
+			local top = kind_of(data[va:index(x, area.y2, z)])
+			if top ~= "air" and top ~= "ignore" and top ~= "passable" then clipped = clipped + 1 end
 			local covered, sees_water = false, false
 			local found
 			for y = area.y2, area.y1, -1 do
@@ -102,7 +104,23 @@ local function read_terrain(area)
 		end
 	end
 	return {ground = ground, wet = wet, leaves = leaves, trunks = trunks,
-		columns = columns, unknown = unknown, canopy_columns = canopy_columns}
+		columns = columns, unknown = unknown, canopy_columns = canopy_columns, clipped = clipped}
+end
+
+-- A column whose topmost scanned node is already solid may continue above the
+-- scan, so raise the ceiling until none does. The area keeps the raised ceiling
+-- for the later read.
+local EXTEND_BY, MAX_EXTENSIONS = 64, 8
+local function read_terrain(area)
+	local terrain = scan_terrain(area)
+	local extensions = 0
+	while terrain.clipped > 0 and extensions < MAX_EXTENSIONS do
+		area.y2 = area.y2 + EXTEND_BY
+		extensions = extensions + 1
+		terrain = scan_terrain(area)
+	end
+	if terrain.clipped > 0 then log("warning: terrain still clipped at y=" .. area.y2) end
+	return terrain
 end
 
 -- Leaves with no trunk within reach: what is left when a building clears a
@@ -151,6 +169,7 @@ local function terrain_report(terrain, info, footprints)
 		heights = metrics.height_range(terrain.ground),
 		steps = metrics.steps(terrain.ground, footprints),
 		unknown_columns = terrain.unknown,
+		clipped_columns = terrain.clipped,
 		canopy_cover = terrain.columns > 0 and math.floor(100 * terrain.canopy_columns / terrain.columns) / 100 or 0,
 		trunk_nodes = #terrain.trunks,
 		leaf_nodes = #terrain.leaves,
@@ -381,6 +400,8 @@ local function visit(site, on_done)
 end
 
 core.after(2, function()
+	local created = io.open(RESULT_FILE, "a") -- a seed with no sites still leaves a file
+	if created then created:close() end
 	local sites = index.predicted_sites({x = 0, y = 0, z = 0}, index.low32(seed), {}, nil)
 	local within, queue = {}, {}
 	for _, site in ipairs(sites) do

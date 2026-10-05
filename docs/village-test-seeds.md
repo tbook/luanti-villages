@@ -47,7 +47,7 @@ Chunk is the chunk's minimum x and z. Center is the belltower's position.
 | flat | 2022 | -832, -1872 | -793, 2, -1833 | Swampland | Control. 21 buildings with a church and a tavern, on ground that varies by 14 over the whole area. Nothing should get worse here |
 | flat-small | 2023 | -1152, 528 | -1113, 14, 567 | Savanna | Control. Level grassland, 13 buildings, no tavern. The fastest case |
 | snow-flat | 2005 | -1392, -832 | -1353, 7, -793 | ColdTaiga | Snow surface (`mcl_core:snow`, so `place_schematics` swaps in spruce wood) on level ground |
-| snow-steep | 2006 | -512, -2192 | -473, 11, -2153 | IcePlains | Snow surface under slopes 125 blocks high, with the floors only 10 apart |
+| snow-steep | 2006 | -512, -2192 | -473, 11, -2153 | IcePlains | Snow surface under slopes 132 blocks high, with the floors only 10 apart |
 | desert | 2002 | 128, 928 | 167, 11, 967 | Desert | Sand surface, with a church and a tavern |
 | mesa | 2017 | -912, -1712 | -873, 4, -1673 | MesaPlateauF_sandlevel | Red sand surface on a mesa |
 
@@ -76,7 +76,7 @@ Steps>1, Traps and Orphans after the build. `ms` is the time in the four generat
 | flat | 21 | CT | 8 | 7 | 14 | 0 | 1 | 4 | 24% | 356 | 3 | 8 | 5 | 64 | 299 |
 | flat-small | 13 | -- | 7 | 5 | 8 | 1 | 3 | 1 | 4% | 97 | 1 | 0 | 0 | 6 | 108 |
 | snow-flat | 13 | -T | 4 | 3 | 7 | 0 | 3 | 0 | 41% | 675 | 2 | 2 | 0 | 102 | 125 |
-| snow-steep | 20 | CT | 10 | 10 | 125 | 16 | 19 | 93 | 0% | 29 | 80 | 917 | 6 | 0 | 202 |
+| snow-steep | 20 | CT | 10 | 10 | 132 | 16 | 19 | 93 | 0% | 30 | 80 | 958 | 6 | 0 | 246 |
 | desert | 21 | CT | 19 | 10 | 40 | 1 | 4 | 4 | 1% | 31 | 12 | 134 | 0 | 0 | 284 |
 | mesa | 21 | -T | 11 | 5 | 22 | 9 | 8 | 3 | 0% | 0 | 9 | 20 | 9 | 0 | 266 |
 
@@ -96,12 +96,12 @@ nodes (`tools/lv_probe/survey.sh 2001 2030`). #139 quotes its yield against this
 | plan failed (no surface at the center) | 39 |
 | rejected as too uneven (`max_height_difference` 56) | 5 |
 | buildings per built village | 16 |
-| with a church | 41.9% |
-| with a tavern | 87.9% |
+| with a church | 43.8% |
+| with a tavern | 88.3% |
 | floor range, median | 8 |
 | neighbor floor difference, median | 6 |
 | largest step between columns, median | 18 |
-| villages with at least one trapped column | 66.8% |
+| villages with at least one trapped column | 66.4% |
 
 The church share is for plain vanilla. #132 changed it for villages built with `living_villages`.
 
