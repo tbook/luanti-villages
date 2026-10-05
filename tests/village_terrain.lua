@@ -4,7 +4,7 @@ local function vec(x, y, z) return {x = x, y = y, z = z} end
 
 -- Node ids for a few materials.
 local names = {"air", "mcl_core:stone", "mcl_core:dirt", "mcl_core:dirt_with_grass", "mcl_core:water_source",
-	"mcl_core:tree", "mcl_core:leaves", "mcl_core:sand", "mcl_flowers:tallgrass"}
+	"mcl_core:tree", "mcl_core:leaves", "mcl_core:sand", "mcl_flowers:tallgrass", "mcl_core:snow"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local ignore_id = 99
@@ -14,13 +14,13 @@ local registered = {
 	["mcl_core:dirt_with_grass"] = {walkable = true}, ["mcl_core:sand"] = {walkable = true},
 	["mcl_core:tree"] = {walkable = true}, ["mcl_core:leaves"] = {walkable = true},
 	["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
-	["mcl_flowers:tallgrass"] = {walkable = false},
+	["mcl_flowers:tallgrass"] = {walkable = false}, ["mcl_core:snow"] = {walkable = true},
 }
 
 -- A fake map: flat grass at y=10, a hill (top 14) at x=3..4, a shaft down to a
 -- cave floor at y=4 at x=6, a pond (water to y=10, bed at 7) at x=8, a tree
 -- (trunk to 13, leaves at 14) at x=10, a tall-grass tuft on top of x=1,
--- and an unloaded column at x=12.
+-- snow on x=2 at y=11, leaves under the grass at x=5, and an unloaded column at x=12.
 local map = {}
 local function node(x, y, z)
 	if x == 12 then return "ignore" end
@@ -43,6 +43,12 @@ local function node(x, y, z)
 		if y > 14 then return "air" end
 	end
 	if x == 1 and y == 11 then return "mcl_flowers:tallgrass" end
+	if x == 2 and y == 11 then return "mcl_core:snow" end
+	if x == 5 then
+		if y == 10 then return "mcl_core:dirt_with_grass" end
+		if y == 9 then return "mcl_core:leaves" end
+		if y == 8 then return "mcl_core:dirt_with_grass" end
+	end
 	if y > top then return "air" end
 	if y == top then return "mcl_core:dirt_with_grass" end
 	if y > top - 3 then return "mcl_core:dirt" end
@@ -133,13 +139,28 @@ assert(pond.y == 10 and pond.name == "mcl_core:water_source" and pond.liquid, "p
 assert(pond.surface_y == nil, "a pond bed is no surface: water above it, as find_surface sees it")
 local tree = lookup(10, 0)
 assert(tree.y == 14 and tree.name == "mcl_core:leaves" and not tree.liquid, "tree top is its leaves")
-assert(tree.surface_y == nil, "no surface under a trunk")
+assert(tree.surface_y == 10 and tree.material == "mcl_core:dirt_with_grass",
+	"grass under a trunk is a surface, as find_surface accepts a tree above it")
 local tuft = lookup(1, 0)
 assert(tuft.y == 10 and tuft.surface_y == 10, "a plant is not solid and is open space above the surface")
+local snow = lookup(2, 0)
+assert(snow.y == 11 and snow.surface_y == 10, "snow above a surface is accepted")
+local canopy = lookup(5, 0)
+assert(canopy.y == 10 and canopy.surface_y == nil, "grass with leaves below it is no surface")
 assert(lookup(50, 50) == nil and lookup(0, 5) == nil, "outside the area")
 
 local failed, why = terrain.heights({minp = vec(10, 0, 0), maxp = vec(13, 20, 1)}, surface)
 assert(failed == nil and why:find("unloaded"), "unloaded area refuses to read")
+
+-- A block below the surface that was never loaded still fails the read.
+local saved = node
+node = function(x, y, z)
+	if x == 0 and y == 0 then return "ignore" end
+	return saved(x, y, z)
+end
+local partial, partial_why = terrain.heights({minp = vec(0, 0, 0), maxp = vec(1, 20, 1)}, surface)
+assert(partial == nil and partial_why:find("(0,0,0)", 1, true), "ignore under a valid surface is caught")
+node = saved
 
 -- Emerge first.
 local result
@@ -206,6 +227,15 @@ stays(env, {replacement("create_site_plan", {"mcl_vars.get_node"})}, "mcl_vars.g
 env = new_env()
 stays(env, {replacement("create_site_plan"), {target = "terraform", make = function() end}}, "declined")
 stays({}, {replacement("terraform")}, "settlements table")
+env = new_env()
+env.settlements.surface_mat = {["mcl_core:sand"] = true}
+assert(terrain.install(env, {replacement("terraform", {{"settlements.surface_mat", type = "table"}})}, engine),
+	"a table need is satisfied by a table")
+env = new_env()
+stays(env, {replacement("terraform", {{"settlements.surface_mat", type = "table"}})}, "settlements.surface_mat")
+env = new_env()
+env.settlements.surface_mat = function() end
+stays(env, {replacement("terraform", {{"settlements.surface_mat", type = "table"}})}, "not a table")
 setting = false
 env = new_env()
 stays(env, {replacement("terraform")}, "is off")

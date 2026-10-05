@@ -85,9 +85,15 @@ function M.emerge(area, done, engine)
 	engine.emerge_area(area.minp, area.maxp, callback)
 end
 
-local function is_surface_above(def)
-	-- find_surface wants air or a plant above: nothing solid, nothing liquid
-	return not def or (not def.walkable and (def.liquidtype or "none") == "none")
+-- What settlements.find_surface (mcl_villages/utils.lua) accepts above a
+-- surface node, matched by substring on the node name as it does: air, a
+-- plant, a tree (a trunk standing on it still counts) or snow.
+local OPEN_ABOVE = {"air", "fern", "flower", "bush", "tree", "grass", "snow"}
+local function open_above(name)
+	for _, word in ipairs(OPEN_ABOVE) do
+		if name:find(word, 1, true) then return true end
+	end
+	return false
 end
 
 -- Read the area once, with a single VoxelManip pass, and return
@@ -95,9 +101,9 @@ end
 -- - y, name: the top solid or liquid node of the column, whatever its material
 --   (a tree's leaves, a cave floor under an open shaft, the water of a pond)
 -- - liquid: whether that top node is liquid
--- - surface_y, material: the highest node in settlements.surface_mat with
---   open space above it, as find_surface reports it, or nil where the column
---   has none (a shaft, a pond bed, ground under a tree trunk)
+-- - surface_y, material: the highest node in settlements.surface_mat that
+--   find_surface would accept: air, a plant, a trunk or snow above it, and no
+--   leaves below it. nil where the column has none (a shaft, a pond bed)
 -- Returns nil and a reason if any of the area is still unloaded, because the
 -- column tops would then be wrong; emerge first.
 function M.heights(area, surface_materials, engine)
@@ -111,14 +117,16 @@ function M.heights(area, surface_materials, engine)
 	local function trait(id)
 		local t = traits[id]
 		if not t then
-			local def = engine.registered_nodes[engine.get_name_from_content_id(id)]
+			local name = engine.get_name_from_content_id(id)
+			local def = engine.registered_nodes[name]
 			local liquid = def and (def.liquidtype or "none") ~= "none" or false
 			t = {
 				def = def,
-				name = engine.get_name_from_content_id(id),
+				name = name,
 				solid_or_liquid = id ~= engine.CONTENT_AIR and (liquid or (def and def.walkable) or false) or false,
 				liquid = liquid,
-				open = is_surface_above(def),
+				open = open_above(name),
+				leaves = name:find("leaves", 1, true) ~= nil,
 			}
 			traits[id] = t
 		end
@@ -130,7 +138,8 @@ function M.heights(area, surface_materials, engine)
 		columns[z] = {}
 		for x = area.minp.x, area.maxp.x do
 			local column = {}
-			local above_open = true
+			-- Every node of the requested volume is checked for ignore, so no
+			-- early exit: a block below the surface may still be unloaded.
 			for y = area.maxp.y, area.minp.y, -1 do
 				local id = data[va:index(x, y, z)]
 				if id == ignore then return nil, "unloaded node at " .. engine.pos_to_string({x = x, y = y, z = z}) end
@@ -138,11 +147,13 @@ function M.heights(area, surface_materials, engine)
 				if not column.y and t.solid_or_liquid then
 					column.y, column.name, column.liquid = y, t.name, t.liquid
 				end
-				if not column.surface_y and surface_materials[t.name] and above_open then
-					column.surface_y, column.material = y, t.name
+				if not column.surface_y and surface_materials[t.name] then
+					local above = y < area.maxp.y and trait(data[va:index(x, y + 1, z)]) or nil
+					local below = y > area.minp.y and trait(data[va:index(x, y - 1, z)]) or nil
+					if (not above or above.open) and not (below and below.leaves) then
+						column.surface_y, column.material = y, t.name
+					end
 				end
-				above_open = t.open
-				if column.y and column.surface_y then break end
 			end
 			columns[z][x] = column
 		end
@@ -183,8 +194,10 @@ end
 
 -- The one place that replaces VoxeLibre's generator steps. `replacements` is a
 -- list of {target = "terraform", needs = {...}, make = function(original) ... end}:
--- `target` names a function on the settlements table, `needs` lists the other
--- functions (dotted paths, "settlements.find_surface") or globals it relies on,
+-- `target` names a function on the settlements table, `needs` lists what else it
+-- relies on by dotted path: "settlements.find_surface" must be a function, and
+-- {"settlements.surface_mat", type = "table"} (or any other Lua type) checks a
+-- table or value,
 -- and `make` gets the vanilla function and returns the replacement (or nil to
 -- decline). Nothing is replaced unless every entry can be: with the setting
 -- off, or a target or need missing or not a function, this logs and leaves the
@@ -208,9 +221,11 @@ function M.install(env, replacements, engine)
 		if type(settlements[entry.target]) ~= "function" then
 			return warn("settlements." .. entry.target .. " is missing or not a function")
 		end
-		for _, path in ipairs(entry.needs or {}) do
-			if type(lookup_path(path, env)) ~= "function" then
-				return warn(path .. " (needed by " .. entry.target .. ") is missing or not a function")
+		for _, need in ipairs(entry.needs or {}) do
+			local path, want = need, "function"
+			if type(need) == "table" then path, want = need[1], need.type end
+			if type(lookup_path(path, env)) ~= want then
+				return warn(path .. " (needed by " .. entry.target .. ") is missing or not a " .. want)
 			end
 		end
 		made[i] = entry.make(settlements[entry.target])
