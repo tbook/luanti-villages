@@ -53,6 +53,10 @@ settings produces the same terrain and a village at the same chunk, laid out the
 repeatability limits in the catalog. The probe sets
 `fixed_map_seed` and `mg_name = v7` and nothing else about the mapgen.
 
+`tools/lv_probe/check_terrain.sh` is a separate, short check for `village_terrain.lua` (#143): on a fresh
+world it reads an ungenerated area before and after `village_terrain.emerge`, and expects the first to be
+refused and the second to succeed.
+
 ## What it reports
 
 One JSON line per site, and `report.sh` prints the main columns.

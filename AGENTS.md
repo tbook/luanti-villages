@@ -36,6 +36,7 @@ their jobsite lose it, so vanilla demotes them.
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
+| `village_terrain.lua` | Shared pieces for the village terrain work (#133): village area, one-pass height lookup, emerge-first, column writes, and the installer that replaces `mcl_villages` generator steps. The `living_villages_smooth_villages` setting turns it off |
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |
 | `tests/*.lua` | Standalone tests, one per module, that stub the engine. `tests/fixtures/` holds data extracted from VoxeLibre, such as the stock church |
 | `docs/navigation-scenarios.md` | Manual in-game test scenarios |
