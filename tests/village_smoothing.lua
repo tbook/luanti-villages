@@ -94,17 +94,71 @@ tt = smoothing.targets(small, flat(7), cfg)
 stats = smoothing.apply(small, tt, function() return {y = 7} end, cfg, engine)
 assert(stats.filled > 0 and map[key(1, 10, 1)] == "mcl_core:sand" and map[key(1, 8, 1)] == "mcl_core:sandstone")
 
--- terraform falls back to the original when the area will not load.
-local fell
-local env = {
-	settlements = {schematic_table = schematics, surface_mat = {}},
-	engine = {log = function(_, m) logs[#logs + 1] = m end},
-	original = function() fell = true end,
-	force_node = function() return {name = "ignore"} end,
-	clear_trees = function() error("not reached") end,
+-- terraform on a fake map: flat ground at 14 and a structure block at (8,16,1).
+-- The structure and its neighbors are kept.
+local ids = {air = 1, ["mcl_core:dirt_with_grass"] = 2, struct = 3}
+local names = {"air", "mcl_core:dirt_with_grass", "struct"}
+local IGNORE = 99
+local world = {}
+local function at(x, y, z)
+	if x < -30 then return "ignore" end
+	local k = world[x .. "," .. y .. "," .. z]
+	if k then return k end
+	if x == 8 and y == 16 and z == 1 then return "struct" end
+	return y <= 14 and "mcl_core:dirt_with_grass" or "air"
+end
+VoxelArea = {new = function(_, e)
+	local dx, dy = e.MaxEdge.x - e.MinEdge.x + 1, e.MaxEdge.y - e.MinEdge.y + 1
+	return {index = function(_, x, y, z)
+		return (z - e.MinEdge.z) * dx * dy + (y - e.MinEdge.y) * dx + (x - e.MinEdge.x) + 1
+	end}
+end}
+local fake = {
+	CONTENT_IGNORE = IGNORE, CONTENT_AIR = 1,
+	registered_nodes = {
+		air = {walkable = false}, ["mcl_core:dirt_with_grass"] = {walkable = true},
+		struct = {walkable = true, is_ground_content = false, groups = {}},
+	},
+	get_name_from_content_id = function(id) return names[id] or "ignore" end,
+	pos_to_string = function(p) return ("(%d,%d,%d)"):format(p.x, p.y, p.z) end,
+	log = function(_, m) logs[#logs + 1] = m end,
+	swap_node = function(p, n) world[p.x .. "," .. p.y .. "," .. p.z] = n.name end,
+	get_node = function(p) return {name = at(p.x, p.y, p.z)} end,
+	get_voxel_manip = function()
+		local vm, a, b = {}
+		function vm:read_from_map(x, y) a, b = x, y; return x, y end
+		function vm:get_data()
+			local data, va = {}, VoxelArea:new({MinEdge = a, MaxEdge = b})
+			for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
+				local n = at(x, y, z)
+				data[va:index(x, y, z)] = n == "ignore" and IGNORE or ids[n]
+			end end end
+			return data
+		end
+		return vm
+	end,
 }
-assert(smoothing.terraform(plan_of({0, 0, 10}), nil, env) == false and fell, "fallback on unloaded area")
-fell = nil
+local fragments = dofile("village_fragments.lua")
+local test = fragments.structure_test(fake)
+local fell, loads = nil, 0
+local env = {
+	settlements = {schematic_table = schematics, surface_mat = {["mcl_core:dirt_with_grass"] = true}},
+	engine = fake,
+	original = function() fell = true end,
+	load_node = function(pos) loads = loads + 1; return {name = at(pos.x, pos.y, pos.z)} end,
+	scan = function(area) return fragments.scan_structures(area, test, fake) end,
+	clear_trees = function() end,
+}
+assert(smoothing.terraform(plan_of({0, 0, 10, "mcl_core:dirt_with_grass"}), nil, env) == true and not fell,
+	"smooths without waiting")
+assert(loads > 0)
+assert(world["8,16,1"] == nil, "structure block not removed")
+assert(world["8,14,1"] == nil and world["8,15,1"] == nil, "ground beside the structure untouched")
+assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air", "footprint cut to the pad")
+local joined = table.concat(logs, "\n")
+assert(joined:find("unloaded blocks skipped", 1, true), "reports skipped blocks")
+
+-- An empty plan falls back to the original.
 assert(smoothing.terraform({}, nil, env) == false and fell, "fallback on empty plan")
 
 print("village_smoothing: ok")

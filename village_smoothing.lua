@@ -25,7 +25,7 @@ M.config = {
 	relax_passes = 100, -- limit on slope-limiting sweeps
 	below = 20, above = 24, -- the area reaches this far under the lowest pad and over the highest
 	cut_clear = 3, -- a cut removes this much above the old surface, for whatever stands on it
-	load_timeout = 10000000, -- microseconds to wait for each mapblock to generate
+	structure_margin = 1, -- ground this close to a structure is left alone
 	block = 16,
 }
 
@@ -209,12 +209,12 @@ local function area_of(pads, config)
 	return area
 end
 
--- Waits for every mapblock of the area to be generated and loaded, one probe per
--- block. `force_node(pos, wait_us)` blocks until the node there exists
--- (mcl_vars.get_node does), so unlike async emerge it can be used between
--- planning and placing. Returns false if a block would not load.
+-- Loads the mapblocks of the area that exist, one probe per block, and returns
+-- how many are still missing (ungenerated). It never waits: mcl_vars.get_node
+-- with `force` busy-waits on the server thread, which blocks the mapgen it waits
+-- for, so ground in a missing block is simply left alone.
 function M.load_area(area, config, env)
-	local size = config.block
+	local size, missing = config.block, 0
 	for bz = math.floor(area.minp.z / size), math.floor(area.maxp.z / size) do
 		for by = math.floor(area.minp.y / size), math.floor(area.maxp.y / size) do
 			for bx = math.floor(area.minp.x / size), math.floor(area.maxp.x / size) do
@@ -223,11 +223,11 @@ function M.load_area(area, config, env)
 					y = clamp(by * size, area.minp.y, area.maxp.y),
 					z = clamp(bz * size, area.minp.z, area.maxp.z),
 				}
-				if env.force_node(pos, config.load_timeout).name == "ignore" then return false end
+				if env.load_node(pos).name == "ignore" then missing = missing + 1 end
 			end
 		end
 	end
-	return true
+	return missing
 end
 
 -- Writes the targets. Changed columns go through village_terrain.set_column
@@ -261,7 +261,7 @@ function M.apply(pads, targets, lookup, config, engine)
 end
 
 -- settlements.terraform's replacement. `env` has settlements (schematic_table),
--- force_node, clear_trees, engine, and `original` to fall back on when the area
+-- load_node, scan (optional, village_fragments.scan_structures), clear_trees, engine, and `original` to fall back on when the area
 -- can't be loaded. Returns true if the ground was smoothed.
 function M.terraform(plan, pr, env, config)
 	config = config or M.config
@@ -283,7 +283,7 @@ function M.terraform(plan, pr, env, config)
 		minp = {x = area.minp.x - margin, y = area.minp.y, z = area.minp.z - margin},
 		maxp = {x = area.maxp.x + margin, y = area.maxp.y, z = area.maxp.z + margin},
 	}
-	if not M.load_area(loading, config, env) then return fall_back("the village area did not load") end
+	local missing = M.load_area(loading, config, env)
 
 	local zone = {}
 	for _, p in ipairs(pads) do
@@ -295,23 +295,33 @@ function M.terraform(plan, pr, env, config)
 	end
 	env.clear_trees(zone)
 
-	local lookup, reason = terrain.heights(area, env.settlements.surface_mat, engine)
+	local lookup, reason = terrain.heights(area, env.settlements.surface_mat, engine, true)
 	if not lookup then return fall_back(reason) end
+	-- Structures (ruined portals, outposts) are not terrain: leave them and the
+	-- ground just around them alone. The planner keeps them only a few blocks from
+	-- a footprint, but the smoothing reaches further.
+	local structures = env.scan and env.scan(area)
+	local m = config.structure_margin
+	local function near_structure(x, z)
+		return structures and structures.find(x - m, z - m, x + m, z + m) ~= nil
+	end
 	local targets = M.targets(pads, function(x, z)
 		local column = lookup(x, z)
-		if not column or column.liquid then return nil end
+		if not column or column.liquid or near_structure(x, z) then return nil end
 		return column.surface_y or column.y
 	end, config)
 	local stats = M.apply(pads, targets, lookup, config, engine)
-	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block%s")
-		:format(stats.changed, stats.cut, stats.filled, stats.steepest, targets.violations,
+	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block, %d unloaded blocks skipped%s")
+		:format(stats.changed, stats.cut, stats.filled, stats.steepest, targets.violations, missing,
 			started and (", " .. math.floor((engine.get_us_time() - started) / 1000) .. " ms") or ""))
 	return true
 end
 
+local structure_test
 -- Replaces settlements.terraform (see village_terrain.install for the guard).
 function M.install(globals, engine)
 	engine = engine or core
+	structure_test = fragments.structure_test(engine)
 	return terrain.install(globals, {{
 		target = "terraform",
 		needs = {
@@ -325,7 +335,8 @@ function M.install(globals, engine)
 					settlements = globals.settlements,
 					engine = engine,
 					original = original,
-					force_node = function(pos, wait) return globals.mcl_vars.get_node(pos, true, wait) end,
+					load_node = function(pos) return globals.mcl_vars.get_node(pos) end,
+					scan = function(area) return fragments.scan_structures(area, structure_test, engine) end,
 					clear_trees = function(zone) return fragments.clear_trees(zone, nil, engine) end,
 				})
 			end

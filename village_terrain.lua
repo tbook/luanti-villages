@@ -107,8 +107,9 @@ end
 --   find_surface would accept: air, a plant, a trunk or snow above it, and no
 --   leaves below it. nil where the column has none (a shaft, a pond bed)
 -- Returns nil and a reason if any of the area is still unloaded, because the
--- column tops would then be wrong; emerge first.
-function M.heights(area, surface_materials, engine)
+-- column tops would then be wrong; emerge first. With `partial` set, a column with
+-- an unloaded node is nil in the lookup instead, and the rest is returned.
+function M.heights(area, surface_materials, engine, partial)
 	engine = engine or core
 	local vm = engine.get_voxel_manip()
 	local emin, emax = vm:read_from_map(area.minp, area.maxp)
@@ -144,7 +145,10 @@ function M.heights(area, surface_materials, engine)
 			-- early exit: a block below the surface may still be unloaded.
 			for y = area.maxp.y, area.minp.y, -1 do
 				local id = data[va:index(x, y, z)]
-				if id == ignore then return nil, "unloaded node at " .. engine.pos_to_string({x = x, y = y, z = z}) end
+				if id == ignore then
+					if not partial then return nil, "unloaded node at " .. engine.pos_to_string({x = x, y = y, z = z}) end
+					column.unloaded = true
+				end
 				local t = trait(id)
 				if not column.y and t.solid_or_liquid then
 					column.y, column.name, column.liquid = y, t.name, t.liquid
@@ -161,7 +165,8 @@ function M.heights(area, surface_materials, engine)
 		end
 	end
 	return function(x, z)
-		return columns[z] and columns[z][x]
+		local column = columns[z] and columns[z][x]
+		if column and not column.unloaded then return column end
 	end
 end
 
