@@ -17,7 +17,7 @@ local install_fisherman = dofile(core.get_modpath("living_villages") .. "/fisher
 local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
 local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
 -- Registers living_villages:meal, so it loads here for the same reason.
-local path_storage = core.get_mod_storage()
+local path_storage = core.get_mod_storage and core.get_mod_storage()
 local meal = dofile(core.get_modpath("living_villages") .. "/meal.lua")
 -- Registers living_villages:pulpit, likewise.
 dofile(core.get_modpath("living_villages") .. "/pulpit.lua")
@@ -573,6 +573,6 @@ end
 -- build_a_settlement looks settlements.paths up at the call, so replacing it
 -- here is enough.
 if rawget(_G, "settlements") and settlements.paths
-		and core.settings:get_bool("living_villages_generated_paths", false) == false then
+		and not (core.settings and core.settings:get_bool("living_villages_generated_paths", false)) then
 	settlements.paths = function() end
 end
