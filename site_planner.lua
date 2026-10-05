@@ -19,7 +19,7 @@ local M = {}
 M.config = {
 	cell = 16, -- blocks per grid cell
 	min_cells = 4, max_cells = 5, -- village radius in cells, drawn per village
-	max_spread = 3, -- largest height difference among a site's samples
+	max_spread = 4, -- largest height difference among a site's samples
 	max_step = 5, -- a site this far from an approved neighbor's floor is rejected
 	neighbor_cells = 1.5, -- approved sites this close (in cells) are neighbors
 	min_buildings = 8, -- including the belltower

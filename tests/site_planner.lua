@@ -141,8 +141,8 @@ local planned = assert(plan(slanted, 3))
 assert(planned[1].pos.y == 11, "floor is the average, rounded up: " .. planned[1].pos.y)
 
 -- Within a site: every approved footprint has its nine samples within 3 blocks,
--- here on terraces 4 blocks high every 30 blocks, so footprints across an edge are rejected.
-local function terrace(x) return 10 + 4 * math.floor((x + 15) / 30) end
+-- here on terraces 6 blocks high every 30 blocks, so footprints across an edge are rejected.
+local function terrace(x) return 10 + 6 * math.floor((x + 15) / 30) end
 local terraces = world(function(x) return terrace(x) end)
 planned = assert(plan(terraces, 4))
 for _, entry in ipairs(planned) do
