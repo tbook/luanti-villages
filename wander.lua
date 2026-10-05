@@ -7,6 +7,10 @@
 -- way. Whenever a villager is put into "walk", this takes over with a leg: a
 -- straight line to a spot where the villager can stand at every step of the
 -- way, then a stop. A villager with no such leg stands instead.
+-- A villager with an anchor, {pos = ..., radius = ...} in _villages_wander_anchor
+-- (the bell gathering, #127), keeps its legs within that many nodes of pos: a
+-- leg stops where the next step would take it farther out. One already outside
+-- the radius is not held to it and its legs lead back in.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 
@@ -36,14 +40,19 @@ end
 -- stand. Between standing spots, a sample may have the box over the next
 -- floor and the center still over the last, partway up a step or off a
 -- kerb; the villager keeps its level there until the move completes.
-local function clear_run(start, yaw, max_length)
+local function clear_run(start, yaw, max_length, anchor)
 	local dx, dz = heading(yaw)
+	local limit
+	if anchor then
+		limit = math.max(anchor.radius, math.sqrt((start.x - anchor.pos.x) ^ 2 + (start.z - anchor.pos.z) ^ 2))
+	end
 	local previous = start
 	local reached, target = 0, start
 	for step = 1, math.floor(max_length / SAMPLE_STEP) do
 		local distance = step * SAMPLE_STEP
 		local x, z = start.x + dx * distance, start.z + dz * distance
 		local here = {x = x, y = previous.y, z = z}
+		if limit and (x - anchor.pos.x) ^ 2 + (z - anchor.pos.z) ^ 2 > limit * limit then break end
 		if not common.is_body_clear(here) then
 			-- Climb anything one node high; do_jump (mcl_mobs/movement.lua)
 			-- makes the jump once the villager walks into it.
@@ -88,9 +97,10 @@ local function plan_leg(self, pos)
 	-- and ends the search.
 	local wanted = SAMPLE_STEP * math.floor((LEG_MIN + math.random() * (LEG_MAX - LEG_MIN)) / SAMPLE_STEP)
 	local yaw = (self.target_yaw or self.object:get_yaw() or 0) + (self.rotate or 0)
+	local anchor = self._villages_wander_anchor
 	local best_length, best_target = 0, nil
 	for _, candidate in ipairs(candidate_yaws(yaw)) do
-		local length, target = clear_run(start, candidate, wanted)
+		local length, target = clear_run(start, candidate, wanted, anchor)
 		if length > best_length then best_length, best_target = length, target end
 		if length >= wanted then break end
 	end

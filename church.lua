@@ -4,7 +4,7 @@
 -- full. The cleric who claimed the pulpit (cleric.lua) stands beside it facing
 -- the congregation during the Pulpit and Service stages. With no church within
 -- reach, or none a villager can walk to, the villager putters as on any
--- morning. At the end of the stage seats are released; the bell is #127.
+-- morning. At the end of the stage seats are released and the bell gathering (bell.lua) follows.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")

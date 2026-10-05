@@ -76,6 +76,7 @@ minetest = {
 	get_modpath = function() return "." end,
 	get_day_count = function() return 0 end,
 	find_nodes_in_area = function() return {} end,
+	get_gametime = function() return 0 end,
 	get_timeofday = function() return time end,
 	get_node_or_nil = function(pos) return nodes[key(pos)] end,
 	get_item_group = function(name, group)
