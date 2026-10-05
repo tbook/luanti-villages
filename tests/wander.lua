@@ -264,4 +264,29 @@ local saved = villager(0, 0, 0)
 step(saved)
 assert(def.get_staticdata(saved) == "without leg" and saved._villages_wander, "the leg is left out of staticdata")
 
+-- An anchor keeps every leg within its radius, from the middle or from the rim.
+math.randomseed(5)
+for _, start in ipairs({{0, 0}, {3.4, 0}, {0, -3.5}}) do
+	for _ = 1, 30 do
+		reset()
+		local anchored = villager(start[1], start[2], math.random() * 6.28)
+		anchored._villages_wander_anchor = {pos = {x = 0, y = -1, z = 0}, radius = 4}
+		step(anchored)
+		local leg = anchored._villages_wander
+		if leg then
+			assert(math.sqrt(leg.target.x ^ 2 + leg.target.z ^ 2) <= 4 + 1e-9, "an anchored leg ends within the radius")
+		end
+	end
+end
+
+-- Outside the radius, legs lead back in rather than going farther out.
+reset()
+for _ = 1, 20 do
+	local outside = villager(8, 0, math.pi / 2)
+	outside._villages_wander_anchor = {pos = {x = 0, y = -1, z = 0}, radius = 4}
+	step(outside)
+	local leg = outside._villages_wander
+	assert(leg and leg.target.x <= 8 + 1e-9, "a villager outside the radius is not led farther out")
+end
+
 print("wander tests passed")

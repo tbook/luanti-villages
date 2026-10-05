@@ -540,6 +540,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal, seat)
 	-- After the tavern, so its seated-guest check sees a pew first.
 	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
+	dofile(core.get_modpath("living_villages") .. "/bell.lua").install(def)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)

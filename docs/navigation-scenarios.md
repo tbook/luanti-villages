@@ -216,6 +216,18 @@ stands on the dais behind the pulpit, facing the pews. At 10:30 everyone gets
 up and leaves the seats. With no church in the village, or one sealed off from
 the villagers, they putter as on any morning.
 
+## 18. Bell gathering on a holiday
+
+In a generated village with its belltower, on a holiday afternoon
+(`/time 10500` after the moon change). At 10:30:
+
+Expected result: adults, children excepted, walk to the bell and each stops at
+a spot of its own within about four nodes of it, then drifts about in short
+legs that never go past that radius. They do not pile onto one node. At 13:30
+they leave for the tavern. With no bell in the village, or one they cannot
+walk to, they putter as on any afternoon. The tavern keeper keeps their own
+hours, and the cleric joins once the service ends.
+
 ## Interpretation
 
 - `mode legacy`: VoxeLibre's native mover owns the route.
