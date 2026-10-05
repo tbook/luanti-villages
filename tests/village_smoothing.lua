@@ -105,6 +105,8 @@ local function at(x, y, z)
 	local k = world[x .. "," .. y .. "," .. z]
 	if k then return k end
 	if x == 8 and y == 16 and z == 1 then return "struct" end
+	-- Blocks under the shaft floor are not generated yet.
+	if x >= 13 and x <= 14 and z >= 0 and z <= 2 and y < -20 then return "ignore" end
 	-- A shaft in the gap beyond the smoothing, down to a floor at -8.
 	if x >= 13 and x <= 14 and z >= 0 and z <= 2 and y > -8 and y <= 14 then return "air" end
 	return y <= 14 and "mcl_core:dirt_with_grass" or "air"

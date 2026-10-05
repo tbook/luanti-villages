@@ -220,8 +220,9 @@ function M.run(pads, area, env, config)
 	local plan = M.plan({
 		x0 = area.minp.x, z0 = area.minp.z, x1 = area.maxp.x, z1 = area.maxp.z,
 		column = function(x, z)
-			local c = lookup(x, z)
-			if not c then return nil end
+			-- Blocks unloaded under the ground don't matter, only ground we can't see.
+			local c = lookup(x, z, true)
+			if not c or c.ground_unknown or (c.unloaded and not c.ground_y) then return nil end
 			-- A shaft deeper than the area has no ground in it: treat the bottom as the floor.
 			return {
 				y = c.ground_y or area.minp.y - 1,

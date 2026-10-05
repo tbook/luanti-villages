@@ -150,6 +150,9 @@ function M.heights(area, surface_materials, engine, partial)
 				if id == ignore then
 					if not partial then return nil, "unloaded node at " .. engine.pos_to_string({x = x, y = y, z = z}) end
 					column.unloaded = true
+					-- Unknown ground above the first solid node makes the column unknown;
+					-- unloaded blocks under it do not (ground_y).
+					if not column.ground_y then column.ground_unknown = true end
 				end
 				local t = trait(id)
 				if not column.y and t.solid_or_liquid then
@@ -169,9 +172,11 @@ function M.heights(area, surface_materials, engine, partial)
 			columns[z][x] = column
 		end
 	end
-	return function(x, z)
+	-- With `raw`, a column that has unloaded nodes comes back too, for callers that
+	-- check ground_unknown themselves.
+	return function(x, z, raw)
 		local column = columns[z] and columns[z][x]
-		if column and not column.unloaded then return column end
+		if column and (raw or not column.unloaded) then return column end
 	end
 end
 

@@ -24,6 +24,7 @@ local registered = {
 local map = {}
 local function node(x, y, z)
 	if x == 12 then return "ignore" end
+	if x == 20 and y < 5 then return "ignore" end
 	local key = x .. "," .. y .. "," .. z
 	if map[key] then return map[key] end
 	local top = 10
@@ -250,5 +251,14 @@ top, under = terrain.materials("mcl_core:snow")
 assert(top == "mcl_core:dirt_with_grass_snow" and under == "mcl_core:dirt", "no snow layer on top of dirt")
 top, under = terrain.materials(nil)
 assert(top == "mcl_core:dirt_with_grass" and under == "mcl_core:dirt", "default")
+
+-- Unloaded blocks under the ground leave the column known to raw callers;
+-- unloaded ground above it does not.
+local under = terrain.heights({minp = vec(20, 0, 0), maxp = vec(20, 20, 0)}, surface, nil, true)
+assert(under(20, 0) == nil, "plain lookup drops a column with unloaded nodes")
+local raw = under(20, 0, true)
+assert(raw.unloaded and raw.ground_y == 10 and not raw.ground_unknown, "unloaded under the ground")
+local whole = terrain.heights({minp = vec(12, 0, 0), maxp = vec(12, 20, 0)}, surface, nil, true)
+assert(whole(12, 0, true).ground_unknown and whole(12, 0, true).ground_y == nil, "unloaded above the ground")
 
 print("village_terrain: ok")
