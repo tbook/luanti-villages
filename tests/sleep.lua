@@ -70,6 +70,7 @@ local entity_def = {
 	on_die = function(self) table.insert(died, self._id) end,
 }
 minetest = {
+	get_mod_storage = function() return {} end,
 	registered_entities = {["mobs_mc:villager"] = entity_def},
 	registered_nodes = registered_nodes,
 	register_on_mods_loaded = function(callback) callback() end,

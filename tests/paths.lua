@@ -72,3 +72,23 @@ self.pos = {x = 1, y = 5.5, z = 0}
 def.on_step(self, 0.1)
 check(paths.size() == 2, "second block counted")
 print("paths: ok")
+
+-- Visits just under one period apart still fade a period each time (review).
+paths.reset()
+for i = 0, 10 do paths.walk(9, GRASS, i * 80) end   -- period is 100
+check(paths.serialize()[1][2] < 6, "partial periods are kept")
+paths.reset()
+local t = 0
+for _ = 1, 40 do t = t + 150; paths.walk(9, GRASS, t) end
+check(#paths.serialize() == 1 and paths.serialize()[1][4] == nil, "rare visits never wear a path")
+
+-- A replaced path is not ours any more, even before it has faded.
+paths.reset()
+for _ = 1, 3 do paths.walk(1, GRASS, 0) end   -- converted, owned
+nodes["0,0,1"] = GRASS                         -- player dug and regrew / replaced
+paths.sweep(10, get, set)
+check(paths.size() == 0, "sweep drops stale ownership")
+for _ = 1, 3 do paths.walk(1, GRASS, 0) end
+paths.changed(1)
+check(paths.size() == 0, "dig or place drops tracking")
+print("paths review: ok")

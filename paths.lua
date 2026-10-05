@@ -55,9 +55,19 @@ end
 -- it, or nil. `name` is the node there.
 function M.walk(hash, name, now)
 	if name ~= GRASS and not (name == PATH and is_path[hash]) then return end
-	local value = math.min(M.CAP, (count[hash] and current(hash, now) or 0) + 1)
-	-- A faded count restarts its clock; fading counts from the old stamp
-	-- would otherwise be applied twice.
+	-- Grass where a path of ours was: someone replaced it, so it is not ours.
+	if name == GRASS then is_path[hash] = nil end
+	local value = 1
+	if count[hash] then
+		local faded = math.floor((now - stamp[hash]) / M.DECAY_PERIOD)
+		local left = count[hash] - faded
+		if left > 0 then
+			value = math.min(M.CAP, left + 1)
+			-- Keep the part of a period that has not elapsed yet, or a block
+			-- visited just under once per period would never fade.
+			now = stamp[hash] + faded * M.DECAY_PERIOD
+		end
+	end
 	count[hash], stamp[hash] = value, now
 	dirty = true
 	if name == GRASS and value >= M.WEAR_UP then
@@ -72,19 +82,23 @@ function M.sweep(now, get, set)
 	for hash in pairs(stamp) do
 		local value = current(hash, now)
 		if is_path[hash] then
-			if value < M.WEAR_DOWN then
-				local name = get(hash)
-				if name == PATH then
-					set(hash, GRASS)
-					forget(hash)
-				elseif name then
-					forget(hash)
-				end
+			local name = get(hash)
+			if name and name ~= PATH then
+				-- Replaced since we made it, so it is no longer ours.
+				forget(hash)
+			elseif name and value < M.WEAR_DOWN then
+				set(hash, GRASS)
+				forget(hash)
 			end
 		elseif value == 0 then
 			forget(hash)
 		end
 	end
+end
+
+-- A player digging or placing at a tracked block ends our claim on it.
+function M.changed(hash)
+	if stamp[hash] then forget(hash) end
 end
 
 function M.serialize()
@@ -140,6 +154,9 @@ local function start_timers(storage)
 		end
 	end)
 	core.register_on_shutdown(function() save(storage) end)
+	local function on_change(pos) M.changed(core.hash_node_position(pos)) end
+	core.register_on_dignode(on_change)
+	core.register_on_placenode(on_change)
 end
 
 local timers_started = false
