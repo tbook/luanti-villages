@@ -1,0 +1,18 @@
+# Catalog cases for docs/village-test-seeds.md: name, world seed, chunk minp "x,z".
+# tools/lv_probe/run_cases.sh generates each one on a fresh world.
+cliff	2026	-1072,1488
+hillside	2014	1248,1088
+tower	2002	368,1328
+mountain-edge	2007	208,768
+pit	2025	1808,1328
+forest	2004	-1632,-352
+jungle	2010	-2112,-752
+portal	2024	2288,-512
+portal-outpost	2014	-1712,-1632
+outpost	2018	608,1728
+flat	2022	-832,-1872
+flat-small	2023	-1152,528
+snow-flat	2005	-1392,-832
+snow-steep	2006	-512,-2192
+desert	2002	128,928
+mesa	2017	-912,-1712
