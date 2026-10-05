@@ -24,6 +24,7 @@ M.config = {
 	neighbor_cells = 1.5, -- approved sites this close (in cells) are neighbors
 	min_buildings = 8, -- including the belltower
 	church_give_up = 60, -- candidates the church may miss before it is no longer reserved
+	relocate_step = 8, relocate_rings = 4, relocate_points = 12, -- where the belltower may move to if the center fails
 	ring_points = 24,
 	angle_jitter = 5, -- degrees
 	radius_jitter = 2, -- blocks
@@ -67,7 +68,7 @@ function M.plan(maxp, minp, pr, env, config)
 	local settlements = env.settlements
 	local schematics = settlements.schematic_table
 	local wait = env.wait ~= false
-	local report = {rejects = {}}
+	local report = {rejects = {}, center = nil}
 	local function reject(reason, detail)
 		report.rejects[reason] = (report.rejects[reason] or 0) + 1
 		env.log("verbose", "[living_villages] site rejected (" .. reason .. ")" .. (detail and (": " .. detail) or ""))
@@ -86,13 +87,11 @@ function M.plan(maxp, minp, pr, env, config)
 		return settlements.find_surface(pos, first and wait or nil)
 	end
 
-	local center_surface, center_material = find_surface(center)
-	report.center = center_surface or center
-	if not center_surface then
-		env.log("action", "[living_villages] no village at " .. core.pos_to_string(center) .. ": no surface at the center")
-		return false, "no surface at the center", report
-	end
-	local start_y = center_surface.y + config.height_above
+	-- Samples start above the center's ground, or at the top of the chunk when
+	-- the center has none (water, or no surface material).
+	report.center = center
+	local center_surface = find_surface(center)
+	local start_y = center_surface and center_surface.y + config.height_above or center.y
 
 	-- One sample per column, found once: the surface y and material, or why
 	-- the column is not buildable. Water is the top of the column, which
@@ -193,15 +192,36 @@ function M.plan(maxp, minp, pr, env, config)
 	local counts = {}
 	for _, schem in ipairs(schematics) do counts[schem.name] = 0 end
 
-	local ok, reason, detail = accept(belltower, center_surface.x, center_surface.z,
-		rotations[pr:next(1, #rotations)])
+	-- The belltower goes at the chunk center. If its site fails (a lake or a
+	-- cliff there), the nearest dry level site on rings around the center takes
+	-- its place; only a village with no belltower site at all is rejected.
+	local rotation = rotations[pr:next(1, #rotations)]
+	local ok, reason, detail = accept(belltower, center.x, center.z, rotation)
+	local relocated
 	if not ok then
 		reject(reason, detail)
-		env.log("action", "[living_villages] no village at " .. core.pos_to_string(center_surface)
-			.. ": the belltower site fails (" .. reason .. ")")
-		return false, "belltower site: " .. reason, report
+		for ring = 1, config.relocate_rings do
+			for step = 0, config.relocate_points - 1 do
+				local angle = (step * 360 / config.relocate_points + pr:next(-config.angle_jitter, config.angle_jitter))
+					* math.pi / 180
+				local radius = ring * config.relocate_step
+				local x = math.floor(center.x + radius * math.cos(angle) + 0.5)
+				local z = math.floor(center.z + radius * math.sin(angle) + 0.5)
+				local found, why, why_detail = accept(belltower, x, z, rotation)
+				if found then relocated = true break end
+				reject(why, why_detail)
+			end
+			if relocated then break end
+		end
+		if not relocated then
+			env.log("action", "[living_villages] no village at " .. core.pos_to_string(center)
+				.. ": no belltower site within " .. config.relocate_rings * config.relocate_step
+				.. " of the center (center: " .. reason .. ")")
+			return false, "no belltower site (center: " .. reason .. ")", report
+		end
 	end
-	plan[1].surface_mat = plan[1].surface_mat or center_material
+	local hall = plan[1].pos
+	report.center = hall
 	counts[belltower.name] = 1
 
 	local church
@@ -216,8 +236,8 @@ function M.plan(maxp, minp, pr, env, config)
 			local angle = (step * 360 / config.ring_points + pr:next(-config.angle_jitter, config.angle_jitter))
 				* math.pi / 180
 			local radius = r + pr:next(-config.radius_jitter, config.radius_jitter)
-			local x = math.floor(center_surface.x + radius * math.cos(angle) + 0.5)
-			local z = math.floor(center_surface.z + radius * math.sin(angle) + 0.5)
+			local x = math.floor(hall.x + radius * math.cos(angle) + 0.5)
+			local z = math.floor(hall.z + radius * math.sin(angle) + 0.5)
 
 			local reserving = church and not has_church(plan) and church_misses < config.church_give_up
 			local order = reserving and {church} or shuffle(schematics, pr)
@@ -246,12 +266,12 @@ function M.plan(maxp, minp, pr, env, config)
 
 	report.buildings = #plan
 	if #plan < config.min_buildings then
-		env.log("action", "[living_villages] no village at " .. core.pos_to_string(center_surface) .. ": only "
+		env.log("action", "[living_villages] no village at " .. core.pos_to_string(hall) .. ": only "
 			.. #plan .. " of " .. config.min_buildings .. " buildings found sites (rejected: "
 			.. sorted_counts(report.rejects) .. ")")
 		return false, "only " .. #plan .. " buildings", report
 	end
-	env.log("action", "[living_villages] village planned at " .. core.pos_to_string(center_surface) .. ": "
+	env.log("action", "[living_villages] village planned at " .. core.pos_to_string(hall) .. ": "
 		.. #plan .. " buildings" .. (has_church(plan) and ", church" or ", no church")
 		.. " (rejected: " .. sorted_counts(report.rejects) .. ")")
 	return plan, nil, report

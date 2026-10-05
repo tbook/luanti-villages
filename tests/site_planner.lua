@@ -206,9 +206,23 @@ for _, entry in ipairs(planned) do
 	end
 end
 
-local lake = world(function() return 10 end, function(x, z) return x >= 3 and x <= 8 and z >= 0 and z <= 4 end)
-local failed, reason = plan(lake)
-assert(failed == false and reason:find("belltower", 1, true) and reason:find("water", 1, true), "belltower in water: " .. tostring(reason))
+-- A lake under the belltower's footprint moves the belltower to dry ground
+-- nearby, and the village is still built.
+local lake_world = function(x, z) return x >= 3 and x <= 8 and z >= 0 and z <= 4 end
+local lake = world(function() return 10 end, lake_world)
+planned = assert(plan(lake), "a village by a lake is still planned")
+assert(planned[1].name == "belltower" and not (planned[1].pos.x == 0 and planned[1].pos.z == 0), "belltower moved off the water")
+local bx0, bz0, bx1, bz1 = box(planned[1], lake)
+for _, x in ipairs({bx0, math.floor((bx0 + bx1) / 2), bx1}) do
+	for _, z in ipairs({bz0, math.floor((bz0 + bz1) / 2), bz1}) do assert(not lake_world(x, z), "dry belltower") end
+end
+assert(math.sqrt(planned[1].pos.x ^ 2 + planned[1].pos.z ^ 2) <= planner.config.relocate_rings * planner.config.relocate_step + 1,
+	"belltower stays near the center")
+
+-- No dry belltower site within reach: no village, and the reason names the center's failure.
+local sea = world(function() return 10 end, function(x, z) return math.abs(x) <= 60 and math.abs(z) <= 60 end)
+local failed, reason = plan(sea)
+assert(failed == false and reason:find("belltower", 1, true) and reason:find("water", 1, true), "belltower in the sea: " .. tostring(reason))
 
 -- Canopy: find_surface refuses ground with leaves above it, but the ground
 -- under the leaves still counts, so such columns don't reject the site.
@@ -229,7 +243,7 @@ assert(not planned.rejects)
 
 -- No surface at the center.
 failed, reason = plan(world(function() return nil end))
-assert(failed == false and reason:find("center", 1, true))
+assert(failed == false and reason:find("belltower", 1, true) and reason:find("no_surface", 1, true))
 
 -- Too few buildings: a small island of ground.
 local island = world(function(x, z) return (x * x + z * z <= 20 * 20) and 10 or nil end)
