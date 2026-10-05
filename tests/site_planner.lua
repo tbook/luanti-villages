@@ -289,6 +289,59 @@ planned = plan(nochurch)
 assert(planned, "a village without a church is still built")
 for _, entry in ipairs(planned) do assert(entry.name ~= "church") end
 
+-- Structures (#141): a site within the margin of one is rejected, and the log
+-- says which node blocked it. The scan is a stub keyed by column.
+local function with_structures(env, columns)
+	env.scan = function(area)
+		env.scanned = (env.scanned or 0) + 1
+		env.scan_area = area
+		local scan = {}
+		function scan.at(x, z) local c = columns[x .. "," .. z]; if c then return c.name, c.y end end
+		function scan.find(x0, z0, x1, z1)
+			for key, c in pairs(columns) do
+				local x, z = key:match("(-?%d+),(-?%d+)")
+				x, z = tonumber(x), tonumber(z)
+				if x >= x0 and x <= x1 and z >= z0 and z <= z1 then return c.name, x, c.y, z end
+			end
+		end
+		return scan
+	end
+	return env
+end
+local margin = planner.config.structure_margin
+local clear = plan(with_structures(world(function() return 10 end), {}))
+assert(clear, "no structures, no change")
+local portal = with_structures(world(function() return 10 end), {["30,0"] = {name = "mcl_portals:portal_frame", y = 11}})
+logs = {}
+local around, _, sreport = plan(portal)
+assert(portal.scanned == 1, "one scan per village")
+assert(around, "the village wraps around the structure")
+assert(sreport.rejects.structure and sreport.rejects.structure > 0, "sites near it were rejected")
+assert(sreport.structures["mcl_portals:portal_frame"] == sreport.rejects.structure, "and the blocking node is counted")
+for _, entry in ipairs(around) do
+	local x0, z0, x1, z1 = box(entry, portal)
+	assert(not (30 >= x0 - margin and 30 <= x1 + margin and 0 >= z0 - margin and 0 <= z1 + margin),
+		entry.name .. " at " .. entry.pos.x .. "," .. entry.pos.z .. " is too close to the structure")
+end
+local logged_block
+for _, line in ipairs(logs) do
+	if line:find("site rejected (structure)", 1, true) and line:find("mcl_portals:portal_frame", 1, true) then logged_block = true end
+	if line:find("village planned", 1, true) then assert(line:find("structures: mcl_portals:portal_frame=", 1, true), line) end
+end
+assert(logged_block, "the log says what blocked a site")
+-- The scan covers the village area around the center's ground.
+local area = portal.scan_area
+assert(area.minp.x == -planner.config.structure_half and area.maxp.x == planner.config.structure_half)
+assert(area.minp.y == 10 - planner.config.structure_below and area.maxp.y == 10 + planner.config.structure_above,
+	"the scan is vertical about the ground, " .. area.minp.y .. " to " .. area.maxp.y)
+-- A center inside a structure builds no village.
+local inside = with_structures(world(function() return 10 end), {["0,0"] = {name = "mcl_core:cobble", y = 12}})
+logs = {}
+local none, why, ireport = plan(inside)
+assert(none == false and why:find("inside a structure", 1, true), tostring(why))
+assert(ireport.structures["mcl_core:cobble"] == 1)
+assert(logs[#logs]:find("center is inside a structure", 1, true) and logs[#logs]:find("%[living_villages%]"), logs[#logs])
+
 -- Install: replaces create_site_plan, and leaves vanilla in place when upstream changed.
 local function globals(env)
 	local original = function() return "vanilla" end
@@ -298,6 +351,11 @@ local function globals(env)
 end
 minetest.get_node = function(pos) return {name = pos.y <= 10 and "mcl_core:dirt_with_grass" or "air"} end
 minetest.registered_nodes = registered
+minetest.get_voxel_manip = function() -- an empty map: nothing to avoid
+	return {read_from_map = function(_, a, b) return a, b end, get_data = function() return setmetatable({}, {__index = function() return 1 end}) end}
+end
+minetest.get_name_from_content_id = function() return "air" end
+VoxelArea = {new = function() return {index = function() return 1 end} end}
 local g, original = globals(world(function() return 10 end))
 assert(planner.install(g, minetest) == true)
 assert(g.settlements.create_site_plan ~= original, "installed over create_site_plan")

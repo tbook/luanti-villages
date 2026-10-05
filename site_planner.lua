@@ -9,10 +9,17 @@
 -- It also reserves the church (#132) before the random pick, which replaces
 -- church_site.lua's wrapper of create_site_plan, so install this after it.
 --
+-- A site whose footprint plus a margin overlaps a structure (a ruined portal, a
+-- pillager outpost; found by village_fragments.scan_structures, #141) is
+-- rejected, so the village wraps around it; a village whose center is inside
+-- one is not built.
+--
 -- The planning is plain functions of an `env` table (settlements, get_node,
--- registered_nodes, get_chunk_number, log) so tests can stub the engine.
+-- registered_nodes, get_chunk_number, log, and optionally scan) so tests can
+-- stub the engine.
 local core = minetest
 local terrain = dofile(core.get_modpath("living_villages") .. "/village_terrain.lua")
+local fragments = dofile(core.get_modpath("living_villages") .. "/village_fragments.lua")
 
 local M = {}
 
@@ -30,6 +37,9 @@ M.config = {
 	radius_jitter = 2, -- blocks
 	height_above = 50, -- samples start this far above the belltower's ground
 	water_scan = 150, -- how far down a column is searched for its top node
+	structure_margin = 4, -- a site stays this far from a structure
+	structure_half = 100, -- the structure scan covers this far from the center in x and z
+	structure_below = 20, structure_above = 40, -- and this far under and over the center's ground
 }
 
 local function shuffle(list, pr)
@@ -61,14 +71,16 @@ end
 -- Plans one village. `env` has: settlements (find_surface, check_distance,
 -- schematic_table), get_node, registered_nodes, get_chunk_number, log, and
 -- `wait` (false to never wait for unloaded chunks, as the dry-run command does).
+-- `scan(area)` (optional) returns village_fragments.scan_structures' result for
+-- the area; without it structures are not avoided.
 -- Returns the settlement_info, or false and a reason, and then a report
--- {rejects = {reason = count}, center = pos}.
+-- {rejects = {reason = count}, structures = {node name = count}, center = pos}.
 function M.plan(maxp, minp, pr, env, config)
 	config = config or M.config
 	local settlements = env.settlements
 	local schematics = settlements.schematic_table
 	local wait = env.wait ~= false
-	local report = {rejects = {}, center = nil}
+	local report = {rejects = {}, structures = {}, center = nil}
 	local function reject(reason, detail)
 		report.rejects[reason] = (report.rejects[reason] or 0) + 1
 		env.log("verbose", "[living_villages] site rejected (" .. reason .. ")" .. (detail and (": " .. detail) or ""))
@@ -92,6 +104,26 @@ function M.plan(maxp, minp, pr, env, config)
 	report.center = center
 	local center_surface = find_surface(center)
 	local start_y = center_surface and center_surface.y + config.height_above or center.y
+
+	-- Structures, scanned once over the whole village area around the center's
+	-- ground (the chunk's middle when the center has none).
+	local structures
+	if env.scan then
+		local ground = center_surface and center_surface.y or center.y - config.height_above
+		structures = env.scan({
+			minp = {x = center.x - config.structure_half, y = ground - config.structure_below,
+				z = center.z - config.structure_half},
+			maxp = {x = center.x + config.structure_half, y = ground + config.structure_above,
+				z = center.z + config.structure_half},
+		})
+		local name, sy = structures.at(center.x, center.z)
+		if name then
+			env.log("action", "[living_villages] no village at " .. core.pos_to_string(center)
+				.. ": the center is inside a structure (" .. name .. " at y=" .. sy .. ")")
+			report.structures[name] = 1
+			return false, "center inside a structure (" .. name .. ")", report
+		end
+	end
 
 	-- One sample per column, found once: the surface y and material, or why
 	-- the column is not buildable. Water is the top of the column, which
@@ -139,6 +171,15 @@ function M.plan(maxp, minp, pr, env, config)
 	-- The floor and material for a building at (x, z), or nil and a reason.
 	local function evaluate(schem, x, z, rotation)
 		local box = terrain.footprint({pos = {x = x, z = z}, name = schem.name, rotat = rotation}, schematics)
+		if structures then
+			local m = config.structure_margin
+			local name, hx, hy, hz = structures.find(box.minp.x - m, box.minp.z - m, box.maxp.x + m, box.maxp.z + m)
+			if name then
+				report.structures[name] = (report.structures[name] or 0) + 1
+				return nil, "structure", schem.name .. " at " .. x .. "," .. z .. " is within " .. m
+					.. " of " .. name .. " at " .. hx .. "," .. hy .. "," .. hz
+			end
+		end
 		local xs = {box.minp.x, math.floor((box.minp.x + box.maxp.x) / 2), box.maxp.x}
 		local zs = {box.minp.z, math.floor((box.minp.z + box.maxp.z) / 2), box.maxp.z}
 		local low, high, sum, count, material
@@ -264,14 +305,16 @@ function M.plan(maxp, minp, pr, env, config)
 	if #plan < config.min_buildings then
 		env.log("action", "[living_villages] no village at " .. core.pos_to_string(hall) .. ": only "
 			.. #plan .. " of " .. config.min_buildings .. " buildings found sites (rejected: "
-			.. sorted_counts(report.rejects) .. ")")
+			.. sorted_counts(report.rejects) .. "; structures: " .. sorted_counts(report.structures) .. ")")
 		return false, "only " .. #plan .. " buildings", report
 	end
 	env.log("action", "[living_villages] village planned at " .. core.pos_to_string(hall) .. ": "
 		.. #plan .. " buildings" .. (has_church(plan) and ", church" or ", no church")
-		.. " (rejected: " .. sorted_counts(report.rejects) .. ")")
+		.. " (rejected: " .. sorted_counts(report.rejects) .. "; structures: " .. sorted_counts(report.structures) .. ")")
 	return plan, nil, report
 end
+
+local structure_test = fragments.structure_test(core)
 
 local function live_env(globals, wait)
 	return {
@@ -280,6 +323,7 @@ local function live_env(globals, wait)
 		registered_nodes = core.registered_nodes,
 		get_chunk_number = globals.mcl_vars.get_chunk_number,
 		log = core.log,
+		scan = function(area) return fragments.scan_structures(area, structure_test, core) end,
 		wait = wait,
 	}
 end
@@ -347,6 +391,7 @@ function M.register_command(globals)
 				lines[#lines + 1] = "No village: " .. tostring(why)
 			end
 			lines[#lines + 1] = "Rejected candidates: " .. sorted_counts(report.rejects)
+			lines[#lines + 1] = "Structure nodes that blocked sites: " .. sorted_counts(report.structures)
 			return plan and true or false, table.concat(lines, "\n")
 		end,
 	})
