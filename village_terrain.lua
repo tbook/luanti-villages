@@ -103,6 +103,8 @@ end
 -- - y, name: the top solid or liquid node of the column, whatever its material
 --   (a tree's leaves, a cave floor under an open shaft, the water of a pond)
 -- - liquid: whether that top node is liquid
+-- - ground_y, ground_name, ground_liquid: the same, but skipping leaves, which
+--   nobody stands on (#142 measures holes by it)
 -- - surface_y, material: the highest node in settlements.surface_mat that
 --   find_surface would accept: air, a plant, a trunk or snow above it, and no
 --   leaves below it. nil where the column has none (a shaft, a pond bed)
@@ -153,6 +155,9 @@ function M.heights(area, surface_materials, engine, partial)
 				if not column.y and t.solid_or_liquid then
 					column.y, column.name, column.liquid = y, t.name, t.liquid
 				end
+				if not column.ground_y and t.solid_or_liquid and not t.leaves then
+					column.ground_y, column.ground_name, column.ground_liquid = y, t.name, t.liquid
+				end
 				if not column.surface_y and surface_materials[t.name] then
 					local above = y < area.maxp.y and trait(data[va:index(x, y + 1, z)]) or nil
 					local below = y > area.minp.y and trait(data[va:index(x, y - 1, z)]) or nil
@@ -168,6 +173,16 @@ function M.heights(area, surface_materials, engine, partial)
 		local column = columns[z] and columns[z][x]
 		if column and not column.unloaded then return column end
 	end
+end
+
+-- What a village's ground is made of: the top node and the fill under it for a
+-- site's surface material. Sand sits on sandstone, as VoxeLibre builds foundations
+-- (mcl_villages/foundation.lua), and a snow layer cannot top a column of dirt.
+local FOUNDATION = {["mcl_core:sand"] = "mcl_core:sandstone"}
+local TOP = {["mcl_core:snow"] = "mcl_core:dirt_with_grass_snow"}
+function M.materials(surface)
+	surface = surface or "mcl_core:dirt_with_grass"
+	return TOP[surface] or surface, FOUNDATION[surface] or "mcl_core:dirt"
 end
 
 -- Fill `fill` (default dirt) under y, down until the first solid node, at most

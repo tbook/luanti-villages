@@ -141,6 +141,8 @@ local tree = lookup(10, 0)
 assert(tree.y == 14 and tree.name == "mcl_core:leaves" and not tree.liquid, "tree top is its leaves")
 assert(tree.surface_y == 10 and tree.material == "mcl_core:dirt_with_grass",
 	"grass under a trunk is a surface, as find_surface accepts a tree above it")
+assert(tree.ground_y == 13 and tree.ground_name == "mcl_core:tree" and not tree.ground_liquid, "ground skips leaves")
+assert(pond.ground_y == 10 and pond.ground_liquid, "ground of a pond is its water")
 local tuft = lookup(1, 0)
 assert(tuft.y == 10 and tuft.surface_y == 10, "a plant is not solid and is open space above the surface")
 local snow = lookup(2, 0)
@@ -241,5 +243,12 @@ env = new_env()
 stays(env, {replacement("terraform")}, "is off")
 setting = true
 assert(terrain.install(new_env(), {replacement("terraform")}, engine))
+
+local top, under = terrain.materials("mcl_core:sand")
+assert(top == "mcl_core:sand" and under == "mcl_core:sandstone", "sand sits on sandstone")
+top, under = terrain.materials("mcl_core:snow")
+assert(top == "mcl_core:dirt_with_grass_snow" and under == "mcl_core:dirt", "no snow layer on top of dirt")
+top, under = terrain.materials(nil)
+assert(top == "mcl_core:dirt_with_grass" and under == "mcl_core:dirt", "default")
 
 print("village_terrain: ok")
