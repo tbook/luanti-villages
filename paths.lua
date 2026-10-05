@@ -22,8 +22,8 @@ local M = {}
 
 -- Defaults are first guesses to be tuned on real villages. The decay period
 -- is one game week at the default time_speed (a game day is 1200 s).
-M.WEAR_UP = setting_number("living_villages_path_wear_up", 12)
-M.WEAR_DOWN = setting_number("living_villages_path_wear_down", 4)
+M.WEAR_UP = setting_number("living_villages_path_wear_up", 6)
+M.WEAR_DOWN = setting_number("living_villages_path_wear_down", 2)
 M.DECAY_PERIOD = setting_number("living_villages_path_decay_period", 8400)
 -- Counts stop here, so a path that was walked heavily still fades in time.
 M.CAP = M.WEAR_UP * 2
