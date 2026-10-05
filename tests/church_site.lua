@@ -61,8 +61,8 @@ assert(info[2].name == "church" and info[2].pos.x == 40)
 
 -- With no room anywhere the wrapper gives up, and the village is not left bare.
 local far = {}
-for i = 1, 20 do far[i] = {x = 3, z = i} end
-far[21] = {x = 100, z = 0}
+for i = 1, 70 do far[i] = {x = 3, z = i} end
+far[71] = {x = 100, z = 0}
 s = new_settlements(far)
 wrap(s)
 info = s.create_site_plan()

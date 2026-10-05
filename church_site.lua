@@ -5,11 +5,12 @@
 --
 -- Until a village has a church, this refuses every other building at the
 -- distance check, so the first position with room for a church gets one. After
--- a few positions where the church does not fit, it gives up and lets the plan
+-- 60 failed fits (the first ring of positions around the belltower is too close
+-- for a church, so this is a few rings, not a few positions), it gives up and lets the plan
 -- carry on as usual. The church's own max_num still stops a second one.
 local core = minetest
 
-local GIVE_UP_AFTER = 8
+local GIVE_UP_AFTER = 60
 
 local function wrap(settlements)
 	local church
