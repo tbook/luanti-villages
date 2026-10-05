@@ -1,7 +1,8 @@
--- Seats for dinner guests (#99): a guest inside the tavern reserves a chair
--- that faces a table, walks beside it and sits. Chairs are found by what is
--- next to them, not by the generated layout, so a player-built tavern seats
--- guests too. Load this once (tavern.lua): the reservations are this file's
+-- Seats for dinner guests (#99) and church pews (#126): a guest reserves a
+-- chair that faces a table (at the tavern) or a pulpit (at the church), walks
+-- beside it and sits. Chairs are found by what is next to them, not by the
+-- generated layout, so a player-built tavern or church seats guests too. Load
+-- this once (init.lua passes the copy on): the reservations are this file's
 -- own in-memory table.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
@@ -11,6 +12,11 @@ local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 -- similar size.
 local SEARCH_RADIUS = 8
 local SEARCH_HEIGHT = 2
+-- How far a pew may be from its pulpit: the stock church is 13 x 15 with the
+-- pulpit at one end. The pulpit stands on a dais, a step above the pews.
+local PEW_RADIUS = 12
+local PEW_HEIGHT = 2
+local PULPIT = "living_villages:pulpit"
 -- A reservation lapses unless its guest renews it, so one left by a villager
 -- that unloaded or was removed frees itself. A seated or approaching guest
 -- renews it every tick.
@@ -70,11 +76,31 @@ local function is_table(node)
 	return node and core.get_item_group(node.name, "table") > 0
 end
 
--- A chair counts as a seat when it faces a table, so a guest sits at dinner
--- rather than on a lone chair in a corner.
-local function seat_table(chair)
+-- A chair is a pew seat when the pulpit is somewhere ahead of it and the chair
+-- is on the pulpit's audience side. The pulpit's audience is on the side
+-- facedir_to_dir names (see church_schematic.lua), so the pews need not sit in
+-- line with it.
+local function faces_pulpit(chair, node, pulpit)
+	local target = core.get_node_or_nil(pulpit)
+	if not target or target.name ~= PULPIT then return false end
+	local dx, dy, dz = pulpit.x - chair.x, pulpit.y - chair.y, pulpit.z - chair.z
+	if math.abs(dy) > PEW_HEIGHT or dx * dx + dz * dz > PEW_RADIUS * PEW_RADIUS then return false end
+	local front = facing(node)
+	if dx * front.x + dz * front.z <= 0 then return false end
+	local audience = core.facedir_to_dir(target.param2 % 32)
+	return dx * audience.x + dz * audience.z < 0
+end
+
+-- What a chair is a seat at: the table in front of it, so a guest sits at
+-- dinner rather than on a lone chair in a corner; or, for church seats, the
+-- given pulpit. Returns that position and the chair's node.
+local function seat_focus(chair, kind, pulpit)
 	local node = core.get_node_or_nil(chair)
 	if not is_chair(node) then return end
+	if kind == "pulpit" then
+		if not pulpit or not faces_pulpit(chair, node, pulpit) then return end
+		return {x = pulpit.x, y = pulpit.y, z = pulpit.z}, node
+	end
 	local front = facing(node)
 	local table_pos = {x = chair.x + front.x, y = chair.y, z = chair.z + front.z}
 	if not is_table(core.get_node_or_nil(table_pos)) then return end
@@ -101,7 +127,7 @@ end
 local function approach(chair, table_pos)
 	for _, side in ipairs(SIDES) do
 		local pos = {x = chair.x + side.x, y = chair.y, z = chair.z + side.z}
-		if not vector.equals(pos, table_pos) and common.is_standing_space(pos) then return pos end
+		if not vector.equals(pos, table_pos) and common.is_standing_space(pos, true) then return pos end
 	end
 end
 
@@ -137,7 +163,7 @@ end
 local function still_valid(self)
 	local seat = self._villages_seat
 	if not seat then return false end
-	local table_pos = seat_table(seat.chair)
+	local table_pos = seat_focus(seat.chair, seat.kind, seat.table)
 	if not table_pos or not vector.equals(table_pos, seat.table) then return false end
 	if held_by_other(seat.chair, self._id) then return false end
 	return not player_in(seat.chair)
@@ -145,8 +171,13 @@ end
 
 local M = {}
 
--- Reserve the nearest free seat in the tavern at jukebox, and set out for it.
-function M.reserve(self, jukebox)
+-- Reserve the nearest free seat around center, and set out for it. kind is
+-- "table" for the tavern at a jukebox (the default) or "pulpit" for the pews of
+-- the church at a pulpit.
+function M.reserve(self, center, kind)
+	kind = kind or "table"
+	local radius, height = SEARCH_RADIUS, SEARCH_HEIGHT
+	if kind == "pulpit" then radius, height = PEW_RADIUS, PEW_HEIGHT end
 	if not self._id then return false end
 	local last = self._villages_seat_searched_at
 	if last and now() - last < SEARCH_SECONDS then return false end
@@ -154,19 +185,19 @@ function M.reserve(self, jukebox)
 	local pos = self.object:get_pos()
 	if not pos then return false end
 	local chairs = core.find_nodes_in_area(
-		{x = jukebox.x - SEARCH_RADIUS, y = jukebox.y - SEARCH_HEIGHT, z = jukebox.z - SEARCH_RADIUS},
-		{x = jukebox.x + SEARCH_RADIUS, y = jukebox.y + SEARCH_HEIGHT, z = jukebox.z + SEARCH_RADIUS},
+		{x = center.x - radius, y = center.y - height, z = center.z - radius},
+		{x = center.x + radius, y = center.y + height, z = center.z + radius},
 		{"group:chair"})
 	local best, best_distance
 	for _, chair in ipairs(chairs) do
-		local table_pos = seat_table(chair)
+		local table_pos = seat_focus(chair, kind, center)
 		local skipped = self._villages_seat_unreachable and self._villages_seat_unreachable[key(chair)]
 		if table_pos and not held_by_other(chair, self._id) and not player_in(chair)
 			and not (skipped and skipped > now()) then
 			local stand = approach(chair, table_pos)
 			local distance = vector.distance(pos, chair)
 			if stand and (not best or distance < best_distance) then
-				best, best_distance = {chair = copy(chair), table = table_pos, approach = stand}, distance
+				best, best_distance = {chair = copy(chair), table = table_pos, approach = stand, kind = kind}, distance
 			end
 		end
 	end
@@ -184,7 +215,7 @@ function M.sit(self)
 	local here = self.object:get_pos()
 	-- The square it sat down from is where it stands back up, if it came from
 	-- beside the chair; otherwise the square the seat was reserved with.
-	if here and vector.distance(here, seat.chair) <= REACH and common.is_standing_space(here) then
+	if here and vector.distance(here, seat.chair) <= REACH and common.is_standing_space(here, true) then
 		self._villages_seat_exit = copy(here)
 	else
 		self._villages_seat_exit = {x = seat.approach.x, y = seat.approach.y - 0.49, z = seat.approach.z}
@@ -225,11 +256,11 @@ end
 -- chair.
 function M.exit(self)
 	local exit, chair = self._villages_seat_exit, self._villages_seat_chair
-	if exit and common.is_standing_space(exit) then return exit end
+	if exit and common.is_standing_space(exit, true) then return exit end
 	if not chair then return self.object:get_pos() end
 	for _, side in ipairs(SIDES) do
 		local pos = {x = chair.x + side.x, y = chair.y, z = chair.z + side.z}
-		if common.is_standing_space(pos) then return {x = pos.x, y = pos.y - 0.49, z = pos.z} end
+		if common.is_standing_space(pos, true) then return {x = pos.x, y = pos.y - 0.49, z = pos.z} end
 	end
 	return {x = chair.x, y = chair.y + 0.01, z = chair.z}
 end

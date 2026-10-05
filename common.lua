@@ -41,7 +41,9 @@ local workstation_search_node_names = {"group:cauldron"}
 for name in pairs(workstation_nodes) do table.insert(workstation_search_node_names, name) end
 
 local function collision_box_top(def)
-	local box = def and def.collision_box
+	-- A nodebox with no collision box of its own collides as its node box
+	-- (Luanti does this): a carpet is a sixteenth of a node thick, not a block.
+	local box = def and (def.collision_box or (def.drawtype == "nodebox" and def.node_box))
 	if not box or box.type ~= "fixed" then return 0.5 end
 	local fixed = box.fixed
 	if type(fixed) ~= "table" then return -0.5 end
@@ -75,10 +77,14 @@ end
 -- and not something that hurts it. Openness alone is not enough -- fire is not
 -- walkable, carries no collision box and is not a liquid, so a check that only
 -- asks whether a villager fits would happily place one in a fire.
-local function is_clear(pos)
+--
+-- With thin_ok, a carpet counts as clear: it is a walkable sliver a villager
+-- stands on top of, and the church floor (#126) is laid with it.
+local function is_clear(pos, thin_ok)
 	local node = core.get_node_or_nil(pos)
 	local def = node and core.registered_nodes[node.name]
 	if not def then return false end
+	if thin_ok and core.get_item_group(node.name, "carpet") > 0 then return true end
 	if def.walkable or (def.collision_box and def.collision_box.type ~= "none") then return false end
 	if def.liquidtype and def.liquidtype ~= "none" then return false end
 	return not is_hazard(node.name, def)
@@ -101,7 +107,7 @@ end
 
 -- Whether every node the standing box at pos touches, from layer bottom to
 -- top, is clear.
-local function box_is_clear(pos, bottom, top)
+local function box_is_clear(pos, bottom, top, thin_ok)
 	-- Shrink the span by a hair so a box whose edge lands exactly on a node
 	-- boundary is not treated as reaching into the node beyond it. Villagers
 	-- stand on half-node offsets constantly, so without this the check
@@ -110,7 +116,7 @@ local function box_is_clear(pos, bottom, top)
 	for x = round(pos.x - HALF_WIDTH + EDGE), round(pos.x + HALF_WIDTH - EDGE) do
 		for z = round(pos.z - HALF_WIDTH + EDGE), round(pos.z + HALF_WIDTH - EDGE) do
 			for y = bottom, top do
-				if not is_clear({x = x, y = y, z = z}) then return false end
+				if not is_clear({x = x, y = y, z = z}, thin_ok) then return false end
 			end
 		end
 	end
@@ -281,9 +287,11 @@ return {
 	-- begins at x = 0.5, while the column at x = 0 still reads as open. The
 	-- floor is only required under the center column, since standing with part
 	-- of the box over an edge is ordinary.
-	is_standing_space = function(pos)
+	-- With thin_ok, carpet in the villager's own cell does not count against it.
+	-- Only there: carpet at head height still blocks.
+	is_standing_space = function(pos, thin_ok)
 		local feet = round(pos.y)
-		return box_is_clear(pos, feet, feet + HEIGHT_NODES - 1)
+		return box_is_clear(pos, feet, feet, thin_ok) and box_is_clear(pos, feet + 1, feet + HEIGHT_NODES - 1)
 			and is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
 	end,
 	-- The two halves of is_standing_space, for a villager partway over a step

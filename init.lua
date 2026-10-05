@@ -528,11 +528,18 @@ core.register_on_mods_loaded(function()
 
 	dofile(core.get_modpath("living_villages") .. "/births.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/navigation.lua")(def)
+	-- Jumps up carpeted steps that vanilla's do_jump refuses (#126).
+	dofile(core.get_modpath("living_villages") .. "/step.lua").install(def)
 	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)
 	cleric.install(def)
-	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal)
+	-- One copy of seat.lua, so that its reservations cover both the tavern's
+	-- chairs and the church's.
+	local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
+	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal, seat)
+	-- After the tavern, so its seated-guest check sees a pew first.
+	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
