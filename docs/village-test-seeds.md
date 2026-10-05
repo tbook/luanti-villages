@@ -89,21 +89,21 @@ Traps count columns.
 The sites VoxeLibre tried on seeds 2001 to 2030, 14 per seed, nearest the origin within 2400
 nodes (`tools/lv_probe/survey.sh 2001 2030`). #139 quotes its yield against this.
 
-| | Vanilla |
-|-|---------|
-| sites tried | 309 |
-| built | 265 (85.8%) |
-| plan failed (no surface at the center) | 39 |
-| rejected as too uneven (`max_height_difference` 56) | 5 |
-| buildings per built village | 16 |
-| with a church | 43.8% |
-| with a tavern | 88.3% |
-| floor range, median | 8 |
-| neighbor floor difference, median | 6 |
-| largest step between columns, median | 18 |
-| villages with at least one trapped column | 66.4% |
+| | Vanilla | #139 planner |
+|-|---------|--------------|
+| sites tried | 309 | 309 |
+| built | 265 (85.8%) | 281 (90.9%) |
+| plan failed | 39 (no surface at the center) | 23 (17 no belltower site within 32 blocks of the center, 6 fewer than 8 building sites) |
+| rejected as too uneven (`max_height_difference` 56) | 5 | 5 |
+| buildings per built village | 16 | 17.6 |
+| with a church | 43.8% | 97.2% |
+| with a tavern | 88.3% | 90.4% |
+| floor range, median | 8 | 8 |
+| neighbor floor difference, median | 6 | 5 |
+| largest step between columns, median | 18 | 20 |
+| villages with at least one trapped column | 66.4% | 73.7% |
 
-The church share is for plain vanilla. #132 changed it for villages built with `living_villages`.
+The #139 column uses `max_spread` 4 (3 gave 72.8% built, before the belltower could move off a failed center site). The church share for vanilla is plain VoxeLibre; #132 changed it for villages built with `living_villages`.
 
 ## Repeatability
 

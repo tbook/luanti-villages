@@ -551,3 +551,15 @@ dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_site.lua")
 dofile(core.get_modpath("living_villages") .. "/village_index.lua")
+
+-- After church_site.lua: the planner reserves the church itself and replaces its wrapper.
+do
+	local planner = dofile(core.get_modpath("living_villages") .. "/site_planner.lua")
+	local globals = {
+		settlements = rawget(_G, "settlements"),
+		mcl_vars = rawget(_G, "mcl_vars"),
+		max_height_difference = rawget(_G, "max_height_difference"),
+		half_map_chunk_size = rawget(_G, "half_map_chunk_size"),
+	}
+	if planner.install(globals) then planner.register_command(globals) end
+end
