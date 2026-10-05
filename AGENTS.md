@@ -22,6 +22,7 @@ their jobsite lose it, so vanilla demotes them.
 | `fisherman.lua` | Water-based fisherman profession, the fishing loop, and the bobber and rod entities |
 | `nitwit.lua` | Keeps nitwits from being demoted to unemployed by VoxeLibre's jobsite check |
 | `keeper.lua` | Tavern keeper role, which is a butcher underneath and claims a jukebox, plus its menu and hours |
+| `music.lua` | On holidays the keeper on duty plays the jukebox's disc from dinner to close |
 | `tavern.lua` | The evening tavern visit and keeper takeover |
 | `wander.lua` | Replaces vanilla's aimless walk with short, checked straight legs that stop short of walls |
 | `seat.lua` | Chair reservation and the sitting pose, for dinner tables and church pews |
