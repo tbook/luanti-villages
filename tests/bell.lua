@@ -151,6 +151,45 @@ tick(leaver)
 assert(leaver._villages_wander_anchor == nil and leaver._villages_bell == nil, "the Tavern stage releases the villager")
 time = 11000 / 24000
 
+-- Pushed out long after the original walk budget has run out: a fresh one.
+local late = villager(11, 2)
+tick(late)
+assert(late._villages_wander_anchor)
+now = now + 1000
+late.pos.x = 10 + bell.GATHER_RADIUS + 3
+before = #gopaths
+tick(late)
+assert(#gopaths == before + 1 and late._villages_bell, "a villager displaced late still walks back")
+
+-- The bell taken down while it is attended: the gathering is dropped, and
+-- another bell is found.
+local witness = villager(11, 3)
+tick(witness)
+assert(witness._villages_wander_anchor)
+nodes[key({x = 10, y = 5, z = 0})] = nil
+nodes[key({x = -10, y = 5, z = 0})] = "mcl_bells:bell"
+tick(witness)
+assert(witness._villages_bell and witness._villages_bell.pos.x == -10
+	and witness._villages_wander_anchor == nil, "a removed bell is replaced by another")
+nodes[key({x = -10, y = 5, z = 0})] = nil
+nodes[key({x = 10, y = 5, z = 0})] = "mcl_bells:bell"
+
+-- A route another wrapper starts as the stage ends is left alone.
+local handoff_def = {
+	on_activate = function() end, on_die = function() end, get_staticdata = function() return {} end,
+	do_custom = function(self)
+		if minetest.get_timeofday() * 24000 >= 13500 and self.state ~= "gowp" then self.state = "gowp" end
+	end,
+}
+bell.install(handoff_def)
+local guest = villager(11, 4)
+tick(guest)
+assert(guest._villages_wander_anchor)
+time = 14000 / 24000
+handoff_def.do_custom(guest, 0.1)
+assert(guest.state == "gowp" and guest._villages_bell == nil, "the tavern's trip survives the stage change")
+time = 11000 / 24000
+
 -- Children and keepers have no gathering.
 before = #gopaths
 tick(villager(-5, 20, {child = true}))

@@ -179,7 +179,10 @@ end
 
 local function join(self, pos)
 	local bell = self._villages_bell
-	if bell and skipped(self, bell.pos) then
+	-- A bell that has been taken down is no longer a place to gather: look for
+	-- another.
+	local node = bell and core.get_node_or_nil(bell.pos)
+	if bell and (skipped(self, bell.pos) or (node and node.name ~= BELL)) then
 		leave(self)
 		bell = nil
 	end
@@ -214,7 +217,11 @@ local function join(self, pos)
 		self._villages_wander_anchor = {pos = center, radius = GATHER_RADIUS}
 		return
 	end
-	-- Not there: pushed out of it, or not yet arrived.
+	-- Not there: pushed out of it, or not yet arrived. A villager that was
+	-- pushed out has a walk of its own to time, not the one it began with.
+	if bell.arrived then
+		bell.since, bell.limit = now(), walk_limit(self, center)
+	end
 	bell.arrived = nil
 	self._villages_wander_anchor = nil
 	if now() - bell.since > bell.limit then
@@ -267,12 +274,12 @@ local function install(def)
 	end
 
 	def.do_custom = function(self, dtime)
+		-- Before the other wrappers, so that a route they start as the stage
+		-- ends (the tavern's) is not mistaken for the gathering's and stopped.
+		if self._villages_bell and not gathering(self) then leave(self) end
 		local result = original_custom(self, dtime)
 		if result == false then return result end
-		if not gathering(self) then
-			if self._villages_bell then leave(self) end
-			return result
-		end
+		if not gathering(self) then return result end
 		-- Someone is trading with it: vanilla has stopped it, and the time
 		-- spent does not count against its walk.
 		if trading(self) then
