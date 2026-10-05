@@ -107,8 +107,9 @@ end
 --   find_surface would accept: air, a plant, a trunk or snow above it, and no
 --   leaves below it. nil where the column has none (a shaft, a pond bed)
 -- Returns nil and a reason if any of the area is still unloaded, because the
--- column tops would then be wrong; emerge first.
-function M.heights(area, surface_materials, engine)
+-- column tops would then be wrong; emerge first. With `partial` set, a column with
+-- an unloaded node is nil in the lookup instead, and the rest is returned.
+function M.heights(area, surface_materials, engine, partial)
 	engine = engine or core
 	local vm = engine.get_voxel_manip()
 	local emin, emax = vm:read_from_map(area.minp, area.maxp)
@@ -144,7 +145,10 @@ function M.heights(area, surface_materials, engine)
 			-- early exit: a block below the surface may still be unloaded.
 			for y = area.maxp.y, area.minp.y, -1 do
 				local id = data[va:index(x, y, z)]
-				if id == ignore then return nil, "unloaded node at " .. engine.pos_to_string({x = x, y = y, z = z}) end
+				if id == ignore then
+					if not partial then return nil, "unloaded node at " .. engine.pos_to_string({x = x, y = y, z = z}) end
+					column.unloaded = true
+				end
 				local t = trait(id)
 				if not column.y and t.solid_or_liquid then
 					column.y, column.name, column.liquid = y, t.name, t.liquid
@@ -161,7 +165,21 @@ function M.heights(area, surface_materials, engine)
 		end
 	end
 	return function(x, z)
-		return columns[z] and columns[z][x]
+		local column = columns[z] and columns[z][x]
+		if column and not column.unloaded then return column end
+	end
+end
+
+-- Fill `fill` (default dirt) under y, down until the first solid node, at most
+-- as far as foundations go (20). Covers a hole under a building or a yard.
+function M.fill_below(x, z, y, fill, engine)
+	engine = engine or core
+	fill = fill or "mcl_core:dirt"
+	for fy = y - 1, y - DEFAULT_BELOW, -1 do
+		local pos = {x = x, y = fy, z = z}
+		local def = engine.registered_nodes[engine.get_node(pos).name]
+		if def and def.walkable and (def.liquidtype or "none") == "none" then break end
+		engine.swap_node(pos, {name = fill})
 	end
 end
 
@@ -172,17 +190,11 @@ end
 -- be loaded; see emerge.
 function M.set_column(x, z, top_y, target_y, surface, fill, engine)
 	engine = engine or core
-	fill = fill or "mcl_core:dirt"
 	for y = top_y, target_y + 1, -1 do
 		engine.swap_node({x = x, y = y, z = z}, {name = "air"})
 	end
 	engine.swap_node({x = x, y = target_y, z = z}, {name = surface})
-	for y = target_y - 1, target_y - DEFAULT_BELOW, -1 do
-		local pos = {x = x, y = y, z = z}
-		local def = engine.registered_nodes[engine.get_node(pos).name]
-		if def and def.walkable and (def.liquidtype or "none") == "none" then break end
-		engine.swap_node(pos, {name = fill})
-	end
+	M.fill_below(x, z, target_y, fill, engine)
 end
 
 local function lookup_path(path, root)

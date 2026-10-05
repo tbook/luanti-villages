@@ -562,4 +562,6 @@ do
 		half_map_chunk_size = rawget(_G, "half_map_chunk_size"),
 	}
 	if planner.install(globals) then planner.register_command(globals) end
+	-- Terraform runs on the planner's levelled sites, so it goes in with it.
+	dofile(core.get_modpath("living_villages") .. "/village_smoothing.lua").install(globals)
 end
