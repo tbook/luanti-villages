@@ -125,8 +125,7 @@ local function save(storage)
 	dirty = false
 end
 
-local function start_timers()
-	local storage = core.get_mod_storage()
+local function start_timers(storage)
 	M.load(core.deserialize(storage:get_string(STORAGE_KEY)))
 	local sweep_timer, save_timer = 0, 0
 	core.register_globalstep(function(dtime)
@@ -151,13 +150,15 @@ local function ground_cell(pos)
 	return {x = math.floor(pos.x + 0.5), y = math.floor(pos.y + 0.1), z = math.floor(pos.z + 0.5)}
 end
 
-function M.install(def)
+-- storage must come from core.get_mod_storage() called during mod load, which
+-- is not when this runs (init.lua loads it from on_mods_loaded).
+function M.install(def, storage)
 	if core.settings and core.settings:get_bool("living_villages_natural_paths", true) == false then
 		return
 	end
-	if not timers_started and core.get_mod_storage and core.register_globalstep then
+	if not timers_started and storage and core.register_globalstep then
 		timers_started = true
-		start_timers()
+		start_timers(storage)
 	end
 	local original_step = def.on_step
 	def.on_step = function(self, dtime, moveresult)

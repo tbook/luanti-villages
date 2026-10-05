@@ -17,6 +17,7 @@ local install_fisherman = dofile(core.get_modpath("living_villages") .. "/fisher
 local keeper = dofile(core.get_modpath("living_villages") .. "/keeper.lua")
 local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
 -- Registers living_villages:meal, so it loads here for the same reason.
+local path_storage = core.get_mod_storage()
 local meal = dofile(core.get_modpath("living_villages") .. "/meal.lua")
 -- Registers living_villages:pulpit, likewise.
 dofile(core.get_modpath("living_villages") .. "/pulpit.lua")
@@ -544,7 +545,7 @@ core.register_on_mods_loaded(function()
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
-	dofile(core.get_modpath("living_villages") .. "/paths.lua").install(def)
+	dofile(core.get_modpath("living_villages") .. "/paths.lua").install(def, path_storage)
 	dofile(core.get_modpath("living_villages") .. "/floor_guard.lua")(def)
 end)
 
