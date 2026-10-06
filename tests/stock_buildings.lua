@@ -6,12 +6,12 @@
 -- The routes come from navigation.lua's real gopath with the engine's own
 -- pathfinder stubbed out, so this exercises the planner and the passability
 -- checks it uses. Whatever route comes back is then checked here, by rules that
--- are not the planner's own.
+-- are not the planner's own; the validator has cases of its own, below, and a
+-- corner door that only a correct door rule gets past.
 --
 --   lua tests/stock_buildings.lua
 --   STOCK_ONLY=tavern STOCK_VERBOSE=1 lua tests/stock_buildings.lua
 local stock_world = dofile("tests/support/stock_world.lua")
-local doors = dofile("doors.lua")
 -- The cases that do not pass yet, as patterns over the case names printed below.
 -- A case that starts passing fails the test until its pattern is removed, and so
 -- does a pattern that matches nothing, so the list only ever shrinks.
@@ -68,43 +68,95 @@ local function cell_string(pos)
 	return ("(%d,%d,%d)"):format(pos.x, pos.y, pos.z)
 end
 
+-- Facts about mcl_doors (api_doors.lua), verified for #121 and kept here rather
+-- than taken from doors.lua so that a regression there cannot excuse itself: every
+-- variant's leaf lies on one edge of its node, which for facedir p is north, west,
+-- south or east for p 0..3; toggling a door turns it a quarter, forward when it is
+-- closed and not mirrored or open and mirrored, back otherwise. The variants are
+-- named _b_ or _t_ then 1 closed, 2 open, 3 closed mirrored, 4 open mirrored.
+local LEAF_EDGE = {[0] = "n", "w", "s", "e"}
+
+local function door_blocks(node, entry_edge, exit_edge)
+	local variant = tonumber(node.name:match("_[bt]_(%d)$"))
+	local open, mirrored = variant % 2 == 0, variant > 2
+	local forward = open == mirrored
+	local toggled = (node.param2 + (forward and 1 or -1)) % 4
+	for _, leaf in ipairs({LEAF_EDGE[node.param2 % 4], LEAF_EDGE[toggled]}) do
+		if leaf ~= entry_edge and leaf ~= exit_edge then return false end
+	end
+	return true
+end
+
+local function edge_toward(from, to)
+	if to.x > from.x then return "e" elseif to.x < from.x then return "w" end
+	return to.z > from.z and "s" or "n"
+end
+
+-- How high a node's collision reaches above the node's center: 0.5 for a full
+-- cube, less for a slab or carpet, more for a fence.
+local function collision_top(def)
+	local box = def.collision_box or (def.drawtype == "nodebox" and def.node_box)
+	if not box or box.type ~= "fixed" then return 0.5 end
+	local fixed = box.fixed
+	if type(fixed[1]) == "number" then return fixed[5] end
+	local top = -0.5
+	for _, part in ipairs(fixed) do top = math.max(top, part[5]) end
+	return top
+end
+
 -- The rules a route is held to, none of them the planner's own: each step is to
--- a neighboring cell at most a level up or down; no feet cell is inside
--- something solid and the head cell over each is free; a door is crossed by an
--- entry and exit its leaf lets through in one state or the other; and the route
--- ends beside the target.
+-- a neighboring cell at most a level up or down; every cell has floor to stand on
+-- (a full-height solid that is not a fence, wall or trapdoor); no feet cell is
+-- inside something solid, and the head cell over each is free, carpet at the feet
+-- being the one thing a villager stands in; a step up has the cell above the
+-- departure head free, since the jump swings the head through it (#56); a door
+-- is crossed by an entry and exit its leaf lets through in one state or the other;
+-- and the route ends beside the target.
 local function check_route(world, cells, target)
 	local defs = stock_world.defs
-	local function door(pos)
-		local group = defs[world.get(pos).name].groups.door
-		return group and group > 0
+	local function group(pos, name)
+		local found = defs[world.get(pos).name].groups[name]
+		return found and found > 0
 	end
-	local function solid(pos)
+	local function solid(pos, feet)
 		local def = defs[world.get(pos).name]
-		if door(pos) then return false end
-		if def.groups.carpet and def.groups.carpet > 0 then return false end
+		if group(pos, "door") then return false end
+		if feet and group(pos, "carpet") then return false end
 		return def.walkable or (def.collision_box and def.collision_box.type ~= "none")
+	end
+	local function floor_under(cell)
+		local below = {x = cell.x, y = cell.y - 1, z = cell.z}
+		local def = defs[world.get(below).name]
+		if not def.walkable or collision_top(def) < 0.49 or (def.damage_per_second or 0) > 0 then return false end
+		return not (group(below, "fence") or group(below, "fence_gate") or group(below, "wall") or group(below, "trapdoor"))
 	end
 	for i, cell in ipairs(cells) do
 		local previous = cells[i - 1]
 		if previous then
-			local dx, dz, dy = math.abs(cell.x - previous.x), math.abs(cell.z - previous.z), math.abs(cell.y - previous.y)
-			if dx + dz ~= 1 or dy > 1 then
+			local dx, dz, dy = math.abs(cell.x - previous.x), math.abs(cell.z - previous.z), cell.y - previous.y
+			if dx + dz ~= 1 or math.abs(dy) > 1 then
 				return false, "steps from " .. cell_string(previous) .. " to " .. cell_string(cell)
+			end
+			local over = {x = previous.x, y = previous.y + 2, z = previous.z}
+			if dy == 1 and solid(over) then
+				return false, ("jumps from %s into %s at %s"):format(cell_string(previous), world.get(over).name, cell_string(over))
 			end
 		end
 		local head = {x = cell.x, y = cell.y + 1, z = cell.z}
-		if solid(cell) then
+		if not floor_under(cell) then
+			return false, ("no floor under %s, which is %s"):format(cell_string(cell),
+				world.get({x = cell.x, y = cell.y - 1, z = cell.z}).name)
+		end
+		if solid(cell, true) then
 			return false, ("feet inside %s at %s"):format(world.get(cell).name, cell_string(cell))
 		end
 		if solid(head) then
 			return false, ("head inside %s at %s"):format(world.get(head).name, cell_string(head))
 		end
-		if door(cell) and previous and cells[i + 1] then
-			local node = world.get(cell)
-			local verdict = doors.crossing(node, defs[node.name], doors.sides_toward(cell, previous),
-				doors.sides_toward(cell, cells[i + 1]))
-			if verdict == false then return false, "the leaf of the door at " .. cell_string(cell) .. " blocks the turn" end
+		if group(cell, "door") and previous and cells[i + 1] then
+			if door_blocks(world.get(cell), edge_toward(cell, previous), edge_toward(cell, cells[i + 1])) then
+				return false, "the leaf of the door at " .. cell_string(cell) .. " blocks the turn"
+			end
 		end
 	end
 	local last = cells[#cells]
@@ -288,6 +340,99 @@ local function test_building(name, rotation, doors_open)
 		else
 			record(id, false, reason)
 		end
+	end
+end
+
+-- The validator against routes it must reject, each with a control it must accept.
+-- Not touched by STOCK_ONLY, so a weakened validator cannot hide in a narrowed run.
+local function expect_valid(world, cells, target, wanted, why)
+	local ok, reason = check_route(world, cells, target)
+	if ok ~= wanted then
+		table.insert(unexpected, ("validator: %s (%s)"):format(why, ok and "accepted" or reason))
+	elseif not wanted and verbose then
+		print("rejected as it should: " .. why .. ": " .. reason)
+	end
+end
+
+do
+	local function c(x, y, z) return {x = x, y = y, z = z} end
+	-- A step up under a ceiling: the head is clear at both cells, but the jump
+	-- from (0,1,0) swings it through (0,3,0).
+	local world = stock_world.new()
+	world.set(c(1, 1, 0), "mcl_core:stone")
+	expect_valid(world, {c(0, 1, 0), c(1, 2, 0)}, c(2, 2, 0), true, "a step up in the open")
+	world.set(c(0, 3, 0), "mcl_core:stone")
+	expect_valid(world, {c(0, 1, 0), c(1, 2, 0)}, c(2, 2, 0), false, "a step up under a ceiling")
+	-- Carpet is something to stand in, not to walk into.
+	world = stock_world.new()
+	world.set(c(0, 1, 0), "mcl_wool:white_carpet")
+	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), true, "standing in carpet")
+	world = stock_world.new()
+	world.set(c(0, 2, 0), "mcl_wool:white_carpet")
+	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), false, "carpet at head height")
+	-- A cell with nothing under it, and one over a slab too low to count.
+	world = stock_world.new()
+	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), true, "standing on the ground")
+	expect_valid(world, {c(0, 5, 0)}, c(1, 5, 0), false, "standing in mid-air")
+	world.set(c(0, 0, 0), "mcl_stairs:slab_wood")
+	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), false, "standing over a bottom slab")
+	-- A closed door with its leaf on the north edge, which toggling moves to the west.
+	local function door(name, param2)
+		local door_world = stock_world.new()
+		door_world.set(c(0, 1, 0), "mcl_doors:wooden_door_b_" .. name, param2)
+		door_world.set(c(0, 2, 0), "mcl_doors:wooden_door_t_" .. name, param2)
+		return door_world
+	end
+	local north, south, west, east = c(0, 1, -1), c(0, 1, 1), c(-1, 1, 0), c(1, 1, 0)
+	world = door("1", 0)
+	expect_valid(world, {north, c(0, 1, 0), south}, south, true, "a closed door crossed straight")
+	expect_valid(world, {north, c(0, 1, 0), east}, east, true, "a closed door, north to east")
+	expect_valid(world, {north, c(0, 1, 0), west}, west, false, "a closed door, north to west")
+	-- Open, it is at facedir 1 with the leaf on the west and toggles back to the north.
+	world = door("2", 1)
+	expect_valid(world, {north, c(0, 1, 0), east}, east, true, "an open door, north to east")
+	expect_valid(world, {north, c(0, 1, 0), west}, west, false, "an open door, north to west")
+end
+
+-- A corner door (#121): a closed door whose leaf blocks north and, toggled, west,
+-- between a north room and a room to its west or east. Walking from the north room
+-- into the west one has to turn inside the door cell, which neither state allows;
+-- into the east one, opening the door lets the villager turn. Everything else is
+-- stone, so the door is the only way, and a planner that ignores the leaf
+-- finds the way through.
+local function corner_door(side)
+	local world = stock_world.new()
+	stock_world.install(world)
+	local def = {on_activate = function() end, do_custom = function() end, gopath = function() return false end}
+	dofile("navigation.lua")(def)
+	for x = -4, 4 do for y = 1, 4 do for z = -4, 4 do world.set({x = x, y = y, z = z}, "mcl_core:stone") end end end
+	local function carve(x, z) for y = 1, 2 do world.set({x = x, y = y, z = z}, "air") end end
+	for z = -1, -3, -1 do carve(0, z) end
+	local dx = side == "west" and -1 or 1
+	carve(dx, 0)
+	carve(dx * 2, 0)
+	world.set({x = 0, y = 1, z = 0}, "mcl_doors:wooden_door_b_1", 0)
+	world.set({x = 0, y = 2, z = 0}, "mcl_doors:wooden_door_t_1", 0)
+	local bed = {x = dx * 3, y = 1, z = 0}
+	world.set(bed, "mcl_beds:bed_red_bottom")
+	world.set({x = dx * 4, y = 1, z = 0}, "mcl_beds:bed_red_top")
+	local cells, reason = route(world, def, {x = 0, y = 0.51, z = -3}, bed, "_bed", "_villages_bed_route", HOME)
+	return world, cells, reason, bed
+end
+
+do
+	local world, cells = corner_door("west")
+	if cells then
+		local ok, reason = check_route(world, cells, {x = -3, y = 1, z = 0})
+		table.insert(unexpected, "corner door: the planner routed through a door it cannot turn in" ..
+			(ok and "" or " (" .. reason .. ")"))
+	end
+	local east_world, east_cells, reason, bed = corner_door("east")
+	if not east_cells then
+		table.insert(unexpected, "corner door: no route through a door that opens onto the turn: " .. tostring(reason))
+	else
+		local ok, why = check_route(east_world, east_cells, bed)
+		if not ok then table.insert(unexpected, "corner door: " .. why) end
 	end
 end
 
