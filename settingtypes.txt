@@ -5,11 +5,14 @@ living_villages_smooth_villages (Smooth villages) bool true
 # Villagers wear grass they keep walking over into paths (#12).
 living_villages_natural_paths (Natural paths) bool true
 # Walks over one grass block before it becomes a path.
-living_villages_path_wear_up (Path wear threshold) float 6
+living_villages_path_wear_up (Path wear threshold) float 8
 # A path made this way turns back to grass when its count fades below this.
-living_villages_path_wear_down (Path regrow threshold) float 2
+living_villages_path_wear_down (Path regrow threshold) float 3
 # Seconds for a block's count to fade by one (default: one game week).
 living_villages_path_decay_period (Path fade period) float 8400
 # Keep VoxeLibre's generated paths between village buildings. Off leaves
 # villages as grass, and villagers wear their own paths (see above).
 living_villages_generated_paths (Generated village paths) bool false
+# What a step on a trip (to bed, work, tavern, bell, church) counts for;
+# a step of aimless wandering counts for 1.
+living_villages_path_trip_weight (Path trip step weight) float 3

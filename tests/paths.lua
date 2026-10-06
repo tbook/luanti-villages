@@ -92,3 +92,21 @@ for _ = 1, 3 do paths.walk(1, GRASS, 0) end
 paths.changed(1)
 check(paths.size() == 0, "dig or place drops tracking")
 print("paths review: ok")
+
+-- A step on a trip is worth more than one while wandering.
+paths.reset()
+paths.WEAR_UP, paths.CAP = 6, 12
+check(paths.walk(1, GRASS, 0, 3) == nil, "one trip step is not enough")
+check(paths.walk(1, GRASS, 0, 3) == "path", "two trip steps wear 6")
+paths.reset()
+for _ = 1, 5 do paths.walk(1, GRASS, 0) end
+check(paths.walk(1, GRASS, 0) == "path", "six wander steps wear 6")
+local trip_def = {on_step = function() end}
+paths.reset()
+paths.install(trip_def)
+local walker = {pos = {x = 0, y = 5.5, z = 0}, _villages_job_route = {status = "travelling"}}
+walker.object = {get_pos = function() return walker.pos end}
+nodes["0,5,0"] = GRASS
+trip_def.on_step(walker, 0.1)
+check(paths.serialize()[1][2] == 3, "trip step weighs 3")
+print("paths trips: ok")

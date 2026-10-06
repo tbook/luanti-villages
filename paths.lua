@@ -22,10 +22,14 @@ local M = {}
 
 -- Defaults are first guesses to be tuned on real villages. The decay period
 -- is one game week at the default time_speed (a game day is 1200 s).
-M.WEAR_UP = setting_number("living_villages_path_wear_up", 6)
-M.WEAR_DOWN = setting_number("living_villages_path_wear_down", 2)
+M.WEAR_UP = setting_number("living_villages_path_wear_up", 8)
+M.WEAR_DOWN = setting_number("living_villages_path_wear_down", 3)
 M.DECAY_PERIOD = setting_number("living_villages_path_decay_period", 8400)
 -- Counts stop here, so a path that was walked heavily still fades in time.
+-- A step on a trip counts for more than a step of aimless wandering: trips
+-- repeat along the same blocks and wandering spreads out, so this wears
+-- routes without blotching the grass.
+M.TRIP_WEIGHT = setting_number("living_villages_path_trip_weight", 3)
 M.CAP = M.WEAR_UP * 2
 M.SWEEP_PERIOD = 600
 M.SAVE_PERIOD = 300
@@ -53,16 +57,17 @@ end
 
 -- Add one step to a block and report what it should now be: "path" to convert
 -- it, or nil. `name` is the node there.
-function M.walk(hash, name, now)
+function M.walk(hash, name, now, weight)
+	weight = weight or 1
 	if name ~= GRASS and not (name == PATH and is_path[hash]) then return end
 	-- Grass where a path of ours was: someone replaced it, so it is not ours.
 	if name == GRASS then is_path[hash] = nil end
-	local value = 1
+	local value = math.min(M.CAP, weight)
 	if count[hash] then
 		local faded = math.floor((now - stamp[hash]) / M.DECAY_PERIOD)
 		local left = count[hash] - faded
 		if left > 0 then
-			value = math.min(M.CAP, left + 1)
+			value = math.min(M.CAP, left + weight)
 			-- Keep the part of a period that has not elapsed yet, or a block
 			-- visited just under once per period would never fade.
 			now = stamp[hash] + faded * M.DECAY_PERIOD
@@ -163,6 +168,21 @@ local timers_started = false
 
 -- The block a standing villager rests on: feet are at pos.y, the top of the
 -- block below, and the 0.1 covers paths (15/16 high) and a slight sink.
+local TRIP_ROUTES = {
+	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
+	"_villages_fish_route", "_villages_job_search_route", "_villages_tavern_route",
+}
+
+-- On a managed trip, or on vanilla's waypoint walk (bell, church).
+local function on_trip(self)
+	if self.waypoints then return true end
+	for _, field in ipairs(TRIP_ROUTES) do
+		local route = self[field]
+		if route and route.status == "travelling" then return true end
+	end
+	return false
+end
+
 local function ground_cell(pos)
 	return {x = math.floor(pos.x + 0.5), y = math.floor(pos.y + 0.1), z = math.floor(pos.z + 0.5)}
 end
@@ -188,7 +208,7 @@ function M.install(def, storage)
 			if last_cell[self] ~= hash then
 				last_cell[self] = hash
 				local node = core.get_node_or_nil(cell)
-				if node and M.walk(hash, node.name, core.get_gametime()) == "path" then
+				if node and M.walk(hash, node.name, core.get_gametime(), on_trip(self) and M.TRIP_WEIGHT or 1) == "path" then
 					core.swap_node(cell, {name = PATH})
 				end
 			end
