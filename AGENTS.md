@@ -35,6 +35,7 @@ their jobsite lose it, so vanilla demotes them.
 | `church_site.lua` | Makes the church the first building a new village places, so most villages have one |
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `paths.lua` | Natural paths (#12): counts villager steps per grass block, turns heavily walked ones into `mcl_core:grass_path`, and reverts faded ones. The thresholds are settings, still to be tuned on real villages |
+| `library_schematic.lua` | Furnishes newly generated libraries with a lectern, the librarian's jobsite, by editing the stock schematic in memory (#152) |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |
 | `village_terrain.lua` | Shared pieces for the village terrain work (#133): village area, one-pass height lookup, emerge-first, column writes, and the installer that replaces `mcl_villages` generator steps. The `living_villages_smooth_villages` setting turns it off |
