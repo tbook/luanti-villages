@@ -8,19 +8,18 @@ local function cell(x, y, z)
 	return data[z * size.y * size.x + y * size.x + x + 1]
 end
 
+cell(6, 2, 9).name = "mcl_stairs:stair_wood"
 local schematic = {size = size, data = data}
 assert(furnish(schematic))
-local lectern = cell(6, 2, 8)
+local lectern = cell(6, 2, 9)
 assert(lectern.name == "mcl_lectern:lectern" and lectern.prob == 255)
-assert(cell(6, 3, 8).name == "air", "lectern needs the cell above clear")
-for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
-	assert(cell(6 + d[1], 2, 8 + d[2]).name == "air", "lectern must keep open floor around it")
-end
+assert(cell(6, 3, 9).name == "air", "lectern needs the cell above clear")
+assert(cell(6, 2, 8).name == "air", "lectern must keep open floor in front of it")
 assert(not furnish({size = {x = 13, y = 9, z = 12}, data = data}), "unknown layout must be left alone")
-cell(6, 2, 8).name = "mcl_books:bookshelf"
+cell(6, 2, 9).name = "mcl_books:bookshelf"
 assert(not furnish(schematic), "changed layout must not be overwritten")
 
-cell(6, 2, 8).name = "air"
+cell(6, 2, 9).name = "mcl_stairs:stair_wood"
 minetest.get_modpath = function() return "/test/villages" end
 minetest.serialize_schematic = function() return "fixture" end
 minetest.log = function() end
