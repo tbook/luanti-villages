@@ -44,8 +44,10 @@ their jobsite lose it, so vanilla demotes them.
 | `village_smoothing.lua` | Replaces `settlements.terraform` (#140): loads the area synchronously, clears trees via `village_fragments.lua`, then smooths ground around pads (footprint plus yard) with a blended, slope-limited, capped target height. The planning half (`targets`) is pure. Falls back to vanilla terraform if the area won't load |
 | `village_index.lua` | `/living_villages_goto` testing command and the list of generated villages |
 | `tests/*.lua` | Standalone tests, one per module, that stub the engine. `tests/fixtures/` holds data extracted from VoxeLibre, such as the stock church |
+| `tests/stock_buildings.lua` | Reachability test (#159): every stock village building, at four rotations with doors shut and open, must let a villager in to each bed, jobsite and jukebox and out from each room, by `navigation.lua`'s real `gopath` with the engine's pathfinder stubbed out. `tests/support/stock_world.lua` builds the stub map from `tests/fixtures/buildings/`; `tests/support/stock_buildings_known.lua` lists the cases that fail today, with reasons, and a fix removes its entry |
 | `docs/navigation-scenarios.md` | Manual in-game test scenarios |
 | `docs/village-test-seeds.md` | Test seeds for the village terrain work (#133): seed, chunk, what each exercises, and the vanilla baseline numbers |
+| `tools/extract_schematics/` | Regenerates `tests/fixtures/buildings/` (the stock schematics and the definitions of the nodes in them) from the installed VoxeLibre in a headless server. Rerun it when the supported VoxeLibre version changes. Not loaded by the mod |
 | `tools/lv_probe/` | Headless village probe: generates a seed's villages on a throwaway world and measures them. Not loaded by the mod. See its README |
 
 ## Testing
