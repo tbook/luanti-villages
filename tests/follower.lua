@@ -13,6 +13,7 @@ mcl_mobs = {mob_class = {check_gowp = function() vanilla_ticks = vanilla_ticks +
 
 local objects_near = {}
 local clock = 0
+local pending = {}
 minetest = {
 	get_modpath = function() return "." end,
 	get_item_group = function() return 0 end,
@@ -20,7 +21,7 @@ minetest = {
 	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
 	get_objects_inside_radius = function() return objects_near end,
 	get_us_time = function() return clock end,
-	after = function() end,
+	after = function(_, callback, ...) table.insert(pending, {callback, ...}) end,
 }
 
 local function reset()
@@ -51,7 +52,7 @@ local function villager(x, z, path)
 			self.object_velocity = v
 			if v.y == 4.3 then self.jumps = self.jumps + 1; self.jumped = v end
 		end,
-		set_acceleration = function() end,
+		set_acceleration = function(_, a) self.acceleration = a end,
 	}
 	self.turn_in_direction = function(_, dx, dz) yaw = -math.atan2(dx, dz) end
 	self.set_velocity = function(_, v) velocity = v end
@@ -189,6 +190,24 @@ v.vy = -4
 run(v, 1.2)
 assert(v.jumps == 1, "jumps once toward a rise, not " .. v.jumps)
 assert(v.jumped.x > 1 and math.abs(v.jumped.z) < 0.01, "with forward speed along the heading")
+
+-- The pushes scheduled with a jump end with the walk: after arriving on the
+-- raised final cell, a late callback does not move the villager again.
+reset()
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+v = villager(0, 0, {cell(0, 0), {x = 2, y = 1, z = 0}})
+v.object.get_luaentity = function() return v end
+follower.begin(v)
+pending = {}
+run(v, 1.2)
+assert(#pending == 3, "a jump schedules three pushes")
+v.acceleration = nil
+v.object.get_pos = function() return {x = 2, y = 0.51, z = 0} end
+v.tick()
+assert(v.state == "stand" and v.arrived, "arrived on the raised cell")
+v.acceleration = {x = 0, y = 0, z = 0}
+for _, p in ipairs(pending) do p[1](v) end
+assert(v.acceleration.x == 0 and v.acceleration.z == 0, "stale pushes do nothing after arrival")
 
 -- Holding for a turn stops what is moving, not just the acceleration
 -- (upstream's set_velocity(0) leaves the object's velocity alone).

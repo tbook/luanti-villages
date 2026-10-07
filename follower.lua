@@ -177,7 +177,8 @@ local function rise_step(self, f, pos, waypoint, dx, dz)
 	if self.set_animation then self:set_animation("jump") end
 	self.object:set_velocity(velocity)
 	local forward = function(entity)
-		if not entity.object or not entity.object:get_luaentity() or entity.state == "die" then return end
+		-- Only for this walk: arriving, giving up or a new route ends the push.
+		if not entity.object or not entity.object:get_luaentity() or entity._villages_follow ~= f then return end
 		entity.object:set_acceleration({x = velocity.x * 2, y = FALL_SPEED, z = velocity.z * 2})
 	end
 	core.after(0.1, forward, self)
