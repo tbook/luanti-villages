@@ -15,10 +15,10 @@ local HALF_WIDTH = 0.3
 local HEIGHT_NODES = 2
 local EDGE = 0.001
 -- The lowest floor top, in node units from the node's center, a villager walks
--- on as a floor. A bottom slab tops out at 0.0 and is not one. A grass path,
--- farmland and soul sand top out a sixteenth or two short of a full node
--- (0.4375): the villager's feet just sit lower and the engine walks it on and
--- off without a jump. Asking for 0.49 made every village road a hole in the
+-- on as a floor. A bottom slab tops out at 0.0 and is not one. A grass path and
+-- farmland top out a sixteenth short of a full node (0.4375): the villager's feet
+-- just sit lower and the engine walks it on and off without a jump. Soul sand
+-- (0.375) is left out on purpose: it is a Nether block, not village ground. Asking for 0.49 made every village road a hole in the
 -- map, and cut the tavern off from the rest of the village (#156).
 local MIN_FLOOR_TOP = 0.4
 -- Nodes a villager never stands on, though they are walkable: do_jump

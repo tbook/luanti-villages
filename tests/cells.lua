@@ -8,6 +8,7 @@ local defs = {
 	air = {walkable = false},
 	["mcl_core:stone"] = {walkable = true},
 	["mcl_core:grass_path"] = {walkable = true, drawtype = "nodebox", node_box = box(0.4375)},
+	["mcl_nether:soul_sand"] = {walkable = true, drawtype = "nodebox", node_box = box(0.375)},
 	["mcl_stairs:slab_wood"] = {walkable = true, drawtype = "nodebox", node_box = box(0)},
 	["mcl_fences:fence"] = {walkable = true, collision_box = box(1.0)},
 	["mcl_wool:carpet"] = {walkable = true, drawtype = "nodebox", node_box = box(-0.4375)},
@@ -34,6 +35,7 @@ assert(stand_on("mcl_core:stone"), "a full block is floor")
 -- The tavern's route went nowhere because a grass path was not floor (#156).
 assert(stand_on("mcl_core:grass_path"), "a grass path is floor")
 assert(not stand_on("mcl_stairs:slab_wood"), "a bottom slab is not")
+assert(not stand_on("mcl_nether:soul_sand"), "soul sand (0.375) is left out: no village has it")
 assert(not stand_on("mcl_fences:fence"), "a fence is not")
 assert(not stand_on("mcl_core:lava_source"), "a hazard is not")
 assert(not stand_on("air"), "nor is nothing")
