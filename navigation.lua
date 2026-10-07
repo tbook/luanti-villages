@@ -13,10 +13,14 @@ local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
 local planner = dofile(core.get_modpath("living_villages") .. "/planner.lua")
 local doors = dofile(core.get_modpath("living_villages") .. "/doors.lua")
 local route_queue = dofile(core.get_modpath("living_villages") .. "/route_queue.lua")
+local follower = dofile(core.get_modpath("living_villages") .. "/follower.lua")
 local RETRY_SECONDS = 30
 local LEGACY_FAILURE_WAIT = 30
 local NO_PROGRESS_SECONDS = 20
 local PROGRESS_DISTANCE = 0.35
+-- A walk the follower gave up on (no progress, a villager in the way, off the
+-- route) is planned again from where the villager stands, this many times.
+local MAX_REPLANS = 2
 -- Allow ordinary multi-room trips beyond the legacy 25-node preflight while
 -- staying inside the planner's search boundary.
 local PATH_RANGE = 40
@@ -232,6 +236,7 @@ local function stop(self)
 	self.waypoints = nil
 	self.callback_arrived = nil
 	self._villages_blocked_door = nil
+	self._villages_follow = nil
 	self.object:set_velocity(vector.zero())
 end
 
@@ -241,6 +246,7 @@ local function set_route(self, route_field, route)
 	local pos = self.object:get_pos()
 	route.last_progress_at = core.get_gametime()
 	route.last_progress_pos = pos and vector.new(pos) or nil
+	self._villages_follow_failed = nil
 	self[route_field] = route
 	return route
 end
@@ -354,7 +360,9 @@ local function nearest_walk_position(pos)
 	return best
 end
 
-local function plan_stair_route(self, candidates)
+-- `avoid` lists positions (a villager that was in the way) whose cells the
+-- route may not use.
+local function plan_stair_route(self, candidates, avoid)
 	local start = self.object:get_pos()
 	start = start and nearest_walk_position(start)
 	if not start then return nil, nil, "stair planner found no nearby walk position" end
@@ -381,7 +389,16 @@ local function plan_stair_route(self, candidates)
 		end
 		return best
 	end
-	local path, visited, status, details = planner.find_path(start, cells.can_stand, function(pos)
+	local function can_stand(pos)
+		for _, spot in ipairs(avoid or {}) do
+			if math.floor(spot.x + 0.5) == pos.x and math.floor(spot.z + 0.5) == pos.z
+				and math.abs(math.floor(spot.y + 0.5) - pos.y) <= 1 then
+				return false
+			end
+		end
+		return cells.can_stand(pos)
+	end
+	local path, visited, status, details = planner.find_path(start, can_stand, function(pos)
 		return targets[pos.x .. ":" .. pos.y .. ":" .. pos.z] ~= nil
 	end, {
 		range = planner_range(),
@@ -636,6 +653,8 @@ local function start_engine_path(self, target, path, arrived, door_actions, rout
 	self.current_target = current
 	self.waypoints = waypoints
 	self.state = PATHFINDING
+	-- A route the planner made (door actions on) is walked by follower.lua.
+	if door_actions then follower.begin(self) end
 	return true
 end
 
@@ -650,12 +669,13 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 		return route and route.status == "planning" and route.id == route_id and route
 	end
 	stop(self)
-	route_queue.submit(function() return plan_stair_route(self, candidates) end,
+	route_queue.submit(function() return plan_stair_route(self, candidates, opts.avoid) end,
 		function(target, path, failure, _, report)
 			local route = current()
 			if not route then return end
 			if target and path then
 				route.status, route.mode, route.planner = "travelling", "planner", report
+				route.replans = opts.replans
 				route.target = vector.new(target)
 				local pos = self.object:get_pos()
 				route.last_progress_at = core.get_gametime()
@@ -663,6 +683,7 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 				if start_engine_path(self, target, path,
 					arrival_callback(route_field, route_id, target, opts.callback, opts.sleep), true,
 					route_field, route_id) then
+					if self._villages_follow then self._villages_follow.avoid = opts.avoid end
 					return
 				end
 			end
@@ -729,27 +750,38 @@ end
 local function recover_route(self, destination)
 	local route = self[destination.route_field]
 	if not route or route.status ~= "travelling" or self.state == PATHFINDING then return false end
+	-- The follower gave up on a walk it could not finish (#164); plan again
+	-- from where the villager stands, around whatever was in the way.
+	local gave_up = self._villages_follow_failed
+	self._villages_follow_failed = nil
+	local replans = (route.replans or 0) + (gave_up and 1 or 0)
+	local replan = gave_up and replans <= MAX_REPLANS
 	-- A legacy route may start successfully, then wedge on stairs or a door.
 	-- Hand that case to the Villages planner before backing off.
-	if destination.claimed(self) and route.mode ~= "planner" then
-		local candidates = approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
+	if destination.claimed(self) and (route.mode ~= "planner" or replan) then
+		local candidates = destination.candidates
+			or approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
 		local failed_at = self._pf_last_failed
-		local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
+		local reason = gave_up and ("walk ended: " .. gave_up.reason)
+			or failed_at and failed_at >= (route.wall_started_at or failed_at)
 			and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
 			or destination.kind .. " route was canceled before arrival"
 		local planning = set_route(self, destination.route_field, {
 			status = "planning", mode = "planner", target = route.target and vector.new(route.target) or nil,
+			goal = route.goal and vector.new(route.goal) or nil,
 			started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
 			site = route.site and vector.new(route.site) or nil,
 		})
 		plan_route_later(self, destination.route_field, planning.id, candidates, {
 			callback = route.callback, sleep = destination.sleep, reason = reason, fail_target = route.target,
+			avoid = gave_up and gave_up.blocker and {gave_up.blocker} or nil, replans = replans,
 		})
 		return true
 	end
 	local failed_at = self._pf_last_failed
-	local reason = failed_at and failed_at >= (route.wall_started_at or failed_at)
+	local reason = gave_up and ("walk ended: " .. gave_up.reason)
+		or failed_at and failed_at >= (route.wall_started_at or failed_at)
 		and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
 		or destination.kind .. " route was canceled before arrival"
 	fail(self, destination.route_field, reason, route.target)
@@ -791,6 +823,7 @@ local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
 	"_villages_fish_route", "_villages_job_search_route", "_villages_goto_route",
 	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
+	"_villages_follow", "_villages_follow_failed",
 }
 
 local function install(def)
@@ -799,6 +832,7 @@ local function install(def)
 	local original_activate = def.on_activate
 	local original_staticdata = def.get_staticdata or mcl_mobs.mob_class.get_staticdata
 	local original_door_action = def.do_pathfind_action or mcl_mobs.mob_class.do_pathfind_action
+	follower.install(def)
 
 	-- mcl_mobs serializes every field of self, so saving a route writes its
 	-- callback into the villager's staticdata as a dumped Lua function. The
@@ -1178,6 +1212,18 @@ local function install(def)
 		local walk = self._villages_goto_route
 		if walk and walk.status == "travelling" then
 			if self.state ~= PATHFINDING then
+				-- A walk the follower gave up on is planned again; any other
+				-- walk that left gowp was taken over by another module.
+				if self._villages_follow_failed then
+					local goal = walk.goal
+					if recover_route(self, {
+						pos = goal, route_field = "_villages_goto_route", kind = "destination",
+						candidates = goal and (cells.can_stand(goal) and {goal} or approaches(goal)) or nil,
+						claimed = function() return goal ~= nil end,
+					}) then
+						return result
+					end
+				end
 				self._villages_goto_route = nil
 			elseif recover_stalled_route(self, {
 				pos = walk.goal, route_field = "_villages_goto_route", kind = "destination",

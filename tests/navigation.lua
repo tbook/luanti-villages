@@ -1728,6 +1728,29 @@ do
 	timeofday = 0.8
 	search_sites = {}
 
+	-- A walk the follower gave up on (#164) is planned again from where the
+	-- villager stands, twice at most, and then backs off with the reason.
+	local gave_up = new_entity(true)
+	assert(planner_def.gopath(gave_up, gave_up._bed, nil, true))
+	settle()
+	assert(gave_up.state == "gowp" and gave_up._villages_follow, "the planner's walk is the follower's")
+	for attempt = 1, 2 do
+		gave_up.state = "stand"
+		gave_up._villages_follow = nil
+		gave_up._villages_follow_failed = {reason = "no progress along the route"}
+		planner_def.do_custom(gave_up, 0.1)
+		settle()
+		assert(gave_up.state == "gowp" and gave_up._villages_bed_route.replans == attempt,
+			"replanned after the follower gave up, attempt " .. attempt)
+	end
+	gave_up.state = "stand"
+	gave_up._villages_follow = nil
+	gave_up._villages_follow_failed = {reason = "blocked by another villager"}
+	planner_def.do_custom(gave_up, 0.1)
+	settle()
+	assert(gave_up._villages_bed_route.status == "retry"
+		and gave_up._villages_bed_route.reason:find("blocked by another villager", 1, true), "then backs off")
+
 	assert(engine_calls == 0, "the engine's pathfinder is never asked")
 	assert(vanilla_calls == 0, "nor is vanilla's gopath")
 	minetest.find_path = plain_find_path
