@@ -25,6 +25,11 @@ local lines = {
 	'{"type":"trip","stage":"home","variant":"A","round":1,"villager":"c","kind":"bed","outcome":"superseded","distance":5,"target":{"x":3,"y":1,"z":1},"calls":[]}',
 	-- the same trip as villager a, with the engine silenced: the planner finds it
 	'{"type":"trip","stage":"home","variant":"B","round":1,"villager":"a","kind":"bed","outcome":"arrived","mode":"planner","distance":10,"target":{"x":1,"y":1,"z":1},"calls":[{"engine_calls":0,"engine_found":0,"engine_headroom":0,"engine_ms":0,"ms":3,"route":{"planner_status":"found","planner_searched":50}}]}',
+	-- a retry of villager a's trips from another spot, in both variants, is not another pair
+	'{"type":"trip","stage":"home","variant":"A","round":1,"villager":"a","kind":"bed","outcome":"arrived","distance":4,"start":{"x":5,"y":1,"z":1},"target":{"x":1,"y":1,"z":1},"calls":[{"engine_calls":1,"engine_found":0,"engine_headroom":0,"engine_ms":1,"ms":1,"route":{}}]}',
+	'{"type":"trip","stage":"home","variant":"B","round":1,"villager":"a","kind":"bed","outcome":"arrived","distance":4,"start":{"x":5,"y":1,"z":1},"target":{"x":1,"y":1,"z":1},"calls":[{"engine_calls":0,"engine_found":0,"engine_headroom":0,"engine_ms":0,"ms":1,"route":{}}]}',
+	-- the same villager and target in another run is not paired with this run's
+	'{"type":"trip","label":"other","stage":"home","variant":"B","round":1,"villager":"a","kind":"bed","outcome":"arrived","distance":10,"target":{"x":1,"y":1,"z":1},"calls":[]}',
 	-- a job trip made during the home stage is not a bed trip
 	'{"type":"trip","stage":"home","variant":"A","round":1,"villager":"d","kind":"jobsite","outcome":"arrived","distance":9,"target":{"x":4,"y":1,"z":1},"calls":[]}',
 	-- the bell's wander legs are not trips; its one real walk is
@@ -40,8 +45,8 @@ file:close()
 local report = sh("sh tools/lv_trips/report.sh " .. path)
 os.remove(path)
 
-check("home A counts its three bed trips", report:match("home\tA\ttrips 3\tarrived 1\tstuck 1\tno_route 0\tsuperseded 1"))
-check("home B counts the planner's trip", report:match("home\tB\ttrips 1\tarrived 1"))
+check("home A counts its four bed trips", report:match("home\tA\ttrips 4\tarrived 2\tstuck 1\tno_route 0\tsuperseded 1"))
+check("home B counts its trips", report:match("home\tB\ttrips 3\tarrived 3"))
 check("the job trip is left out", not report:match("jobsite"))
 check("only the real bell walk counts", report:match("bell\tA\ttrips 1\tarrived 1"))
 check("pairing sees the planner find what the engine did", report:match("paired 1\tboth 1\tengine only 0\tplanner only 0\tneither 0"))

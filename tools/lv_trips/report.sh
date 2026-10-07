@@ -34,10 +34,11 @@ def planner_ok: any(.calls[]?; .route.planner_status == "found") or (.mode == "p
   ($trips | map(select(.mode != null)) | group_by(.mode)[] |
     "mode \(.[0].mode)\tstarted \(length)\tarrived \(n(.outcome == "arrived"))\tstuck \(n(.outcome == "stuck"))\trecovered by planner \(n(.recovered_by_planner == true))"),
   "",
-  "== Engine against planner, same start and target (A round engine route with headroom vs B round planner route)",
-  ([$trips[] | select(.variant == "A")] as $a | [$trips[] | select(.variant == "B")] as $b
-   | [ $a[] as $x | ($b[] | select(.stage == $x.stage and .round == $x.round and .villager == $x.villager and .target == $x.target)) as $y
-       | {engine: ($x | engine_ok), planner: ($y | planner_ok), stage: $x.stage} ]
+  "== Engine against planner, one pair per villager, round, start and target (the first trip of each in an A round: engine route with headroom; in a B round: planner route)",
+  ([$trips[] | select(.variant == "A" or .variant == "B")]
+   | group_by([.label, .stage, .round, .villager, .target, .origin])
+   | map({a: (map(select(.variant == "A"))[0]), b: (map(select(.variant == "B"))[0])} | select(.a != null and .b != null))
+   | map({engine: (.a | engine_ok), planner: (.b | planner_ok)})
    | "paired \(length)\tboth \(n(.engine and .planner))\tengine only \(n(.engine and (.planner | not)))\tplanner only \(n((.engine | not) and .planner))\tneither \(n((.engine | not) and (.planner | not)))"),
   "",
   "== Cost (ms per call; planner from B rounds, engine from every round)",

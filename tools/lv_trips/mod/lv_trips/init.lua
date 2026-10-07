@@ -189,6 +189,7 @@ local function begin_trip(self, target)
 		kind = kind_of_target(self, target, round_info.stage), started_at = wall(), calls = {}, events = {},
 		last_pos = vec(pos), last_progress = wall(), stage = round_info.stage and round_info.stage.name,
 		variant = round_info.variant, round = round_info.round,
+		origin = round_info.origins and round_info.origins[villager_id(self)] or nil,
 	}
 	trip.distance = pos and round1(vector.distance(pos, target)) or nil
 	trip.rise = pos and round1(target.y - pos.y) or nil
@@ -246,7 +247,7 @@ local function close_trip(trip, reason)
 	local record = {
 		type = "trip", village = round_info.village, stage = trip.stage, variant = trip.variant, round = trip.round,
 		villager = trip.villager, kind = trip.kind, start = trip.start, target = trip.target,
-		distance = trip.distance, rise = trip.rise, calls = trip.calls, events = trip.events,
+		origin = trip.origin, distance = trip.distance, rise = trip.rise, calls = trip.calls, events = trip.events,
 		duration_s = round1(wall() - trip.started_at), holiday = holiday,
 	}
 	record.final_route = route_snapshot(trip.entity)
@@ -372,6 +373,27 @@ local function stand_near(base, used)
 	return best
 end
 
+-- Stand up a villager that is sitting or eating, as seat.stand and meal.finish
+-- do (they are not reachable from here), but where it is: it is about to be
+-- moved. Left seated, seat.hold_seat would put it back in its chair after the
+-- teleport, and the reduced collision box would stay.
+local LEGS = {"leg.right", "leg.left"}
+local function release_seat(self)
+	if self._villages_seated then
+		for _, bone in ipairs(LEGS) do self.object:set_bone_override(bone, nil) end
+		if self._villages_seat_box then
+			self.collisionbox = self._villages_seat_box
+			self.object:set_properties({collisionbox = self.collisionbox})
+		end
+	end
+	local meal = self._villages_meal
+	if meal and meal.object then meal.object:remove() end
+	self._villages_meal, self._villages_seated_at = nil, nil
+	self._villages_seated, self._villages_seat, self._villages_seat_box = nil, nil, nil
+	self._villages_seat_exit, self._villages_seat_chair = nil, nil
+	self._villages_seat_searched_at, self._villages_seat_unreachable = nil, nil
+end
+
 local function reset_villager(self)
 	for _, field in pairs(ROUTE_FIELDS) do self[field] = nil end
 	self.state, self.waypoints, self.current_target, self.callback_arrived = "stand", nil, nil, nil
@@ -413,16 +435,28 @@ local function run_round(list, stage, variant, round)
 		if v.object:get_pos() and (v.health or 1) > 0 and v.state ~= "die" then table.insert(living, v) end
 	end
 	list = living
+	local was_seated = false
+	for _, v in ipairs(list) do
+		if v._villages_seated or v._villages_meal then was_seated = true end
+		release_seat(v)
+	end
+	-- The chairs and plates they held are released when the hold runs out
+	-- (seat.lua's HOLD_SECONDS is 10).
+	if was_seated then wait(11) end
 	for _, v in ipairs(list) do reset_villager(v) end
 	core.set_timeofday(stage.tod)
 	-- Start each villager beside another one's home (to go to work) or
 	-- workplace (to go anywhere else), a different one each round.
 	local used = {}
+	round_info.origins = {}
 	for index, v in ipairs(list) do
 		local source = list[(index + round * 3) % #list + 1]
 		local base = (stage.name == "work" and source._bed) or source._jobsite or source._bed
 		local cell = base and stand_near(base, used)
-		if cell then v.object:set_pos({x = cell.x, y = cell.y - 0.45, z = cell.z}) end
+		if cell then
+			v.object:set_pos({x = cell.x, y = cell.y - 0.45, z = cell.z})
+			round_info.origins[villager_id(v)] = vec(cell)
+		end
 	end
 	local began = elapsed_real
 	wait(2)
