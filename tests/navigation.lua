@@ -1517,6 +1517,63 @@ assert(not saved_fields._villages_fish_target,
 assert(travelling._villages_bed_route and travelling._villages_fish_target,
 	"the live villager must keep its trip state across a save")
 
+-- Review of #162: polling, superseded detours and holding a waiting villager.
+do
+	timeofday = 0.8
+	low_ceiling = true
+	local hold_def = {
+		on_activate = function() end,
+		do_custom = function() end,
+		gopath = function(self, target, callback)
+			self.callback_arrived = callback
+			self.current_target = {pos = {x = 2, y = 0, z = 0}}
+			self.waypoints = {{pos = {x = 1, y = 0, z = 0}}, {pos = vector.new(target)}}
+			self.state = "gowp"
+			return true
+		end,
+	}
+	dofile("navigation.lua")(hold_def)
+	local function new_entity()
+		return {
+			_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
+			object = {get_pos = function() return {x = 5, y = 0.5, z = 0} end, set_velocity = function() end},
+		}
+	end
+	-- Polling while the search is queued keeps the one route and the one job.
+	local polled = new_entity()
+	assert(hold_def.gopath(polled, polled._bed, nil, true))
+	local first_id = polled._villages_bed_route.id
+	assert(polled._villages_bed_route.status == "planning")
+	polled._pf_last_failed = os.time()
+	assert(hold_def.gopath(polled, polled._bed, nil, true))
+	assert(polled._villages_bed_route.id == first_id and polled._villages_bed_route.status == "planning",
+		"a repeated gopath reuses the planning route")
+	-- The villager is held on every tick, even if vanilla would walk it off.
+	polled.state = "walk"
+	assert(hold_def.do_custom(polled, 0.1) == false, "a planning villager skips vanilla's states")
+	assert(polled.state == "stand", "and stands still")
+	settle()
+	assert(polled._villages_bed_route.status == "travelling" and polled._villages_bed_route.mode == "planner")
+	assert(polled._villages_bed_route.id == first_id)
+
+	-- A detour that a later trip superseded must not start.
+	local first_callback, second_callback = function() end, function() end
+	local detoured = new_entity()
+	detoured._bed = nil
+	detoured._jobsite = {x = 50, y = 0, z = 0}
+	timeofday = 0.3
+	assert(hold_def.gopath(detoured, {x = -2, y = 0, z = 0}, first_callback, true))
+	assert(detoured.state == "stand" and hold_def.do_custom(detoured, 0.1) == false, "a detour waits in place")
+	low_ceiling = false
+	assert(hold_def.gopath(detoured, {x = 8, y = 0, z = 0}, second_callback, true))
+	settle()
+	timeofday = 0.8
+	assert(detoured._target == nil or detoured._target.x == 8 or detoured.callback_arrived == second_callback)
+	assert(detoured.callback_arrived == second_callback, "the superseded detour does not restore its callback")
+	assert(detoured.waypoints[#detoured.waypoints].pos.x == 8, "nor its path")
+	low_ceiling = false
+end
+
 math.random = real_random
 
 print("navigation.lua: ok")

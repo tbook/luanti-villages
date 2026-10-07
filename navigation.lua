@@ -727,6 +727,11 @@ local detours = setmetatable({}, {__mode = "k"})
 -- A finished workstation search, handed back to the gopath call that asked for it.
 local job_selections = setmetatable({}, {__mode = "k"})
 
+local ROUTE_FIELDS = {
+	"_villages_bed_route", "_villages_job_route", "_villages_farm_route", "_villages_fish_route",
+	"_villages_job_search_route", "_villages_tavern_route",
+}
+
 local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
 	"_villages_fish_route", "_villages_job_search_route",
@@ -844,6 +849,9 @@ local function install(def)
 		local destination
 		local selected = job_selections[self]
 		job_selections[self] = nil
+		-- Any new request supersedes a queued detour, unless it is the same one.
+		local pending_detour = detours[self]
+		detours[self] = nil
 		local no_jobsite_candidate = false
 		local now = core.get_gametime()
 		if self._bed and same_pos(target, self._bed) and is_home_time(self) then
@@ -934,8 +942,10 @@ local function install(def)
 		end
 		if not destination then
 			-- A detour for this very target is still being planned.
-			local pending = detours[self]
-			if pending and same_pos(pending.target, vector.round(target)) then return true end
+			if pending_detour and same_pos(pending_detour.target, vector.round(target)) then
+				detours[self] = pending_detour
+				return true
+			end
 			local started = original_gopath(self, target, callback_arrived, prioritised)
 			if not (started or self.state == PATHFINDING) then return started end
 			local clear, head = legacy_route_has_headroom(self)
@@ -968,6 +978,11 @@ local function install(def)
 		end
 
 		local route = self[destination.route_field]
+		-- A search for this trip is already queued; polling must not replace it.
+		if route and route.status == "planning" then
+			stop(self)
+			return true
+		end
 		if route and route.status == "retry" and now < route.retry_at then
 			stop(self)
 			return false
@@ -1035,7 +1050,28 @@ local function install(def)
 		return true
 	end
 
+	-- A villager waiting for a route stays where its search started: vanilla's
+	-- do_states would otherwise walk it off on its own order.
+	local function planning_hold(self)
+		if detours[self] then return true end
+		for _, field in ipairs(ROUTE_FIELDS) do
+			local route = self[field]
+			if route and route.status == "planning" then return true end
+		end
+		return false
+	end
+
+	local custom
 	def.do_custom = function(self, dtime)
+		local result = custom(self, dtime)
+		if result ~= false and planning_hold(self) then
+			stop(self)
+			return false
+		end
+		return result
+	end
+
+	custom = function(self, dtime)
 		local result = original_custom(self, dtime)
 		-- The global step is the authoritative cleanup path. This also keeps
 		-- standalone callers responsive in environments without global steps.
@@ -1050,6 +1086,7 @@ local function install(def)
 			cancel_route(self, "_villages_tavern_route")
 			self._villages_farm_target = nil
 			self._villages_fish_target = nil
+			detours[self] = nil
 			return result
 		end
 		if not is_home_time(self) then
