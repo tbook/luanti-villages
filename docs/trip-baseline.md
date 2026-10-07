@@ -38,8 +38,7 @@ Natural days (B and C, trips of 3 nodes or more): bed 41 of 54 arrived, jobsite 
 bell walks 47 of 84, tavern **0 of 27** (4 with no route, the rest abandoned after retries).
 
 The tavern is the outlier. Its failures are mostly `stair planner reached its search limit after 4096
-nodes` from 14 to 33 nodes away, and they happen in a village with plain ground between the villager and
-the jukebox. This is the same family as #156 ("no route after 24 nodes") and is for #161 to diagnose;
+nodes` from 14 to 33 nodes away. This is the same family as #156 ("no route after 24 nodes") and is for #161 to diagnose;
 the stock tavern in #159's tests did not reproduce it, so look at these villages' real nodes.
 
 ## The three questions
