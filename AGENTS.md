@@ -17,7 +17,8 @@ their jobsite lose it, so vanilla demotes them.
 | `births.lua` | Bed-limited births. The cooldown is stored in bed metadata |
 | `navigation.lua` | Trips to beds, jobsites, and targets. Uses VoxeLibre's pathing first, then falls back to `planner.lua` |
 | `step.lua` | Lets a villager on a planned route jump a full step topped with carpet, which vanilla's `do_jump` reads as a two-block stack |
-| `planner.lua` | Limited A* search over walkable positions, including stairs and wooden doors |
+| `planner.lua` | Limited A* search over walkable positions, including stairs and wooden doors. Calls `options.checkpoint` every few nodes so a search can pause |
+| `route_queue.lua` | Time-sliced planning (#162): searches (the planner, the workstation search) run as coroutines from one round-robin queue under a per-step budget (`living_villages_route_budget_ms`). A villager waits in route status `planning` and stands still. Range and node cap are `living_villages_route_range` and `_max_nodes` |
 | `doors.lua` | Which edge of its cell a door's leaf lies on, and which entries and exits of the cell that leaves free |
 | `farmer.lua` | Farmer visits to crops near a claimed composter |
 | `fisherman.lua` | Water-based fisherman profession, the fishing loop, and the bobber and rod entities |

@@ -182,7 +182,13 @@ local function route(world, def, start, target, field, route_field, timeofday)
 	}
 	entity[field] = target
 	world.claim(target, "v1")
-	if not def.gopath(entity, target, nil, true) then
+	local started = def.gopath(entity, target, nil, true)
+	-- Planning runs from the route queue's globalstep (#162).
+	for _ = 1, 100000 do
+		if (entity[route_field] or {}).status ~= "planning" then break end
+		for _, step in ipairs(world.globalsteps) do step(0.1) end
+	end
+	if not started or (entity[route_field] or {}).status == "retry" then
 		return nil, (entity[route_field] or {}).reason or "gopath refused"
 	end
 	local cells = {}

@@ -4,6 +4,8 @@
 -- jobsites, and later door-aware routes.
 local planner = {}
 
+local CHECKPOINT_EVERY = 16
+
 local directions = {
 	{x = 1, z = 0}, {x = -1, z = 0}, {x = 0, z = 1}, {x = 0, z = -1},
 }
@@ -73,7 +75,9 @@ end
 -- the route enters and leaves it (a door cell, #121), and `options.crossing(from,
 -- gate, to)` then says whether that entry and exit are allowed together. The
 -- search keeps one state per way into a gate for that reason. The third return
--- value is `found`, `unreachable`, or `search_limit`.
+-- value is `found`, `unreachable`, or `search_limit`. `options.checkpoint()`, if
+-- given, is called every few nodes; route_queue.lua uses it to pause a search
+-- between steps (#162).
 function planner.find_path(start, can_stand, goal, options)
 	options = options or {}
 	local range = options.range or 48
@@ -105,6 +109,7 @@ function planner.find_path(start, can_stand, goal, options)
 			local current_key = entry.key
 			closed[current_key] = true
 			visited = visited + 1
+			if options.checkpoint and visited % CHECKPOINT_EVERY == 0 then options.checkpoint() end
 			local distance = options.distance and options.distance(current.pos)
 			if distance and (not closest_distance or distance < closest_distance
 				or (distance == closest_distance and current.g < closest_cost)) then

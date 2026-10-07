@@ -34,7 +34,7 @@ local function group(name, wanted)
 end
 
 function stock_world.new()
-	local world = {cells = {}, meta = {}, timeofday = 0.8, logged = {}}
+	local world = {cells = {}, meta = {}, timeofday = 0.8, logged = {}, globalsteps = {}}
 
 	function world.get(pos)
 		local found = world.cells[key(pos)]
@@ -176,7 +176,7 @@ function stock_world.install(world)
 		find_nodes_in_area = function() return {} end,
 		get_objects_inside_radius = function() return {} end,
 		hash_node_position = key,
-		register_globalstep = function() end,
+		register_globalstep = function(step) table.insert(world.globalsteps, step) end,
 		log = function(_, message) table.insert(world.logged, message) end,
 		pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 		serialize_schematic = function() return nil end,

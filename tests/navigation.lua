@@ -17,11 +17,20 @@ local search_sites = {}
 local job_search_scans = 0
 local jobsite_claimed = true
 local globalstep = nil
+local all_steps = {}
 local water_sites = {}
 local water_source_nodes = {}
 local water_scans = 0
 local raised_shore_nodes = {}
 local logged = {}
+
+-- Route planning runs from the route queue's globalstep (#162); settle() lets
+-- every pending search finish.
+local function settle()
+	for _ = 1, 200 do
+		for _, step in ipairs(all_steps) do step(0.1) end
+	end
+end
 
 minetest = {
 	registered_nodes = {
@@ -107,7 +116,7 @@ minetest = {
 	end,
 	get_objects_inside_radius = function() return nearby_objects end,
 	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
-	register_globalstep = function(callback) globalstep = callback end,
+	register_globalstep = function(callback) globalstep = callback; table.insert(all_steps, callback) end,
 	log = function(level, message) table.insert(logged, message) end,
 	pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 }
@@ -144,6 +153,7 @@ local entity = {
 	},
 }
 assert(def.gopath(entity, entity._bed, function() end, true))
+settle()
 assert(gopath_target and not (gopath_target.x == 0 and gopath_target.z == 0))
 assert(preflight_start.y == 1 and preflight_range == 40)
 assert(entity._villages_bed_route.status == "travelling")
@@ -170,6 +180,7 @@ local cost_aware_bed_entity = {
 	},
 }
 assert(def.gopath(cost_aware_bed_entity, cost_aware_bed_entity._bed, nil, true))
+settle()
 assert(gopath_target.x == -1 and gopath_target.z == 0)
 engine_paths = nil
 
@@ -184,6 +195,7 @@ local expanded_range_entity = {
 	},
 }
 assert(def.gopath(expanded_range_entity, expanded_range_entity._bed, nil, true))
+settle()
 assert(preflight_range == 40 and preflight_found)
 required_path_range = 0
 
@@ -198,6 +210,7 @@ local pane_entity = {
 	},
 }
 assert(def.gopath(pane_entity, pane_entity._bed, nil, true))
+settle()
 assert(gopath_target.x == -1 and gopath_target.z == 0)
 glass_pane = false
 
@@ -211,6 +224,7 @@ local low_ceiling_entity = {
 	},
 }
 assert(def.gopath(low_ceiling_entity, low_ceiling_entity._bed, nil, true))
+settle()
 assert(gopath_target.x == -1 and gopath_target.z == 0)
 low_ceiling = false
 
@@ -238,6 +252,7 @@ local overhang_entity = {
 	},
 }
 assert(overhang_def.gopath(overhang_entity, overhang_entity._bed, nil, true))
+settle()
 assert(overhang_entity._villages_bed_route.mode == "planner", "a route under an overhang goes to the planner")
 for _, waypoint in ipairs(overhang_entity.waypoints) do
 	assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "the planner's route keeps clear of the overhang")
@@ -257,6 +272,7 @@ local detour_entity = {
 }
 timeofday = 0.3
 assert(overhang_def.gopath(detour_entity, {x = -2, y = 0, z = 0}, detour_arrived, true))
+settle()
 timeofday = 0.8
 assert(detour_entity.state == "gowp" and detour_entity._target.x == -2 and detour_entity._target.z == 0,
 	"an unmanaged trip keeps its own target")
@@ -276,13 +292,16 @@ local stuck_entity = {
 	},
 }
 timeofday = 0.3
-assert(not overhang_def.gopath(stuck_entity, {x = -2, y = 0, z = 0}, nil, true))
+assert(overhang_def.gopath(stuck_entity, {x = -2, y = 0, z = 0}, nil, true), "the detour is planned later")
+assert(stuck_entity.state == "stand" and not stuck_entity._pf_last_failed, "and the villager waits meanwhile")
+settle()
 timeofday = 0.8
 assert(stuck_entity.state == "stand" and stuck_entity._pf_last_failed, "a failed detour sets the pathfinding cooldown")
 support_available = true
 low_ceiling = false
 
 def.do_custom(entity, 0.1)
+settle()
 assert(entity._villages_bed_route.status == "arrived")
 
 local failed_def = {
@@ -331,6 +350,7 @@ local stair_support_entity = {
 	},
 }
 assert(def.gopath(stair_support_entity, stair_support_entity._bed, nil, true))
+settle()
 support_node = "stone"
 
 local cooldown_called = false
@@ -369,6 +389,7 @@ local fallback_entity = {
 	},
 }
 assert(fallback_def.gopath(fallback_entity, fallback_entity._bed, nil, true))
+settle()
 assert(fallback_entity.state == "gowp")
 assert(fallback_entity.current_target and fallback_entity.waypoints)
 
@@ -395,6 +416,7 @@ local door_entity = {
 	},
 }
 assert(door_def.gopath(door_entity, door_entity._bed, nil, true))
+settle()
 local opens_door = door_entity.current_target.action and door_entity.current_target.action.action == "open"
 for _, waypoint in ipairs(door_entity.waypoints) do
 	if waypoint.action and waypoint.action.action == "open" then opens_door = true end
@@ -432,6 +454,7 @@ local trailing_door_entity = {
 	},
 }
 assert(trailing_door_def.gopath(trailing_door_entity, trailing_door_entity._bed, nil, true))
+settle()
 local no_close_waypoint = trailing_door_entity.current_target.action == nil
 for _, waypoint in ipairs(trailing_door_entity.waypoints) do
 	if waypoint.action and waypoint.action.action == "close" then no_close_waypoint = false end
@@ -453,9 +476,11 @@ local superseded_trailing_entity = {
 	},
 }
 assert(trailing_door_def.gopath(superseded_trailing_entity, superseded_trailing_entity._bed, nil, true))
+settle()
 local stale_trailing_arrived = superseded_trailing_entity.callback_arrived
 superseded_trailing_entity.state = "stand"
 assert(trailing_door_def.gopath(superseded_trailing_entity, superseded_trailing_entity._bed, nil, true))
+settle()
 stale_trailing_arrived(superseded_trailing_entity)
 assert(not trailing_close_action, "a superseded route must not close its old trailing door")
 minetest.get_node_or_nil = trailing_door_node
@@ -493,6 +518,7 @@ local stair_side_entity = {
 	},
 }
 assert(stair_side_def.gopath(stair_side_entity, stair_side_entity._bed, nil, true))
+settle()
 assert(stair_side_entity._target and stair_side_entity._target.x == 1
 	and stair_side_entity._target.y == 1 and stair_side_entity._target.z == 0,
 	"the planner must reach the bed by jumping onto the stair from its side")
@@ -537,6 +563,7 @@ minetest.get_meta = function(pos)
 	end}
 end
 proactive_def.do_custom(proactive_entity, 0.1)
+settle()
 assert(proactive_target and not (proactive_target.x == 0 and proactive_target.z == 0))
 assert(proactive_entity._villages_bed_route.status == "travelling")
 
@@ -551,6 +578,7 @@ local blocked_entity = {
 	},
 }
 proactive_def.do_custom(blocked_entity, 0.1)
+settle()
 assert(not proactive_target)
 assert(not blocked_entity._villages_bed_route)
 
@@ -568,6 +596,7 @@ local already_home_entity = {
 	},
 }
 proactive_def.do_custom(already_home_entity, 0.1)
+settle()
 assert(not proactive_target, "an already-close villager must not be sent on a bed trip")
 assert(already_home_entity.order == "sleep",
 	"an already-close villager must get order = sleep immediately, not after VoxeLibre's poll")
@@ -595,6 +624,7 @@ local job_entity = {
 }
 timeofday = 0.7
 assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
+settle()
 assert(job_target.x == 10 and job_target.z == 0)
 assert(not job_entity._villages_job_route)
 
@@ -633,6 +663,7 @@ local off_stair_entity = {
 	},
 }
 assert(off_stair_def.gopath(off_stair_entity, off_stair_entity._jobsite, nil, true))
+settle()
 assert(off_stair_entity.current_target and #off_stair_entity.waypoints == 0,
 	"stepping off the stair must be a direct one-node drop, not a detour")
 minetest.get_node_or_nil = off_stair_node
@@ -641,6 +672,7 @@ path_available = true
 jobsite_present = false
 job_entity._villages_job_route = nil
 assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
+settle()
 assert(job_target.x == 10 and job_target.z == 0)
 
 -- When native look_for_job sends its nearest raw node to gopath, redirect the
@@ -662,6 +694,7 @@ local searching_entity = {
 	},
 }
 assert(job_def.gopath(searching_entity, {x = 10, y = 0, z = 0}, nil, true))
+settle()
 assert(job_target and job_target.x >= 29)
 assert(searching_entity._villages_job_search_route.status == "travelling")
 assert(not searching_entity._jobsite)
@@ -685,6 +718,7 @@ local cost_aware_job_entity = {
 	},
 }
 assert(job_def.gopath(cost_aware_job_entity, {x = 10, y = 0, z = 0}, nil, true))
+settle()
 assert(job_target.x == 31 and job_target.z == 0)
 engine_paths = nil
 search_sites = {}
@@ -705,7 +739,9 @@ local no_site_entity = {
 		set_velocity = function() end,
 	},
 }
-assert(not job_def.gopath(no_site_entity, {x = 10, y = 0, z = 0}, nil, true))
+assert(job_def.gopath(no_site_entity, {x = 10, y = 0, z = 0}, nil, true))
+assert(no_site_entity._villages_job_search_route.status == "planning", "the search waits its turn")
+settle()
 assert(no_site_entity._villages_job_search_route.status == "retry")
 assert(no_site_entity._villages_job_search_route.reason == "no reachable unclaimed workstation")
 local scans_after_failure = job_search_scans
@@ -739,6 +775,7 @@ local pulpit_seeker = {
 	object = {get_pos = function() return {x = 35, y = 0, z = 0} end, set_velocity = function() end},
 }
 assert(job_def.gopath(pulpit_seeker, {x = 40, y = 0, z = 0}, function() pulpit_arrivals = pulpit_arrivals + 1 end, true))
+settle()
 assert(job_target and math.abs(job_target.x - 40) + math.abs(job_target.z) == 1 and job_target.y == 0,
 	"a pulpit trip ends on a cardinal neighbor, where the claim on arrival finds it")
 assert(pulpit_seeker._villages_job_search_route.status == "travelling")
@@ -759,6 +796,7 @@ local pulpit_cleric = {
 }
 assert(failing_def.gopath(pulpit_cleric, pulpit_cleric._jobsite, nil, true),
 	"the planner takes over when the legacy pathfinder fails")
+settle()
 assert(pulpit_cleric._villages_job_route.status == "travelling" and pulpit_cleric._villages_job_route.mode == "planner")
 minetest.get_node_or_nil, minetest.get_meta = pulpit_node, pulpit_meta
 pulpit_claimed = false
@@ -792,6 +830,7 @@ assert(recovery_def.gopath(recovery_entity, recovery_entity._bed, function()
 end, true))
 recovery_entity.state = "stand"
 recovery_def.do_custom(recovery_entity, 0.1)
+settle()
 assert(recovery_entity.state == "gowp")
 recovery_entity.callback_arrived(recovery_entity)
 assert(bed_callback_called)
@@ -807,6 +846,7 @@ local exhausted_recovery_entity = {
 	},
 }
 assert(recovery_def.gopath(exhausted_recovery_entity, exhausted_recovery_entity._bed, nil, true))
+settle()
 exhausted_recovery_entity.state = "stand"
 support_available = false
 local no_bed_approach_node = minetest.get_node_or_nil
@@ -815,6 +855,7 @@ minetest.get_node_or_nil = function(pos)
 	return no_bed_approach_node(pos)
 end
 recovery_def.do_custom(exhausted_recovery_entity, 0.1)
+settle()
 assert(exhausted_recovery_entity._villages_bed_route.status == "retry")
 assert(exhausted_recovery_entity._villages_bed_route.reason:find("stair planner", 1, true))
 assert(exhausted_recovery_entity._villages_bed_route.reason:find("after 0 nodes", 1, true))
@@ -838,6 +879,7 @@ recovery_def.do_pathfind_action(changed_door_entity, {
 })
 assert(changed_door_entity._villages_blocked_door)
 recovery_def.do_custom(changed_door_entity, 0.1)
+settle()
 assert(changed_door_entity.state == "gowp")
 assert(changed_door_entity._villages_bed_route.mode == "planner")
 iron_door = false
@@ -854,6 +896,7 @@ local interrupted_farmer = {
 	},
 }
 job_def.do_custom(interrupted_farmer, 0.1)
+settle()
 assert(not interrupted_farmer._villages_farm_route)
 assert(not interrupted_farmer._villages_farm_target)
 
@@ -893,6 +936,7 @@ minetest.get_objects_inside_radius = function(pos)
 	return {}
 end
 assert(job_def.gopath(fish_entity, fish_entity._villages_fish_target, nil, true))
+settle()
 assert(not (job_target.x == occupied_stand.x and job_target.z == occupied_stand.z),
 	"an occupied stand must be skipped for another candidate")
 minetest.get_objects_inside_radius = original_objects_near
@@ -944,6 +988,7 @@ local interrupted_fisherman = {
 	},
 }
 job_def.do_custom(interrupted_fisherman, 0.1)
+settle()
 assert(not interrupted_fisherman._villages_fish_route)
 assert(not interrupted_fisherman._villages_fish_target)
 water_source_nodes[fish_site.x .. ":" .. fish_site.y .. ":" .. fish_site.z] = nil
@@ -1062,6 +1107,7 @@ local falsey_entity = {
 	},
 }
 assert(falsey_def.gopath(falsey_entity, falsey_entity._bed, nil, true))
+settle()
 assert(falsey_entity._villages_bed_route.status == "travelling")
 
 -- A canceled or superseded route must not run its old arrival callback.
@@ -1111,6 +1157,7 @@ local following_entity = {
 	},
 }
 ownership_def.do_custom(following_entity, 0.1)
+settle()
 assert(not following_entity._villages_bed_route)
 assert(following_entity.state == "stand")
 
@@ -1134,9 +1181,11 @@ local stalled_entity = {
 }
 now = 500
 assert(stalled_def.gopath(stalled_entity, stalled_entity._bed, nil, true))
+settle()
 local stalled_route_id = stalled_entity._villages_bed_route.id
 now = now + 21
 stalled_def.do_custom(stalled_entity, 0.1)
+settle()
 assert(stalled_entity.state == "gowp")
 assert(stalled_entity._villages_bed_route.mode == "planner")
 assert(stalled_entity._villages_bed_route.id ~= stalled_route_id)
@@ -1229,12 +1278,14 @@ water_scans = 0
 place_pond(5, 7, -1, 1, 0)
 local promoted_entity = new_promotion_entity()
 promotion_def.do_custom(promoted_entity, 0.1)
+settle()
 assert(promoted_entity._profession == "fisherman", "a 3x3 pond must qualify for promotion")
 assert(promoted_entity._villages_fisherman == true, "promotion must set the fisherman guard flag immediately")
 assert(water_scans == 1)
 
 -- Idempotent, and the cooldown suppresses a rescan on the very next tick.
 promotion_def.do_custom(promoted_entity, 0.1)
+settle()
 assert(promoted_entity._profession == "fisherman")
 assert(water_scans == 1, "the promotion evaluation must respect its cooldown")
 clear_pond()
@@ -1243,6 +1294,7 @@ clear_pond()
 place_pond(5, 6, -1, 0, 0)
 local small_pool_entity = new_promotion_entity()
 promotion_def.do_custom(small_pool_entity, 0.1)
+settle()
 assert(small_pool_entity._profession == "unemployed", "a 2x2 pool must not qualify for promotion")
 clear_pond()
 
@@ -1252,6 +1304,7 @@ clear_pond()
 place_pond(5, 20, 0, 0, 0)
 local channel_entity = new_promotion_entity()
 promotion_def.do_custom(channel_entity, 0.1)
+settle()
 assert(channel_entity._profession == "unemployed", "a one-wide channel must not qualify for promotion")
 clear_pond()
 
@@ -1269,6 +1322,7 @@ for x = 25, 27 do
 end
 local boundary_entity = new_promotion_entity()
 promotion_def.do_custom(boundary_entity, 0.1)
+settle()
 assert(boundary_entity._profession == "unemployed",
 	"a pond outside the search radius must not qualify, even reached from an in-bounds seed")
 clear_pond()
@@ -1280,6 +1334,7 @@ water_scans = 0
 place_pond(5, 7, -1, 1, -6)
 local below_entity = new_promotion_entity()
 promotion_def.do_custom(below_entity, 0.1)
+settle()
 assert(below_entity._profession == "fisherman", "a qualifying pond 6 below the bed must be found")
 clear_pond()
 
@@ -1287,6 +1342,7 @@ water_scans = 0
 place_pond(5, 7, -1, 1, -7)
 local too_deep_entity = new_promotion_entity()
 promotion_def.do_custom(too_deep_entity, 0.1)
+settle()
 assert(too_deep_entity._profession == "unemployed", "a pond 7 below the bed must be outside the downward reach")
 clear_pond()
 
@@ -1294,6 +1350,7 @@ water_scans = 0
 place_pond(5, 7, -1, 1, 2)
 local above_entity = new_promotion_entity()
 promotion_def.do_custom(above_entity, 0.1)
+settle()
 assert(above_entity._profession == "fisherman", "a qualifying pond 2 above the bed must be found")
 clear_pond()
 
@@ -1301,6 +1358,7 @@ water_scans = 0
 place_pond(5, 7, -1, 1, 3)
 local too_high_entity = new_promotion_entity()
 promotion_def.do_custom(too_high_entity, 0.1)
+settle()
 assert(too_high_entity._profession == "unemployed", "a pond 3 above the bed must be outside the narrower upward reach")
 clear_pond()
 
@@ -1321,6 +1379,7 @@ local workstation_entity = new_promotion_entity({
 	},
 })
 promotion_def.do_custom(workstation_entity, 0.1)
+settle()
 assert(workstation_entity._profession == "unemployed", "a reachable workstation must suppress promotion")
 assert(not workstation_entity._villages_fisherman)
 assert(water_scans == 1, "water is checked before the workstation search")
@@ -1342,6 +1401,7 @@ minetest.find_path = function(...)
 end
 local dry_entity = new_promotion_entity()
 promotion_def.do_custom(dry_entity, 0.1)
+settle()
 assert(water_scans == 1, "the water is checked")
 assert(path_calls == 0, "no water means no workstation search")
 assert(dry_entity._profession == "unemployed")
@@ -1371,6 +1431,7 @@ for _ = 1, 30 do
 	now = now + 1
 	for i = 1, 3 do
 		promotion_def.do_custom(morning[i], 0.1)
+		settle()
 		if not promoted_at[i] and morning[i]._profession == "fisherman" then promoted_at[i] = now - start end
 	end
 end
@@ -1386,6 +1447,7 @@ place_pond(5, 7, -1, 1, 0)
 local bedless_entity = new_promotion_entity()
 bedless_entity._bed = nil
 promotion_def.do_custom(bedless_entity, 0.1)
+settle()
 assert(bedless_entity._profession == "unemployed", "a bedless villager must never be promoted")
 assert(water_scans == 0, "a bedless villager must never reach the water search")
 clear_pond()
@@ -1394,10 +1456,12 @@ clear_pond()
 place_pond(5, 7, -1, 1, 0)
 local child_entity = new_promotion_entity({child = true})
 promotion_def.do_custom(child_entity, 0.1)
+settle()
 assert(child_entity._profession == "unemployed", "a child must never be promoted")
 
 local nitwit_entity = new_promotion_entity({_profession = "nitwit"})
 promotion_def.do_custom(nitwit_entity, 0.1)
+settle()
 assert(nitwit_entity._profession == "nitwit", "a nitwit must never be promoted")
 clear_pond()
 
@@ -1413,6 +1477,7 @@ minetest.get_node_or_nil = function(pos)
 end
 local big_pond_entity = new_promotion_entity()
 promotion_def.do_custom(big_pond_entity, 0.1)
+settle()
 minetest.get_node_or_nil = original_lookup
 assert(big_pond_entity._profession == "fisherman", "a large lake must still qualify for promotion")
 assert(lookup_calls < 500, "the flood fill must stop at its cap instead of scanning the whole lake")
