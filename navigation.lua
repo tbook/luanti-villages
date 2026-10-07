@@ -1,6 +1,7 @@
 -- Bed-directed navigation on top of VoxeLibre's legacy gopath API.  Keep the
 -- game's bed claims and movement implementation, but direct trips to an open
--- square beside a bed and retain enough state for useful diagnostics.
+-- square beside a bed and retain enough state for useful diagnostics. The
+-- planner chooses every route (#163); the legacy mover only walks it.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_work_time = common.is_work_time
@@ -28,6 +29,13 @@ local function planner_max_nodes()
 	return tonumber(core.settings and core.settings:get("living_villages_route_max_nodes")) or 4096
 end
 local PATHFINDING = "gowp"
+-- The planner chooses every route (#163). Off brings back the engine-first
+-- route choice, until the legacy mover is replaced (#164) and this goes.
+local function planner_routes()
+	local settings = core.settings
+	if not (settings and settings.get_bool) then return true end
+	return settings:get_bool("living_villages_planner_routes", true)
+end
 local DOOR_USE_RADIUS = 2.5
 -- Door closes must outlive the villager that scheduled them: an entity can be
 -- unloaded or despawned while another villager is still passing through.
@@ -446,7 +454,8 @@ local function job_search_target(self)
 			-- Native employ uses find_node_near(..., 1, ...); a diagonal
 			-- destination is not close enough to complete the native claim.
 			local candidates = approaches(site, true)
-			local approach, engine_path, engine_cost = choose_approach(self, candidates)
+			local approach, engine_path, engine_cost
+			if not planner_routes() then approach, engine_path, engine_cost = choose_approach(self, candidates) end
 			if engine_path then
 				if better_jobsite(pos, site, engine_cost, best) then
 					best = {site = site, candidates = candidates, target = approach,
@@ -657,6 +666,8 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 					return
 				end
 			end
+			-- Like vanilla's gopath, hold off asking again for a while.
+			self._pf_last_failed = os.time()
 			fail(self, route_field, failure or opts.reason, opts.fail_target, nil, report)
 		end, {
 			valid = function() return current() and self.object:get_pos() ~= nil end,
@@ -664,6 +675,55 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 				if current() then fail(self, route_field, "route planning failed: " .. tostring(message), opts.fail_target) end
 			end,
 		})
+end
+
+local ROUTE_FIELDS = {
+	"_villages_bed_route", "_villages_job_route", "_villages_farm_route", "_villages_fish_route",
+	"_villages_job_search_route", "_villages_tavern_route", "_villages_goto_route",
+}
+
+-- A search still queued for another trip must not install its route over the
+-- one starting now.
+local function supersede_planning(self, route_field)
+	for _, field in ipairs(ROUTE_FIELDS) do
+		local route = self[field]
+		if field ~= route_field and route and route.status == "planning" then self[field] = nil end
+	end
+end
+
+-- Starts the trip to `destination` (see gopath), planning its route from the
+-- route queue (#162) while the villager stands still, unless the workstation
+-- search already planned one. Returns what gopath returns.
+local function plan_trip(self, destination, candidates, callback_arrived)
+	local field = destination.route_field
+	local first = destination.target or candidates[1]
+	if not first then
+		self._pf_last_failed = os.time()
+		fail(self, field, "no safe standing space beside " .. destination.kind)
+		return false
+	end
+	local reason = "pathfinder could not start a route to " .. destination.kind
+	self.order = nil
+	supersede_planning(self, field)
+	local route = set_route(self, field, {
+		status = destination.planner_path and "travelling" or "planning", mode = "planner",
+		target = vector.new(first), goal = destination.goal and vector.new(destination.goal) or nil,
+		started_at = core.get_gametime(), wall_started_at = os.time(), callback = callback_arrived,
+		site = destination.site and vector.new(destination.site) or nil,
+	})
+	if destination.planner_path then
+		if start_engine_path(self, first, destination.planner_path,
+			arrival_callback(field, route.id, first, callback_arrived, destination.sleep), true, field, route.id) then
+			return true
+		end
+		self._pf_last_failed = os.time()
+		fail(self, field, reason, first)
+		return false
+	end
+	plan_route_later(self, field, route.id, candidates, {
+		callback = callback_arrived, sleep = destination.sleep, fail_target = first, reason = reason,
+	})
+	return true
 end
 
 local function recover_route(self, destination)
@@ -727,14 +787,9 @@ local detours = setmetatable({}, {__mode = "k"})
 -- A finished workstation search, handed back to the gopath call that asked for it.
 local job_selections = setmetatable({}, {__mode = "k"})
 
-local ROUTE_FIELDS = {
-	"_villages_bed_route", "_villages_job_route", "_villages_farm_route", "_villages_fish_route",
-	"_villages_job_search_route", "_villages_tavern_route",
-}
-
 local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
-	"_villages_fish_route", "_villages_job_search_route",
+	"_villages_fish_route", "_villages_job_search_route", "_villages_goto_route",
 	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
 }
 
@@ -773,6 +828,7 @@ local function install(def)
 			or (self._villages_farm_route and self._villages_farm_route.status == "travelling")
 			or (self._villages_fish_route and self._villages_fish_route.status == "travelling")
 			or (self._villages_job_search_route and self._villages_job_search_route.status == "travelling")
+			or (self._villages_goto_route and self._villages_goto_route.status == "travelling")
 		self._villages_bed_route = nil
 		self._villages_job_route = nil
 		self._villages_farm_route = nil
@@ -780,6 +836,7 @@ local function install(def)
 		self._villages_fish_route = nil
 		self._villages_fish_target = nil
 		self._villages_job_search_route = nil
+		self._villages_goto_route = nil
 		if had_managed_route then stop(self) end
 		return result
 	end
@@ -846,6 +903,8 @@ local function install(def)
 	end
 
 	def.gopath = function(self, target, callback_arrived, prioritised)
+		-- Like vanilla's, a request does not interrupt a walk in progress.
+		if planner_routes() and self.state == PATHFINDING then return end
 		local destination
 		local selected = job_selections[self]
 		job_selections[self] = nil
@@ -940,6 +999,27 @@ local function install(def)
 				end
 			end
 		end
+		if not destination and planner_routes() then
+			-- Every trip this module does not otherwise manage -- a keeper walking
+			-- to its jukebox, a guest to its seat, vanilla's own -- is planned the
+			-- same way, to the target itself when a villager can stand there, or
+			-- else to a spot beside it (#163).
+			local goal = vector.round(target)
+			local walk = self._villages_goto_route
+			if walk and walk.status == "planning" then
+				if same_pos(walk.goal, goal) then
+					stop(self)
+					return true
+				end
+				-- A newer request for somewhere else supersedes the search.
+				self._villages_goto_route = nil
+			end
+			if self.ready_to_path and not self:ready_to_path(prioritised) then return end
+			destination = {
+				pos = goal, goal = goal, route_field = "_villages_goto_route", kind = "destination",
+				candidates = cells.can_stand(goal) and {goal} or approaches(goal),
+			}
+		end
 		if not destination then
 			-- A detour for this very target is still being planned.
 			if pending_detour and same_pos(pending_detour.target, vector.round(target)) then
@@ -984,7 +1064,8 @@ local function install(def)
 			return true
 		end
 		if route and route.status == "retry" and now < route.retry_at then
-			stop(self)
+			-- Another trip's own walk is none of a refused request's business.
+			if not destination.goal then stop(self) end
 			return false
 		end
 		if no_jobsite_candidate then
@@ -993,15 +1074,17 @@ local function install(def)
 		end
 		-- gopath enforces its own failure cooldown. Check it before selecting an
 		-- approach so that a restart or a quick retry is reported accurately.
-		if self.ready_to_path and not self:ready_to_path(true) then
+		if not destination.goal and self.ready_to_path and not self:ready_to_path(true) then
 			local elapsed = self._pf_last_failed and os.time() - self._pf_last_failed or 0
 			local retry = math.max(1, LEGACY_FAILURE_WAIT - elapsed)
-			fail(self, destination.route_field, "legacy pathfinder cooldown", nil, retry)
+			fail(self, destination.route_field,
+				planner_routes() and "pathfinder cooldown" or "legacy pathfinder cooldown", nil, retry)
 			return false
 		end
 
 		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
+		if planner_routes() then return plan_trip(self, destination, candidates, callback_arrived) end
 		local candidate, engine_path = destination.target, destination.engine_path
 		if not candidate then candidate, engine_path = choose_approach(self, candidates) end
 		if not candidate then
@@ -1084,10 +1167,24 @@ local function install(def)
 			cancel_route(self, "_villages_fish_route")
 			cancel_route(self, "_villages_job_search_route")
 			cancel_route(self, "_villages_tavern_route")
+			cancel_route(self, "_villages_goto_route")
 			self._villages_farm_target = nil
 			self._villages_fish_target = nil
 			detours[self] = nil
 			return result
+		end
+		-- Another module's own mover may take over a trip it asked for; only a
+		-- walk that stalls on this one's route is this module's to give up on.
+		local walk = self._villages_goto_route
+		if walk and walk.status == "travelling" then
+			if self.state ~= PATHFINDING then
+				self._villages_goto_route = nil
+			elseif recover_stalled_route(self, {
+				pos = walk.goal, route_field = "_villages_goto_route", kind = "destination",
+				claimed = function() return false end,
+			}) then
+				return result
+			end
 		end
 		if not is_home_time(self) then
 			cancel_route(self, "_villages_bed_route")

@@ -23,6 +23,9 @@ local water_source_nodes = {}
 local water_scans = 0
 local raised_shore_nodes = {}
 local logged = {}
+-- The planner chooses every route (#163). The first half of this file runs
+-- with the setting off, which keeps today's engine-first route choice.
+local planner_routes = false
 
 -- Route planning runs from the route queue's globalstep (#162); settle() lets
 -- every pending search finish.
@@ -48,6 +51,13 @@ minetest = {
 		["test:cactus"] = {walkable = true},
 		["mcl_core:water_source"] = {liquidtype = "source"},
 		["mcl_core:water_flowing"] = {liquidtype = "flowing"},
+	},
+	settings = {
+		get = function() return nil end,
+		get_bool = function(_, name, default)
+			if name == "living_villages_planner_routes" then return planner_routes end
+			return default
+		end,
 	},
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
@@ -1572,6 +1582,156 @@ do
 	assert(detoured.callback_arrived == second_callback, "the superseded detour does not restore its callback")
 	assert(detoured.waypoints[#detoured.waypoints].pos.x == 8, "nor its path")
 	low_ceiling = false
+end
+
+-- With the setting on (#163) the planner chooses every route: the engine's
+-- pathfinder and vanilla's gopath are never asked.
+do
+	planner_routes = true
+	timeofday = 0.8
+	low_ceiling, wooden_door, glass_pane = false, false, false
+	local engine_calls, vanilla_calls = 0, 0
+	local plain_find_path = minetest.find_path
+	minetest.find_path = function(...) engine_calls = engine_calls + 1 return plain_find_path(...) end
+	local planner_def = {
+		on_activate = function() end,
+		do_custom = function() end,
+		gopath = function() vanilla_calls = vanilla_calls + 1 return false end,
+	}
+	dofile("navigation.lua")(planner_def)
+	local function new_entity(bed)
+		return {
+			_id = "villager-1", _bed = bed and {x = 0, y = 0, z = 0}, state = "stand", order = "stand",
+			gopath = function(...) return planner_def.gopath(...) end,
+			object = {get_pos = function() return {x = 5, y = 0.5, z = 0} end, set_velocity = function() end},
+		}
+	end
+	local function ends_at(entity, x)
+		local last = entity.waypoints[#entity.waypoints] or entity.current_target
+		return last.pos.x == x
+	end
+
+	-- A managed trip is planned, then walked by the legacy mover.
+	local sleeper = new_entity(true)
+	assert(planner_def.gopath(sleeper, sleeper._bed, nil, true))
+	assert(sleeper._villages_bed_route.status == "planning" and sleeper._villages_bed_route.mode == "planner")
+	assert(sleeper.state == "stand", "a villager waits where it is while the search runs")
+	settle()
+	assert(sleeper._villages_bed_route.status == "travelling" and sleeper.state == "gowp")
+	assert(sleeper._target and sleeper.current_target, "the mover has its target and waypoint")
+	sleeper.callback_arrived(sleeper)
+	assert(sleeper.order == "sleep" and sleeper._villages_bed_route.status == "arrived")
+
+	-- So is any other trip, to the target itself when a villager can stand there.
+	local arrivals = {}
+	local walker = new_entity()
+	assert(planner_def.gopath(walker, {x = 8, y = 0, z = 0}, function(entity, target)
+		table.insert(arrivals, target)
+	end, true))
+	assert(walker._villages_goto_route.status == "planning" and walker.order == nil)
+	-- Polling the same request keeps its one search; another target replaces it.
+	local goto_id = walker._villages_goto_route.id
+	assert(planner_def.gopath(walker, {x = 8, y = 0, z = 0}, nil, true))
+	assert(walker._villages_goto_route.id == goto_id)
+	assert(planner_def.do_custom(walker, 0.1) == false, "a waiting villager is held")
+	settle()
+	assert(walker.state == "gowp" and ends_at(walker, 8) and walker._target.x == 8)
+	assert(walker._villages_goto_route.status == "travelling")
+	assert(planner_def.gopath(walker, {x = 9, y = 0, z = 0}, nil, true) == nil, "gopath does not interrupt a walk")
+	walker.callback_arrived(walker)
+	assert(#arrivals == 1 and arrivals[1].x == 8 and walker._villages_goto_route.status == "arrived")
+
+	local changed = new_entity()
+	local ignored = false
+	assert(planner_def.gopath(changed, {x = 8, y = 0, z = 0}, function() ignored = true end, true))
+	assert(planner_def.gopath(changed, {x = 9, y = 0, z = 0}, nil, true))
+	settle()
+	assert(ends_at(changed, 9) and not ignored, "the newer request is the one walked")
+
+	-- A target in solid ground is approached from beside it.
+	local beside = new_entity()
+	jobsite_present = true
+	assert(planner_def.gopath(beside, {x = 10, y = 0, z = 0}, nil, true))
+	settle()
+	assert(beside.state == "gowp")
+	local last = beside.waypoints[#beside.waypoints].pos
+	assert(math.abs(last.x - 10) <= 1 and math.abs(last.z) <= 1 and not (last.x == 10 and last.z == 0))
+
+	-- The planner keeps the villager clear of an overhang, whoever asked.
+	low_ceiling = true
+	local ducker = new_entity()
+	assert(planner_def.gopath(ducker, {x = -2, y = 0, z = 0}, nil, true))
+	settle()
+	assert(ducker.state == "gowp")
+	for _, waypoint in ipairs(ducker.waypoints) do
+		assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "no waypoint under the overhang")
+	end
+	low_ceiling = false
+
+	-- vanilla's failure cooldown holds a request back, and a failed search sets it.
+	local waiting = new_entity()
+	function waiting:ready_to_path() return false end
+	assert(planner_def.gopath(waiting, {x = 8, y = 0, z = 0}, nil, true) == nil)
+	assert(waiting._villages_goto_route == nil and waiting.state == "stand")
+	local cooling = new_entity(true)
+	function cooling:ready_to_path() return false end
+	assert(planner_def.gopath(cooling, cooling._bed, nil, true) == false)
+	assert(cooling._villages_bed_route.status == "retry" and cooling._villages_bed_route.reason == "pathfinder cooldown")
+	local trapped = new_entity()
+	support_available = false
+	assert(planner_def.gopath(trapped, {x = 8, y = 0, z = 0}, nil, true) == false, "nowhere to stand")
+	support_available = true
+	assert(trapped._villages_goto_route.status == "retry" and trapped._pf_last_failed, "a failed request sets the cooldown")
+	assert(trapped.state == "stand")
+
+	-- A repeated managed request keeps the walk it has (review of #163).
+	local commuter = new_entity(true)
+	assert(planner_def.gopath(commuter, commuter._bed, nil, true))
+	settle()
+	commuter.current_target.failed_attempts = 50
+	local walk_target = commuter.current_target
+	assert(planner_def.gopath(commuter, commuter._bed, nil, true) == nil)
+	assert(commuter.state == "gowp" and commuter.current_target == walk_target
+		and walk_target.failed_attempts == 50, "the walk is not restarted")
+
+	-- A search still queued for one trip does not overwrite the next trip's route.
+	local switcher = new_entity(true)
+	assert(planner_def.gopath(switcher, {x = 8, y = 0, z = 0}, nil, true))
+	assert(planner_def.gopath(switcher, switcher._bed, nil, true))
+	settle()
+	assert(switcher._villages_goto_route == nil, "the superseded search is dropped")
+	assert(switcher._villages_bed_route.status == "travelling" and switcher._target.x ~= 8)
+
+	-- A walk that stops making progress is given up on.
+	local stuck = new_entity()
+	assert(planner_def.gopath(stuck, {x = 8, y = 0, z = 0}, nil, true))
+	settle()
+	now = now + 60
+	assert(planner_def.do_custom(stuck, 0.1) ~= false)
+	assert(stuck._villages_goto_route.status == "retry" and stuck.state == "stand")
+	-- A trip another module's mover took over is dropped without a word.
+	local taken = new_entity()
+	assert(planner_def.gopath(taken, {x = 8, y = 0, z = 0}, nil, true))
+	settle()
+	taken.state = "stand"
+	planner_def.do_custom(taken, 0.1)
+	assert(taken._villages_goto_route == nil)
+
+	-- The workstation search plans its routes too.
+	search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
+	jobsite_claimed = false
+	local seeker = new_entity()
+	timeofday = 0.3
+	assert(planner_def.gopath(seeker, {x = 20, y = 0, z = 0}, nil, true))
+	settle()
+	assert(seeker._villages_job_search_route.status == "travelling" and seeker.state == "gowp")
+	timeofday = 0.8
+	search_sites = {}
+
+	assert(engine_calls == 0, "the engine's pathfinder is never asked")
+	assert(vanilla_calls == 0, "nor is vanilla's gopath")
+	minetest.find_path = plain_find_path
+	planner_routes = false
 end
 
 math.random = real_random

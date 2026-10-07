@@ -15,7 +15,7 @@ their jobsite lose it, so vanilla demotes them.
 | `cells.lua` | The one passability model (#161): which cells a villager may stand in, on and move between (`is_open`, `has_floor`, `can_stand`, `can_move`, the box checks). `common.lua`, `navigation.lua`, `fisherman.lua` and `diagnostic.lua` all ask it |
 | `common.lua` | Shared helpers with no side effects: schedule stages, standing space, bed and jobsite lookups |
 | `births.lua` | Bed-limited births. The cooldown is stored in bed metadata |
-| `navigation.lua` | Trips to beds, jobsites, and targets. Uses VoxeLibre's pathing first, then falls back to `planner.lua` |
+| `navigation.lua` | Trips to beds, jobsites, and targets. `planner.lua` chooses every route, through the route queue (#163); the setting `living_villages_planner_routes` off brings back the engine-first choice until #164 |
 | `step.lua` | Lets a villager on a planned route jump a full step topped with carpet, which vanilla's `do_jump` reads as a two-block stack |
 | `planner.lua` | Limited A* search over walkable positions, including stairs and wooden doors. Calls `options.checkpoint` every few nodes so a search can pause |
 | `route_queue.lua` | Time-sliced planning (#162): searches (the planner, the workstation search) run as coroutines from one round-robin queue under a per-step budget (`living_villages_route_budget_ms`). A villager waits in route status `planning` and stands still. Range and node cap are `living_villages_route_range` and `_max_nodes` |
