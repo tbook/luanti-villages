@@ -12,12 +12,16 @@ local vanilla_ticks = 0
 mcl_mobs = {mob_class = {check_gowp = function() vanilla_ticks = vanilla_ticks + 1 end}}
 
 local objects_near = {}
+local clock = 0
+local pending = {}
 minetest = {
 	get_modpath = function() return "." end,
 	get_item_group = function() return 0 end,
 	registered_nodes = {air = {walkable = false}, ["mcl_core:stone"] = {walkable = true}},
 	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
 	get_objects_inside_radius = function() return objects_near end,
+	get_us_time = function() return clock end,
+	after = function(_, callback, ...) table.insert(pending, {callback, ...}) end,
 }
 
 local function reset()
@@ -37,20 +41,22 @@ local DT = 0.1
 local function villager(x, z, path)
 	local pos, velocity, yaw = {x = x, y = -0.49, z = z}, 0, 0
 	local self = {
-		state = "gowp", walk_velocity = 1.2, run_velocity = 3, rotate = 0,
+		state = "gowp", jump = true, jump_height = 4, walk_velocity = 1.2, run_velocity = 3, rotate = 0,
 		actions = {}, jumps = 0, arrived = false,
 	}
 	self.object = {
 		get_pos = function() return {x = pos.x, y = pos.y, z = pos.z} end,
 		get_yaw = function() return yaw end,
-		get_velocity = function() return {x = 0, y = 0, z = 0} end,
-		set_velocity = function(_, v) self.object_velocity = v end,
-		set_acceleration = function() end,
+		get_velocity = function() return {x = 0, y = self.vy or 0, z = 0} end,
+		set_velocity = function(_, v)
+			self.object_velocity = v
+			if v.y == 4.3 then self.jumps = self.jumps + 1; self.jumped = v end
+		end,
+		set_acceleration = function(_, a) self.acceleration = a end,
 	}
 	self.turn_in_direction = function(_, dx, dz) yaw = -math.atan2(dx, dz) end
 	self.set_velocity = function(_, v) velocity = v end
 	self.set_animation = function() end
-	self.do_jump = function() self.jumps = self.jumps + 1 end
 	self.do_pathfind_action = function(entity, action) table.insert(entity.actions, action) end
 	self.callback_arrived = function() self.arrived = true end
 	self.waypoints = {}
@@ -60,6 +66,7 @@ local function villager(x, z, path)
 	self.walked = {}
 	-- Drive one tick, then move the villager along its heading.
 	self.tick = function()
+		clock = clock + DT * 1e6
 		def.check_gowp(self, DT)
 		pos.x = pos.x - math.sin(yaw) * velocity * DT
 		pos.z = pos.z + math.cos(yaw) * velocity * DT
@@ -172,13 +179,35 @@ v.object.get_pos = function() return {x = 0, y = -0.49, z = 6} end
 v.tick()
 assert(v._villages_follow_failed.reason == "off the planned route", "off route")
 
--- A rise is a step of its own: the villager jumps once beside it.
+-- A rise is a step of its own: one jump beside the step, with forward speed
+-- (vanilla's jump takes its speed from the villager, which may have none), even
+-- on the tick it lands, when its fall speed is still on it.
 reset()
 nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
 v = villager(0, 0, {cell(0, 0), {x = 2, y = 1, z = 0}})
 follower.begin(v)
+v.vy = -4
 run(v, 1.2)
-assert(v.jumps > 0, "jumps toward a rise")
+assert(v.jumps == 1, "jumps once toward a rise, not " .. v.jumps)
+assert(v.jumped.x > 1 and math.abs(v.jumped.z) < 0.01, "with forward speed along the heading")
+
+-- The pushes scheduled with a jump end with the walk: after arriving on the
+-- raised final cell, a late callback does not move the villager again.
+reset()
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+v = villager(0, 0, {cell(0, 0), {x = 2, y = 1, z = 0}})
+v.object.get_luaentity = function() return v end
+follower.begin(v)
+pending = {}
+run(v, 1.2)
+assert(#pending == 3, "a jump schedules three pushes")
+v.acceleration = nil
+v.object.get_pos = function() return {x = 2, y = 0.51, z = 0} end
+v.tick()
+assert(v.state == "stand" and v.arrived, "arrived on the raised cell")
+v.acceleration = {x = 0, y = 0, z = 0}
+for _, p in ipairs(pending) do p[1](v) end
+assert(v.acceleration.x == 0 and v.acceleration.z == 0, "stale pushes do nothing after arrival")
 
 -- Holding for a turn stops what is moving, not just the acceleration
 -- (upstream's set_velocity(0) leaves the object's velocity alone).
@@ -200,5 +229,15 @@ assert(v.arrived, "detour arrives")
 for _, p in ipairs(v.walked) do
 	assert(math.sqrt((p.x - 1) ^ 2 + p.z ^ 2) > 0.6, "keeps clear of the blocker")
 end
+
+-- Bobbing up and down at a step it cannot climb is not progress.
+reset()
+v = villager(0, 0, {cell(0, 0), cell(4, 0)})
+follower.begin(v)
+local bob = 0
+v.set_velocity = function() end
+v.object.get_pos = function() bob = bob + 1; return {x = 0, y = -0.49 + (bob % 2) * 0.5, z = 0} end
+run(v, 6)
+assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "bobbing is a stall")
 
 print("follower tests passed")

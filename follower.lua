@@ -27,6 +27,7 @@ local BLOCKED_SECONDS = 3
 local BLOCKER_LOOKAHEAD = 0.7
 local BLOCKER_RADIUS = 0.6
 local STALL_DISTANCE = 0.15
+local STALL_RISE = 0.7
 -- A shortcut keeps this far from a villager the route was planned around: both
 -- half-widths and a margin.
 local AVOID_CLEARANCE = 1.0
@@ -145,15 +146,59 @@ local function passes_avoided(f, pos, target)
 	return false
 end
 
--- The rise to the waypoint is a step of its own: face it, and jump once on the
--- ground and near enough. do_jump is vanilla's (with step.lua's carpeted step
--- on it), which only jumps when something is ahead to jump onto.
-local function rise_step(self, pos, waypoint, dx, dz)
+-- The rise to the waypoint is a step of its own: once on the ground and near
+-- enough, jump with forward speed. Vanilla's do_jump takes its forward push
+-- from the speed the villager already has, so one that has stopped to turn or
+-- work a door jumps straight up and lands where it was, again and again. This is
+-- vanilla's jump (mcl_mobs/movement.lua) with the heading's speed instead, and
+-- it does not refuse a step with carpet on it, as the planner has judged it.
+local FALL_SPEED = -9.81 * 1.5
+local JUMP_COOLDOWN = 0.6
+local function rise_step(self, f, pos, waypoint, dx, dz)
 	if waypoint.y <= common.feet_node(pos) then return end
 	if dx * dx + dz * dz > 1.1 * 1.1 then return end
+	if not self.jump or (self.jump_height or 0) == 0 then return end
+	local now = core.get_us_time() / 1e6
+	if f.jumped_at and now - f.jumped_at < JUMP_COOLDOWN then return end
+	-- On the ground, or about to land on it this step (the speed it lands at is
+	-- still on the villager when this runs, and vanilla's do_jump, which runs
+	-- after, would jump from a standstill first): something walkable just under
+	-- the feet, and not on the way up.
+	local below = core.get_node_or_nil({x = math.floor(pos.x + 0.5), y = math.floor(pos.y - 0.35 + 0.5), z = math.floor(pos.z + 0.5)})
+	local def = below and core.registered_nodes[below.name]
+	if not (def and def.walkable) then return end
 	local v = self.object:get_velocity()
-	if v and math.abs(v.y) > 0.01 then return end
-	if self.do_jump then self:do_jump() end
+	if v and v.y > 0.5 then return end
+	f.jumped_at = now
+	f.rising_until = now + 1
+	local yaw = (self.object:get_yaw() or 0) + (self.rotate or 0)
+	local speed = self.walk_velocity
+	local velocity = {x = -math.sin(yaw) * speed, y = self.jump_height + 0.3, z = math.cos(yaw) * speed}
+	if self.set_animation then self:set_animation("jump") end
+	self.object:set_velocity(velocity)
+	local forward = function(entity)
+		-- Only for this walk: arriving, giving up or a new route ends the push.
+		if not entity.object or not entity.object:get_luaentity() or entity._villages_follow ~= f then return end
+		entity.object:set_acceleration({x = velocity.x * 2, y = FALL_SPEED, z = velocity.z * 2})
+	end
+	core.after(0.1, forward, self)
+	core.after(0.2, forward, self)
+	core.after(0.3, forward, self)
+end
+
+-- In the air over a rise nothing else pushes the villager at the step (the
+-- mover's set_velocity does nothing unless it stands on the ground, and
+-- hitting the step's face zeroes its speed), so keep it moving at the step
+-- until it is up.
+local function push_through_rise(self, f, dx, dz)
+	local now = core.get_us_time() / 1e6
+	if not f.rising_until or now > f.rising_until then return end
+	local v = self.object:get_velocity()
+	if not v or math.abs(v.y) < 0.01 then return end
+	local length = math.sqrt(dx * dx + dz * dz)
+	if length < 1e-6 then return end
+	local speed = self.walk_velocity
+	self.object:set_velocity({x = dx / length * speed, y = v.y, z = dz / length * speed})
 end
 
 local function follow(self, dtime)
@@ -198,7 +243,9 @@ local function follow(self, dtime)
 	end
 
 	-- Progress monitoring.
-	if vector.distance(pos, f.progress_pos) >= STALL_DISTANCE then
+	-- A villager bobbing up and down at a step it cannot climb is not progressing.
+	local horizontal = math.sqrt((pos.x - f.progress_pos.x) ^ 2 + (pos.z - f.progress_pos.z) ^ 2)
+	if horizontal >= STALL_DISTANCE or math.abs(pos.y - f.progress_pos.y) >= STALL_RISE then
 		f.progress_pos, f.still, f.blocked = vector.new(pos), 0, 0
 	else
 		f.still = f.still + dtime
@@ -226,7 +273,8 @@ local function follow(self, dtime)
 	local hurry = (self.order == "sleep" or #(self.waypoints or {}) > 15) and self.run_velocity or self.walk_velocity
 	self:set_velocity(hurry)
 	self:set_animation(hurry <= self.walk_velocity and "walk" or "run")
-	rise_step(self, pos, current.pos, dx, dz)
+	rise_step(self, f, pos, current.pos, dx, dz)
+	push_through_rise(self, f, dx, dz)
 end
 
 function follower.install(def)
