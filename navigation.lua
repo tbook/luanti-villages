@@ -683,6 +683,7 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 				if start_engine_path(self, target, path,
 					arrival_callback(route_field, route_id, target, opts.callback, opts.sleep), true,
 					route_field, route_id) then
+					if self._villages_follow then self._villages_follow.avoid = opts.avoid end
 					return
 				end
 			end

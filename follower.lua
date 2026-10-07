@@ -27,6 +27,9 @@ local BLOCKED_SECONDS = 3
 local BLOCKER_LOOKAHEAD = 0.7
 local BLOCKER_RADIUS = 0.6
 local STALL_DISTANCE = 0.15
+-- A shortcut keeps this far from a villager the route was planned around: both
+-- half-widths and a margin.
+local AVOID_CLEARANCE = 1.0
 -- Farther than this from the waypoint it is heading for, a villager has been
 -- pushed off its route (or loaded away from it).
 local OFF_ROUTE = 2.5
@@ -101,12 +104,12 @@ end
 
 -- Flags the walk that `start_engine_path` has just set up, on the planner's
 -- route, so check_gowp leaves it to this module.
-function follower.begin(self)
+function follower.begin(self, avoid)
 	local last = self.waypoints and self.waypoints[#self.waypoints] or self.current_target
 	self._villages_follow_failed = nil
 	self._villages_follow = {
 		final = last and last.pos and vector.new(last.pos) or nil,
-		progress_pos = self.object:get_pos(), still = 0, blocked = 0,
+		avoid = avoid, progress_pos = self.object:get_pos(), still = 0, blocked = 0,
 		leg_start = self.object:get_pos() or {x = 0, z = 0},
 	}
 end
@@ -119,14 +122,27 @@ local function advance(self, from)
 	self.current_target = table.remove(self.waypoints, 1)
 end
 
-local function distance_to_leg(f, pos, target)
-	local ax, az = f.leg_start.x, f.leg_start.z
-	local bx, bz = target.x, target.z
+-- How far (x, z) is from the segment a-b.
+local function segment_distance(ax, az, bx, bz, px, pz)
 	local dx, dz = bx - ax, bz - az
 	local length2 = dx * dx + dz * dz
-	local t = length2 == 0 and 0 or math.max(0, math.min(1, ((pos.x - ax) * dx + (pos.z - az) * dz) / length2))
-	local cx, cz = ax + dx * t, az + dz * t
-	return math.sqrt((pos.x - cx) ^ 2 + (pos.z - cz) ^ 2)
+	local t = length2 == 0 and 0 or math.max(0, math.min(1, ((px - ax) * dx + (pz - az) * dz) / length2))
+	return math.sqrt((px - ax - dx * t) ^ 2 + (pz - az - dz * t) ^ 2)
+end
+
+local function distance_to_leg(f, pos, target)
+	return segment_distance(f.leg_start.x, f.leg_start.z, target.x, target.z, pos.x, pos.z)
+end
+
+-- Whether a shortcut from `pos` to `target` passes too close to a position the
+-- route was planned around (follower.avoid): the map check cannot see a mob.
+local function passes_avoided(f, pos, target)
+	for _, spot in ipairs(f.avoid or {}) do
+		if segment_distance(pos.x, pos.z, target.x, target.z, spot.x, spot.z) < AVOID_CLEARANCE then
+			return true
+		end
+	end
+	return false
 end
 
 -- The rise to the waypoint is a step of its own: face it, and jump once on the
@@ -160,7 +176,8 @@ local function follow(self, dtime)
 	-- A shortcut past this waypoint, only along a line the whole body fits.
 	local nextwp = self.waypoints and self.waypoints[1]
 	if nextwp and not current.action and nextwp.pos and current.pos.y == feet and nextwp.pos.y == feet
-		and follower.line_is_clear({x = pos.x, y = feet, z = pos.z}, nextwp.pos) then
+		and follower.line_is_clear({x = pos.x, y = feet, z = pos.z}, nextwp.pos)
+		and not passes_avoided(f, pos, nextwp.pos) then
 		advance(self, pos)
 		current = self.current_target
 		dx, dz = current.pos.x - pos.x, current.pos.z - pos.z
@@ -199,7 +216,10 @@ local function follow(self, dtime)
 	self:turn_in_direction(dx, dz, TURN_DELAY)
 	local facing = (self.object:get_yaw() or 0) + (self.rotate or 0)
 	if distance > 0.05 and angle_between(facing, -math.atan2(dx, dz)) > FACING_TOLERANCE then
+		-- set_velocity(0) only zeroes the acceleration; stop what is moving too.
 		self:set_velocity(0)
+		local v = self.object:get_velocity()
+		self.object:set_velocity({x = 0, y = v and v.y or 0, z = 0})
 		self:set_animation("stand")
 		return
 	end

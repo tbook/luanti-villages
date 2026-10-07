@@ -44,7 +44,7 @@ local function villager(x, z, path)
 		get_pos = function() return {x = pos.x, y = pos.y, z = pos.z} end,
 		get_yaw = function() return yaw end,
 		get_velocity = function() return {x = 0, y = 0, z = 0} end,
-		set_velocity = function() end,
+		set_velocity = function(_, v) self.object_velocity = v end,
 		set_acceleration = function() end,
 	}
 	self.turn_in_direction = function(_, dx, dz) yaw = -math.atan2(dx, dz) end
@@ -179,5 +179,26 @@ v = villager(0, 0, {cell(0, 0), {x = 2, y = 1, z = 0}})
 follower.begin(v)
 run(v, 1.2)
 assert(v.jumps > 0, "jumps toward a rise")
+
+-- Holding for a turn stops what is moving, not just the acceleration
+-- (upstream's set_velocity(0) leaves the object's velocity alone).
+reset()
+v = villager(0, 0, {cell(0, 0), cell(4, 0)})
+follower.begin(v)
+v.turn_in_direction = function() end -- the yaw lags: still facing +z
+v.object_velocity = {x = 1.2, y = 0, z = 0}
+v.tick()
+assert(v.object_velocity.x == 0 and v.object_velocity.z == 0, "horizontal velocity is cleared while turning")
+
+-- A detour around a villager is not shortcut back through it.
+reset()
+v = villager(0, 0, {cell(0, 0), cell(0, 1), cell(1, 1), cell(2, 1), cell(2, 0)})
+follower.begin(v)
+v._villages_follow.avoid = {{x = 1, y = 0, z = 0}}
+run(v, 10)
+assert(v.arrived, "detour arrives")
+for _, p in ipairs(v.walked) do
+	assert(math.sqrt((p.x - 1) ^ 2 + p.z ^ 2) > 0.6, "keeps clear of the blocker")
+end
 
 print("follower tests passed")
