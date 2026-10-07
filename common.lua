@@ -40,87 +40,13 @@ local workstation_professions = {
 local workstation_search_node_names = {"group:cauldron"}
 for name in pairs(workstation_nodes) do table.insert(workstation_search_node_names, name) end
 
-local function collision_box_top(def)
-	-- A nodebox with no collision box of its own collides as its node box
-	-- (Luanti does this): a carpet is a sixteenth of a node thick, not a block.
-	local box = def and (def.collision_box or (def.drawtype == "nodebox" and def.node_box))
-	if not box or box.type ~= "fixed" then return 0.5 end
-	local fixed = box.fixed
-	if type(fixed) ~= "table" then return -0.5 end
-	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
-	local top = -0.5
-	for _, part in ipairs(fixed) do
-		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
-	end
-	return top
-end
-
--- mobs_mc/villager.lua's collisionbox: {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}.
-local HALF_WIDTH = 0.3
-local HEIGHT_NODES = 2
+local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
 -- mcl_mobs/physics.lua: feet_pos = pos + (-collisionbox[2]) + 0.25.
 local FEET_OFFSET = 0.01 + 0.25
-local EDGE = 0.001
+local HEIGHT_NODES = cells.HEIGHT_NODES
 
 local function round(value)
 	return math.floor(value + 0.5)
-end
-
-local function is_hazard(name, def)
-	if (def.damage_per_second or 0) > 0 then return true end
-	return core.get_item_group(name, "fire") > 0
-		or core.get_item_group(name, "cactus") > 0
-		or core.get_item_group(name, "dangerous") > 0
-end
-
--- A node the villager's body may pass through: not something it collides with,
--- and not something that hurts it. Openness alone is not enough -- fire is not
--- walkable, carries no collision box and is not a liquid, so a check that only
--- asks whether a villager fits would happily place one in a fire.
---
--- With thin_ok, a carpet counts as clear: it is a walkable sliver a villager
--- stands on top of, and the church floor (#126) is laid with it.
-local function is_clear(pos, thin_ok)
-	local node = core.get_node_or_nil(pos)
-	local def = node and core.registered_nodes[node.name]
-	if not def then return false end
-	if thin_ok and core.get_item_group(node.name, "carpet") > 0 then return true end
-	if def.walkable or (def.collision_box and def.collision_box.type ~= "none") then return false end
-	if def.liquidtype and def.liquidtype ~= "none" then return false end
-	return not is_hazard(node.name, def)
-end
-
-local function is_supported(pos)
-	local node = core.get_node_or_nil({x = pos.x, y = pos.y - 1, z = pos.z})
-	local def = node and core.registered_nodes[node.name]
-	if not def or not def.walkable then return false end
-	-- A villager's feet rest on the top of the supporting node. Low slabs do not
-	-- reach that height; fences and trapdoors are not walkable floor surfaces.
-	if collision_box_top(def) < 0.49 then return false end
-	-- Nor are fence gates or walls: do_jump (mcl_mobs/movement.lua) will not
-	-- jump them, so a villager never gets up onto one.
-	for _, group in ipairs({"fence", "fence_gate", "wall", "trapdoor"}) do
-		if core.get_item_group(node.name, group) > 0 then return false end
-	end
-	return not is_hazard(node.name, def)
-end
-
--- Whether every node the standing box at pos touches, from layer bottom to
--- top, is clear.
-local function box_is_clear(pos, bottom, top, thin_ok)
-	-- Shrink the span by a hair so a box whose edge lands exactly on a node
-	-- boundary is not treated as reaching into the node beyond it. Villagers
-	-- stand on half-node offsets constantly, so without this the check
-	-- rejects a node the villager only touches -- most often the bed it is
-	-- climbing out of, since a bed is walkable.
-	for x = round(pos.x - HALF_WIDTH + EDGE), round(pos.x + HALF_WIDTH - EDGE) do
-		for z = round(pos.z - HALF_WIDTH + EDGE), round(pos.z + HALF_WIDTH - EDGE) do
-			for y = bottom, top do
-				if not is_clear({x = x, y = y, z = z}, thin_ok) then return false end
-			end
-		end
-	end
-	return true
 end
 
 -- The villager day (#22), in game ticks (1000 ticks = 1 game hour). Every
@@ -290,30 +216,28 @@ return {
 	-- With thin_ok, carpet in the villager's own cell does not count against it.
 	-- Only there: carpet at head height still blocks.
 	is_standing_space = function(pos, thin_ok)
-		local feet = round(pos.y)
-		return box_is_clear(pos, feet, feet, thin_ok) and box_is_clear(pos, feet + 1, feet + HEIGHT_NODES - 1)
-			and is_supported({x = round(pos.x), y = feet, z = round(pos.z)})
+		return cells.has_standing_space(pos, thin_ok)
 	end,
 	-- The two halves of is_standing_space, for a villager partway over a step
 	-- or a kerb: its box already reaches over the next floor while its center
 	-- is still over the last one.
 	is_body_clear = function(pos)
 		local feet = round(pos.y)
-		return box_is_clear(pos, feet, feet + HEIGHT_NODES - 1)
+		return cells.box_is_open(pos, feet, feet + HEIGHT_NODES - 1)
 	end,
 	has_floor = function(pos)
-		return is_supported({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
+		return cells.has_floor({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
 	end,
 	-- Whether the single node at pos is one a villager's body may pass through.
 	is_clear_node = function(pos)
-		return is_clear({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
+		return cells.is_open({x = round(pos.x), y = round(pos.y), z = round(pos.z)})
 	end,
 	-- Whether the node layer just above a villager standing at pos is clear
 	-- across its whole box. A step up is a jump that lifts the head into that
 	-- layer before the villager has moved over the higher floor (#56).
 	has_headroom = function(pos)
 		local above = round(pos.y) + HEIGHT_NODES
-		return box_is_clear(pos, above, above)
+		return cells.box_is_open(pos, above, above)
 	end,
 	-- The node a villager's feet are in. The entity position sits a hair
 	-- above the floor, and below a node boundary on a lowered floor such as

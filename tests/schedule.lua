@@ -6,6 +6,7 @@ minetest = {
 	get_timeofday = function() return time end,
 	get_day_count = function() return day end,
 	get_item_group = function() return 0 end,
+	get_modpath = function() return "." end,
 }
 mcl_weather = {get_weather = function() return weather end}
 local common = dofile("common.lua")

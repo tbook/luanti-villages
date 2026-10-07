@@ -12,6 +12,7 @@ their jobsite lose it, so vanilla demotes them.
 | File | Role |
 |------|------|
 | `init.lua` | Entry point. Sets the villager model and textures, handles sleeping pose and waking, removes duplicate villagers, and installs the other modules into `mobs_mc:villager` |
+| `cells.lua` | The one passability model (#161): which cells a villager may stand in, on and move between (`is_open`, `has_floor`, `can_stand`, `can_move`, the box checks). `common.lua`, `navigation.lua`, `fisherman.lua` and `diagnostic.lua` all ask it |
 | `common.lua` | Shared helpers with no side effects: schedule stages, standing space, bed and jobsite lookups |
 | `births.lua` | Bed-limited births. The cooldown is stored in bed metadata |
 | `navigation.lua` | Trips to beds, jobsites, and targets. Uses VoxeLibre's pathing first, then falls back to `planner.lua` |
