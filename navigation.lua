@@ -677,6 +677,20 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 		})
 end
 
+local ROUTE_FIELDS = {
+	"_villages_bed_route", "_villages_job_route", "_villages_farm_route", "_villages_fish_route",
+	"_villages_job_search_route", "_villages_tavern_route", "_villages_goto_route",
+}
+
+-- A search still queued for another trip must not install its route over the
+-- one starting now.
+local function supersede_planning(self, route_field)
+	for _, field in ipairs(ROUTE_FIELDS) do
+		local route = self[field]
+		if field ~= route_field and route and route.status == "planning" then self[field] = nil end
+	end
+end
+
 -- Starts the trip to `destination` (see gopath), planning its route from the
 -- route queue (#162) while the villager stands still, unless the workstation
 -- search already planned one. Returns what gopath returns.
@@ -690,6 +704,7 @@ local function plan_trip(self, destination, candidates, callback_arrived)
 	end
 	local reason = "pathfinder could not start a route to " .. destination.kind
 	self.order = nil
+	supersede_planning(self, field)
 	local route = set_route(self, field, {
 		status = destination.planner_path and "travelling" or "planning", mode = "planner",
 		target = vector.new(first), goal = destination.goal and vector.new(destination.goal) or nil,
@@ -771,11 +786,6 @@ end
 local detours = setmetatable({}, {__mode = "k"})
 -- A finished workstation search, handed back to the gopath call that asked for it.
 local job_selections = setmetatable({}, {__mode = "k"})
-
-local ROUTE_FIELDS = {
-	"_villages_bed_route", "_villages_job_route", "_villages_farm_route", "_villages_fish_route",
-	"_villages_job_search_route", "_villages_tavern_route", "_villages_goto_route",
-}
 
 local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
@@ -893,6 +903,8 @@ local function install(def)
 	end
 
 	def.gopath = function(self, target, callback_arrived, prioritised)
+		-- Like vanilla's, a request does not interrupt a walk in progress.
+		if planner_routes() and self.state == PATHFINDING then return end
 		local destination
 		local selected = job_selections[self]
 		job_selections[self] = nil
@@ -992,7 +1004,6 @@ local function install(def)
 			-- to its jukebox, a guest to its seat, vanilla's own -- is planned the
 			-- same way, to the target itself when a villager can stand there, or
 			-- else to a spot beside it (#163).
-			if self.state == PATHFINDING then return end
 			local goal = vector.round(target)
 			local walk = self._villages_goto_route
 			if walk and walk.status == "planning" then

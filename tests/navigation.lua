@@ -1684,6 +1684,24 @@ do
 	assert(trapped._villages_goto_route.status == "retry" and trapped._pf_last_failed, "a failed request sets the cooldown")
 	assert(trapped.state == "stand")
 
+	-- A repeated managed request keeps the walk it has (review of #163).
+	local commuter = new_entity(true)
+	assert(planner_def.gopath(commuter, commuter._bed, nil, true))
+	settle()
+	commuter.current_target.failed_attempts = 50
+	local walk_target = commuter.current_target
+	assert(planner_def.gopath(commuter, commuter._bed, nil, true) == nil)
+	assert(commuter.state == "gowp" and commuter.current_target == walk_target
+		and walk_target.failed_attempts == 50, "the walk is not restarted")
+
+	-- A search still queued for one trip does not overwrite the next trip's route.
+	local switcher = new_entity(true)
+	assert(planner_def.gopath(switcher, {x = 8, y = 0, z = 0}, nil, true))
+	assert(planner_def.gopath(switcher, switcher._bed, nil, true))
+	settle()
+	assert(switcher._villages_goto_route == nil, "the superseded search is dropped")
+	assert(switcher._villages_bed_route.status == "travelling" and switcher._target.x ~= 8)
+
 	-- A walk that stops making progress is given up on.
 	local stuck = new_entity()
 	assert(planner_def.gopath(stuck, {x = 8, y = 0, z = 0}, nil, true))
