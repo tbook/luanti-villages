@@ -13,6 +13,7 @@
 -- to distinguish a barrel fisherman from a fallback one.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
 -- A trade list with one traded entry, in the form core.deserialize reads.
 local TRADED = "return {{traded_once = true, tier = 0}}"
 local FISH_SEARCH_RADIUS = 32
@@ -119,60 +120,18 @@ local SHORE_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 -- out -- a wall or a cliff face is non-liquid too, and so is a sand or dirt
 -- shore that meets the water at the water's own height, whose walkable
 -- surface -- and the stand on it -- is the block above, not beside. This
--- replicates navigation.lua's own is_open/is_supported exactly (that file
--- exposes no public surface beyond its def-installer) rather than a weaker
--- proxy, and skips a tile without at least one cardinal candidate at either
+-- asks cells.lua, the same classifier navigation.lua uses, rather than a
+-- weaker proxy, and skips a tile without at least one cardinal candidate at either
 -- height before it ever reaches gopath.
-local function node_def(pos)
-	local node = core.get_node_or_nil(pos)
-	return node and core.registered_nodes[node.name]
-end
-
-local function collision_box_top(def)
-	local box = def and def.collision_box
-	if not box or box.type ~= "fixed" then return 0.5 end
-	local fixed = box.fixed
-	if type(fixed) ~= "table" then return -0.5 end
-	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
-	local top = -0.5
-	for _, part in ipairs(fixed) do
-		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
-	end
-	return top
-end
-
-local function is_open(pos)
-	local node = core.get_node_or_nil(pos)
-	if not node then return false end
-	if core.get_item_group(node.name, "door") > 0 then return false end
-	local def = node_def(pos)
-	return def and not def.walkable and (not def.collision_box or def.collision_box.type == "none")
-		and (def.liquidtype == nil or def.liquidtype == "none")
-end
-
-local function is_supported(pos)
-	local support = {x = pos.x, y = pos.y - 1, z = pos.z}
-	local node = core.get_node_or_nil(support)
-	local def = node and core.registered_nodes[node.name]
-	if not def or not def.walkable then return false end
-	if collision_box_top(def) < 0.49 then return false end
-	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
-		return false
-	end
-	if (def.damage_per_second or 0) > 0 then return false end
-	return core.get_item_group(node.name, "fire") == 0
-		and core.get_item_group(node.name, "cactus") == 0
-		and core.get_item_group(node.name, "dangerous") == 0
-end
-
 local APPROACH_HEIGHTS = {0, 1}
 
 local function has_open_approach(pos)
 	for _, offset in ipairs(SHORE_NEIGHBOR_OFFSETS) do
 		for _, dy in ipairs(APPROACH_HEIGHTS) do
 			local candidate = {x = pos.x + offset[1], y = pos.y + dy, z = pos.z + offset[2]}
-			if is_open(candidate) and is_open({x = candidate.x, y = candidate.y + 1, z = candidate.z})
-				and is_supported(candidate) then
+			if cells.is_open(candidate, {thin = true})
+				and cells.is_open({x = candidate.x, y = candidate.y + 1, z = candidate.z})
+				and cells.has_floor(candidate) then
 				return true
 			end
 		end

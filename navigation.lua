@@ -8,6 +8,7 @@ local is_home_time = common.is_home_time
 local is_workstation_node = common.is_workstation_node
 -- A cleric's jobsite (cleric.lua), claimed by this mod rather than vanilla.
 local PULPIT = "living_villages:pulpit"
+local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
 local planner = dofile(core.get_modpath("living_villages") .. "/planner.lua")
 local doors = dofile(core.get_modpath("living_villages") .. "/doors.lua")
 local RETRY_SECONDS = 30
@@ -107,55 +108,6 @@ if core.register_globalstep then
 	core.register_globalstep(flush_deferred_door_closes)
 end
 
--- thin_ok is for the cell a villager's feet are in: a carpet there is a walkable
--- sliver the villager stands on top of, and the church floor (#126) is laid with
--- it. Carpet at head height still blocks.
-local function is_open(pos, allow_wooden_door, thin_ok)
-	local node = core.get_node_or_nil(pos)
-	if not node then return false end
-	if thin_ok and core.get_item_group(node.name, "carpet") > 0 then return true end
-	if core.get_item_group(node.name, "door") > 0 then
-		return allow_wooden_door and core.get_item_group(node.name, "door_iron") == 0
-	end
-	local def = node_def(pos)
-	return def and not def.walkable and (not def.collision_box or def.collision_box.type == "none")
-		and (def.liquidtype == nil or def.liquidtype == "none")
-end
-
-local function collision_box_top(def)
-	-- A nodebox with no collision box of its own collides as its node box
-	-- (Luanti does this): a carpet is a sixteenth of a node thick, not a block.
-	local box = def and (def.collision_box or (def.drawtype == "nodebox" and def.node_box))
-	if not box or box.type ~= "fixed" then return 0.5 end
-	local fixed = box.fixed
-	if type(fixed) ~= "table" then return -0.5 end
-	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
-	local top = -0.5
-	for _, part in ipairs(fixed) do
-		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
-	end
-	return top
-end
-
-local function is_supported(pos)
-	local support = {x = pos.x, y = pos.y - 1, z = pos.z}
-	local node = core.get_node_or_nil(support)
-	local def = node and core.registered_nodes[node.name]
-	if not def or not def.walkable then return false end
-	-- A villager's feet are at the top of the supporting node. Low slabs do not
-	-- reach that height; fences and trapdoors are not walkable floor surfaces.
-	if collision_box_top(def) < 0.49 then return false end
-	-- Nor are fence gates or walls: do_jump (mcl_mobs/movement.lua) will not
-	-- jump them, so a villager never gets up onto one.
-	for _, group in ipairs({"fence", "fence_gate", "wall", "trapdoor"}) do
-		if core.get_item_group(node.name, group) > 0 then return false end
-	end
-	if (def.damage_per_second or 0) > 0 then return false end
-	return core.get_item_group(node.name, "fire") == 0
-		and core.get_item_group(node.name, "cactus") == 0
-		and core.get_item_group(node.name, "dangerous") == 0
-end
-
 -- Mirror the legacy gopath start normalization. Villagers on stairs often have
 -- their rounded position inside the stair's walkable node, so gopath starts
 -- from the open node above rather than from the entity's raw position.
@@ -164,7 +116,7 @@ local function legacy_path_start(pos)
 	local def = node_def(start)
 	if def and not def.walkable then return start end
 	local above = {x = start.x, y = start.y + 1, z = start.z}
-	if is_open(above) then return above end
+	if cells.is_open(above) then return above end
 	return core.find_node_near(start, 1, {"air"})
 end
 
@@ -186,8 +138,8 @@ local function approaches(node_pos, cardinal_only, raised_ok)
 		if cardinal_only and index > 4 then break end
 		for _, dy in ipairs(heights) do
 			local pos = {x = node_pos.x + offset.x, y = node_pos.y + dy, z = node_pos.z + offset.z}
-			if is_open(pos, nil, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z})
-				and is_supported(pos) then
+			if cells.is_open(pos, {thin = true}) and cells.is_open({x = pos.x, y = pos.y + 1, z = pos.z})
+				and cells.has_floor(pos) then
 				table.insert(result, pos)
 			end
 		end
@@ -325,7 +277,7 @@ local function has_headroom(path)
 	for _, point in ipairs(path) do
 		local pos = point.pos or point
 		local head = vector.round({x = pos.x, y = pos.y + 1, z = pos.z})
-		if not is_open(head, true) then return false, head end
+		if not cells.is_open(head, {door = true}) then return false, head end
 	end
 	return true
 end
@@ -372,7 +324,7 @@ local function nearest_walk_position(pos)
 		for y = origin.y - 2, origin.y + 2 do
 			for z = origin.z - 1, origin.z + 1 do
 				local candidate = {x = x, y = y, z = z}
-				if is_open(candidate, true, true) and is_open({x = x, y = y + 1, z = z}, true) and is_supported(candidate) then
+				if cells.can_stand(candidate) then
 					local dx, dy, dz = x - pos.x, y - pos.y, z - pos.z
 					local distance = dx * dx + dy * dy + dz * dz
 					if not best_distance or distance < best_distance then
@@ -394,18 +346,6 @@ local function plan_stair_route(self, candidates)
 			start = vector.new(start), candidates = {}, status = "unreachable", searched = 0, trail = {},
 		}
 	end
-	local function can_stand(pos)
-		return is_open(pos, true, true) and is_open({x = pos.x, y = pos.y + 1, z = pos.z}, true) and is_supported(pos)
-	end
-	-- A rise is a jump: it swings the villager's head through the column one
-	-- above their current head, at `from_pos.y + 2`. `can_stand` never looks
-	-- there since it only checks the arrival column, so a low roof over the
-	-- villager's own side keeps them from jumping even when the taller
-	-- neighboring room is otherwise open (#56).
-	local function clear(from_pos, to_pos, dy)
-		if dy <= 0 then return true end
-		return is_open({x = from_pos.x, y = from_pos.y + 2, z = from_pos.z}, true)
-	end
 	local targets = {}
 	for _, target in ipairs(candidates) do targets[target.x .. ":" .. target.y .. ":" .. target.z] = target end
 	-- Bed approaches share nearly all of their map search. Search them as one
@@ -418,13 +358,13 @@ local function plan_stair_route(self, candidates)
 		end
 		return best
 	end
-	local path, visited, status, details = planner.find_path(start, can_stand, function(pos)
+	local path, visited, status, details = planner.find_path(start, cells.can_stand, function(pos)
 		return targets[pos.x .. ":" .. pos.y .. ":" .. pos.z] ~= nil
 	end, {
 		range = 48,
 		heuristic = distance_to_target,
 		distance = distance_to_target,
-		clear = clear,
+		clear = cells.can_move,
 		-- A door's leaf can block a turn inside its cell even when it clears a
 		-- straight crossing, or the reverse (#121).
 		gate = wooden_door_at,
@@ -907,8 +847,7 @@ local function install(def)
 			stop(self)
 			local candidates = approaches(target)
 			local cell = vector.round(target)
-			if is_open(cell, true, true) and is_open({x = cell.x, y = cell.y + 1, z = cell.z}, true)
-				and is_supported(cell) then
+			if cells.can_stand(cell) then
 				candidates = {cell}
 			end
 			local detour, path = plan_stair_route(self, candidates)

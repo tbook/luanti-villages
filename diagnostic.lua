@@ -3,6 +3,7 @@
 -- beds, jobs, paths, or villager AI.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
 local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
@@ -27,9 +28,8 @@ local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
--- Mirror fisherman.lua's own day-to-day search radius and its real
--- is_open/is_supported logic (again its own small copy, for the same
--- reason as the promotion thresholds above), so "why won't this fisherman
+-- Mirror fisherman.lua's own day-to-day search radius, and ask the same
+-- cells.lua classifier it does, so "why won't this fisherman
 -- go fishing" can be diagnosed candidate by candidate instead of guessed at.
 local FISH_SEARCH_RADIUS = 32
 local FISH_BELOW_BAND = 6
@@ -361,50 +361,11 @@ local function barrel_status(villager)
 	return status_of_claim(villager._jobsite, villager._id, "jobsite")
 end
 
--- Verbatim copies of navigation.lua's own is_open/is_supported (that file
--- exposes no public surface beyond its def-installer), used only to explain
--- per-candidate why a fishing anchor near a fisherman was, or was not,
--- accepted -- not to alter anything.
-local function fish_node_def(pos)
-	local node = core.get_node_or_nil(pos)
-	return node and core.registered_nodes[node.name]
-end
-
-local function fish_collision_box_top(def)
-	local box = def and def.collision_box
-	if not box or box.type ~= "fixed" then return 0.5 end
-	local fixed = box.fixed
-	if type(fixed) ~= "table" then return -0.5 end
-	if type(fixed[1]) == "number" then return fixed[5] or -0.5 end
-	local top = -0.5
-	for _, part in ipairs(fixed) do
-		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
-	end
-	return top
-end
-
-local function fish_is_open(pos)
-	local node = core.get_node_or_nil(pos)
-	if not node then return false end
-	if core.get_item_group(node.name, "door") > 0 then return false end
-	local def = fish_node_def(pos)
-	return def and not def.walkable and (not def.collision_box or def.collision_box.type == "none")
-		and (def.liquidtype == nil or def.liquidtype == "none")
-end
-
-local function fish_is_supported(pos)
-	local support = {x = pos.x, y = pos.y - 1, z = pos.z}
-	local node = core.get_node_or_nil(support)
-	local def = node and core.registered_nodes[node.name]
-	if not def or not def.walkable then return false end
-	if fish_collision_box_top(def) < 0.49 then return false end
-	if core.get_item_group(node.name, "fence") > 0 or core.get_item_group(node.name, "trapdoor") > 0 then
-		return false
-	end
-	if (def.damage_per_second or 0) > 0 then return false end
-	return core.get_item_group(node.name, "fire") == 0
-		and core.get_item_group(node.name, "cactus") == 0
-		and core.get_item_group(node.name, "dangerous") == 0
+-- Used only to explain per-candidate why a fishing anchor near a fisherman was,
+-- or was not, accepted -- not to alter anything. cells.lua is the classifier
+-- navigation.lua and fisherman.lua use.
+local function fish_is_open(pos, thin)
+	return cells.is_open(pos, thin and {thin = true} or nil)
 end
 
 local FISH_OFFSET_LABELS = {"+x", "-x", "+z", "-z"}
@@ -417,13 +378,13 @@ local function describe_fish_height(anchor, offset, dy)
 	local candidate = {x = anchor.x + offset[1], y = anchor.y + dy, z = anchor.z + offset[2]}
 	local above = {x = candidate.x, y = candidate.y + 1, z = candidate.z}
 	local reasons = {}
-	if not fish_is_open(candidate) then
+	if not fish_is_open(candidate, true) then
 		table.insert(reasons, "not open (" .. node_name(candidate) .. ")")
 	end
 	if not fish_is_open(above) then
 		table.insert(reasons, "blocked above (" .. node_name(above) .. ")")
 	end
-	if not fish_is_supported(candidate) then
+	if not cells.has_floor(candidate) then
 		local support = {x = candidate.x, y = candidate.y - 1, z = candidate.z}
 		table.insert(reasons, "not supported (" .. node_name(support) .. ")")
 	end
@@ -501,6 +462,15 @@ local function visual_status(villager)
 		props.is_visible == nil and "true (default)" or tostring(props.is_visible))
 end
 
+-- What cells.lua, the one passability model (#161), says about the cell a
+-- villager's feet are in and the one it is walking to.
+local function cell_status(pos)
+	if not pos then return "none" end
+	local cell = {x = math.floor(pos.x + 0.5), y = math.floor(pos.y + 0.5), z = math.floor(pos.z + 0.5)}
+	local text, standable = cells.describe(cell)
+	return pos_string(cell) .. (standable and " standable: " or " NOT standable: ") .. text
+end
+
 local function show(player, villager)
 	local bed_ok = bed_status(villager) == "valid claim"
 	local job_ok = status_of_claim(villager._jobsite, villager._id, "jobsite") == "valid claim"
@@ -563,6 +533,8 @@ local function show(player, villager)
 		"Tavern meal: " .. (villager._villages_meal and ("eating " .. villager._villages_meal.item)
 			or villager._villages_meal_day == core.get_day_count() and "has eaten tonight" or "not served tonight"),
 		"",
+		"Cell: " .. cell_status(pos and {x = pos.x, y = common.feet_node(pos), z = pos.z}),
+		"Next cell: " .. cell_status(villager.current_target and villager.current_target.pos),
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
 		"Births: " .. birth_check,
 	}

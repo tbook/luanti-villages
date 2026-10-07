@@ -127,7 +127,9 @@ local function check_route(world, cells, target)
 	local function floor_under(cell)
 		local below = {x = cell.x, y = cell.y - 1, z = cell.z}
 		local def = defs[world.get(below).name]
-		if not def.walkable or collision_top(def) < 0.49 or (def.damage_per_second or 0) > 0 then return false end
+		-- A full block, or the sixteenth or two short of one that a grass path or
+		-- farmland is.
+		if not def.walkable or collision_top(def) < 0.4 or (def.damage_per_second or 0) > 0 then return false end
 		return not (group(below, "fence") or group(below, "fence_gate") or group(below, "wall") or group(below, "trapdoor"))
 	end
 	for i, cell in ipairs(cells) do
@@ -189,7 +191,7 @@ local function route(world, def, start, target, field, route_field, timeofday)
 	return cells
 end
 
-local function test_building(name, rotation, doors_open)
+local function test_building(name, rotation, doors_open, roads)
 	local fixture = dofile("tests/fixtures/buildings/" .. name .. ".lua")
 	local world = stock_world.new()
 	stock_world.install(world)
@@ -204,7 +206,17 @@ local function test_building(name, rotation, doors_open)
 	end
 	local size = world.place(fixture, ORIGIN, ORIGIN, furnish, rotation)
 	if doors_open then world.open_doors() end
-	local prefix = ("%s r%d%s"):format(name, rotation * 90, doors_open and "o" or "")
+	if roads then
+		-- Village roads are grass path, a sixteenth lower than a full block: the
+		-- ground all round the building, as a generated village lays it (#156).
+		for x = ORIGIN - MARGIN - 4, ORIGIN + size.x + MARGIN + 4 do
+			for z = ORIGIN - MARGIN - 4, ORIGIN + size.z + MARGIN + 4 do
+				local inside = x >= ORIGIN and x < ORIGIN + size.x and z >= ORIGIN and z < ORIGIN + size.z
+				if not inside then world.set({x = x, y = world.ground_y, z = z}, "mcl_core:grass_path") end
+			end
+		end
+	end
+	local prefix = ("%s r%d%s%s"):format(name, rotation * 90, doors_open and "o" or "", roads and " roads" or "")
 
 	local def = {on_activate = function() end, do_custom = function() end, gopath = function() return false end}
 	dofile("navigation.lua")(def)
@@ -440,6 +452,8 @@ for _, name in ipairs(BUILDINGS) do
 	if not only or only == name then
 		-- Every rotation, with the doors shut and then left open.
 		for variant = 0, 7 do test_building(name, variant % 4, variant >= 4) end
+		-- And with the ground a road of grass path.
+		for rotation = 0, 3 do test_building(name, rotation, false, true) end
 	end
 end
 
