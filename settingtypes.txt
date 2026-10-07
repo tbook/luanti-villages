@@ -25,3 +25,6 @@ living_villages_route_budget_ms (Route planning budget per step, ms) float 4 0.5
 living_villages_route_range (Route planner range) int 48 8 96
 # The most positions one route search expands before giving up.
 living_villages_route_max_nodes (Route planner node cap) int 4096 256 32768
+# The route planner chooses every villager route (#163). Off brings back the
+# engine-first route choice, until the legacy mover is replaced (#164).
+living_villages_planner_routes (Planner chooses all routes) bool true
