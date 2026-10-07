@@ -86,6 +86,28 @@ would lower the 49% limit rate but cost more than that.
 * Only Testlandia (stock villages) was measured. The player-built cases in Creative and Home still need
   a run before the epic's later tickets lean on these numbers.
 
+## After #163 and #164
+
+Same villages (Testlandia B, C, D), same trials. `pl163` is main with the planner choosing routes (#163),
+`fl164c` adds the follower (#164) with the rise fix below.
+
+| | #163 | #164 |
+|--|--:|--:|
+| routes that started and arrived | 326 of 370 (88%) | 310 of 346 (90%) |
+| stuck with a route | 33 | 30 |
+| median s per node, trips of 10+ nodes | 1.11 | 1.21 (p75 1.37 -> 1.84) |
+
+The first #164 build (`fl164b`) arrived only 65% (219 of 335) and left 70 villagers in `gowp`, jumping
+in place against a one-block step. Vanilla's `do_jump` runs on every server step, and
+it fired first, from a standstill, so the jump had no forward speed; the follower's own jump waited for the
+fall speed to be near zero, which it never is on the tick a villager lands. The follower now jumps with
+forward speed on that tick, and counts bobbing in place as no progress.
+
+Trips of under 3 nodes in the work stage fell from 651 to 27: a villager already beside its jobsite used to
+"arrive" at every poll from vanilla's 1.8-block rule, and now only a walk to the planned cell counts.
+Trips of 3+ nodes also fell (about 277 to 149) and more home trips end `superseded`; I did not find why, and
+the totals depend on timing in the probe, so treat them as unexplained rather than as a regression.
+
 ## Rerun
 
 ```sh
