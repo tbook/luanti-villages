@@ -59,6 +59,8 @@ local STAGES = {
 local round_info = {} -- the stage, variant and round being run
 
 local function log(message) core.log("action", "[lv_trips] " .. message) end
+-- Which checkout of the mod this run measures (run.sh --mod-dir).
+log("living_villages loaded from " .. tostring(core.get_modpath("living_villages")))
 
 local out = io.open(RESULT_FILE, "a")
 local function emit(record)

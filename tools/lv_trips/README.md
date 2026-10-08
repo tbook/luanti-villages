@@ -10,8 +10,9 @@ copy). The probe is a world mod (`mod/lv_trips/`). It never changes how a trip i
 followed.
 
 **The real world is never touched.** `run.sh` clones the world into a scratch directory, edits only the
-clone's `world.mt`, and runs the server there. Mods that the world names by path (`mods/x`) are
-loaded from the user mods directory, so a run measures the branch that is checked out.
+clone's `world.mt`, and runs the server there. `living_villages` is loaded from the checkout the
+script is in (or `--mod-dir`); the other mods the world names (`mods/x`) come from the user mods
+directory. See "Running the probe from a worktree" below.
 
 ## Run it
 
@@ -30,6 +31,49 @@ The second argument is any point in the village (a villager's position will do; 
 
 To find where a world's villagers are without playing it, read the saved entities straight out
 of `map.sqlite` (see the notes on inspecting world saves); it is slow on a big world.
+
+## Running the probe from a worktree / for a PR
+
+`run.sh` measures the checkout it lives in, not the copy in the user mods directory. From a
+worktree, run the worktree's own script and the clone loads the worktree's `living_villages`
+(`--mod-dir PATH` picks another checkout). The mod is copied into the clone's `worldmods/` and the
+clone's `world.mt` has the user-directory entry switched off, so neither the real world nor the main
+checkout is touched. The log shows which copy loaded:
+`[lv_trips] living_villages loaded from <scratch>/world_<label>/worldmods/living_villages`.
+
+Each run takes its own free port (starting at `LV_TRIPS_PORT`, default 30124, skipping any port a
+running game or another probe holds) and its own scratch directory per checkout, so a running game
+and runs from several worktrees do not collide. Results go to the worktree's own
+`tools/lv_trips/results/`.
+
+```sh
+# in the worktree; start each in the background
+tools/lv_trips/run.sh Testlandia 570,17,-2145 pr_B --rounds 1 &     # village B: every stage, one round
+tools/lv_trips/run.sh Testlandia -235,15,-2130 pr_C --rounds 1 &    # village C
+wait
+tools/lv_trips/compare.sh tools/lv_trips/results/main_B.jsonl tools/lv_trips/results/pr_B.jsonl
+tools/lv_trips/report.sh tools/lv_trips/results/pr_B.jsonl          # the full tables
+```
+
+Time: `--rounds 1 --stages church` took 3 minutes. Every stage for one round is roughly six times
+that (an estimate, not measured); three rounds, the default and what the baseline used, take 30 to 70
+minutes. Villages B and C can run at the same time.
+
+For the "before", run the same command from a worktree of `origin/main` (or with `--mod-dir` pointing
+at one) under another label such as `main_B`, so both runs use the same village, rounds and stages,
+and copy its `.jsonl` into your worktree's `results/`. Don't set a one-round run against the
+three-round numbers in [`docs/trip-baseline.md`](../../docs/trip-baseline.md): that file records one
+point in time and `results/` is git-ignored, so its raw lines are not in the repository.
+`compare.sh BEFORE.jsonl AFTER.jsonl` prints, for each stage and each natural-day kind, arrived over
+trips, the stuck and no-route counts, and the change in the arrival rate. Trip counts differ between
+runs because a villager that fails is sent again, so read the rate, and treat a difference of a few
+trips as noise: routes shift with timing even on the same code.
+
+The user directory (`worlds/`, `mods/`) is found through git, which needs git 2.31 or newer and a
+`.git` directory in the main checkout; otherwise set `LUANTI_USER` to it.
+
+`tools/lv_probe/run.sh` takes the same `--mod-dir` (it implies `--with-mod`) and has the same port and
+scratch handling.
 
 ## What a trial does
 
