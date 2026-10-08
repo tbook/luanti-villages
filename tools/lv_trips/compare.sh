@@ -14,7 +14,13 @@ set -eu
 [ $# -eq 2 ] || { echo "usage: compare.sh BEFORE.jsonl AFTER.jsonl" >&2; exit 2; }
 
 rows() {
-	# shellcheck disable=SC2046
+	# Split the comma-separated list into arguments without splitting on spaces in paths.
+	old_ifs=$IFS
+	IFS=,
+	set -f
+	set -- $1
+	set +f
+	IFS=$old_ifs
 	jq -s -r '
 	{home: "bed", work: "jobsite", tavern: "tavern", holiday_tavern: "tavern", church: "church", bell: "bell"} as $expected
 	| def n(f): map(select(f)) | length;
@@ -22,7 +28,7 @@ rows() {
 	   | group_by(.stage)[] | ["trials " + .[0].stage, length, n(.outcome == "arrived"), n(.outcome == "stuck"), n(.outcome == "no_route")]),
 	  ([.[] | select(.type == "trip" and (.stage == "day" or .stage == "holiday_day") and .distance >= 3)]
 	   | group_by([.stage, .kind])[] | ["" + .[0].stage + " " + .[0].kind, length, n(.outcome == "arrived"), n(.outcome == "stuck"), n(.outcome == "no_route")])
-	| @tsv' $(echo "$1" | tr ',' ' ')
+	| @tsv' "$@"
 }
 
 before=$(mktemp)

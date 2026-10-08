@@ -100,7 +100,10 @@ EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
 port=$(lv_claim_port "${LV_TRIPS_PORT:-30124}" "$ports")
-trap 'lv_release_port "$port" "$ports"' EXIT
+server=
+# On exit or Ctrl-C stop the server too, so it does not keep the port and the scratch world.
+trap 'if [ -n "$server" ]; then kill "$server" 2> /dev/null || true; fi; lv_release_port "$port" "$ports"' EXIT
+trap 'exit 130' INT TERM
 log=$work/lv_trips_$label.log
 : > "$log"
 echo "mod: $mod_dir  port: $port  log: $log"

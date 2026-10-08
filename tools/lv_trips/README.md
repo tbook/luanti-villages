@@ -69,6 +69,9 @@ trips, the stuck and no-route counts, and the change in the arrival rate. Trip c
 runs because a villager that fails is sent again, so read the rate, and treat a difference of a few
 trips as noise: routes shift with timing even on the same code.
 
+The user directory (`worlds/`, `mods/`) is found through git, which needs git 2.31 or newer and a
+`.git` directory in the main checkout; otherwise set `LUANTI_USER` to it.
+
 `tools/lv_probe/run.sh` takes the same `--mod-dir` (it implies `--with-mod`) and has the same port and
 scratch handling.
 

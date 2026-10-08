@@ -105,7 +105,10 @@ EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
 port=$(lv_claim_port "${LV_PROBE_PORT:-30123}" "$ports")
-trap 'lv_release_port "$port" "$ports"' EXIT
+server=
+# On exit or Ctrl-C stop the server too, so it does not keep the port and the scratch world.
+trap 'if [ -n "$server" ]; then kill "$server" 2> /dev/null || true; fi; lv_release_port "$port" "$ports"' EXIT
+trap 'exit 130' INT TERM
 log=$work/lv_probe_$label.log
 : > "$log"
 "$luanti" --server --world "$world" --gameid mineclone2 --config "$conf" \

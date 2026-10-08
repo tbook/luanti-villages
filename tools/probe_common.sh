@@ -12,11 +12,17 @@ lv_user_dir() {
 		return
 	fi
 	common=$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || common=
-	if [ -n "$common" ]; then
-		main_root=$(dirname "$common")
-	else
-		main_root=$repo_root
-	fi
+	case $common in
+		*/.git) main_root=$(dirname "$common") ;;
+		*)
+			# Old git (before 2.31), or a git dir that is not <checkout>/.git.
+			if [ ! -d "$repo_root/../../worlds" ]; then
+				echo "cannot find the user directory from $repo_root; set LUANTI_USER" >&2
+				return 1
+			fi
+			main_root=$repo_root
+			;;
+	esac
 	(cd "$(dirname "$main_root")/.." && pwd)
 }
 
@@ -25,8 +31,8 @@ lv_user_dir() {
 lv_stage_mod() {
 	rm -rf "$2"
 	mkdir -p "$2"
-	rsync -a --exclude .git --exclude .claude --exclude tools --exclude tests --exclude docs \
-		--exclude .github "$1"/ "$2"/
+	rsync -a --exclude /.git --exclude /.claude --exclude /tools --exclude /tests --exclude /docs \
+		--exclude /.github "$1"/ "$2"/
 }
 
 # lv_claim_port PREFERRED CLAIMDIR: print a port nobody is using. A running game
@@ -38,15 +44,24 @@ lv_claim_port() {
 	mkdir -p "$claims"
 	tries=0
 	while [ $tries -lt 200 ]; do
-		if [ -f "$claims/$port" ] && ! kill -0 "$(cat "$claims/$port" 2> /dev/null)" 2> /dev/null; then
-			rm -f "$claims/$port"
+		if [ -f "$claims/$port" ]; then
+			owner=$(cat "$claims/$port" 2> /dev/null) || owner=
+			# An empty file is never left by a claim (they are linked in whole), so it is stale too.
+			if [ -z "$owner" ] || ! kill -0 "$owner" 2> /dev/null; then
+				rm -f "$claims/$port"
+			fi
 		fi
 		if ! lsof -nP -iUDP:"$port" > /dev/null 2>&1 && ! lsof -nP -iTCP:"$port" > /dev/null 2>&1; then
-			# noclobber makes the claim atomic: only one run creates the file.
-			if (set -C; echo $$ > "$claims/$port") 2> /dev/null; then
+			# Write the pid to a temp file, then link it into place: the claim appears
+			# whole, and ln fails if another run got there first.
+			tmp=$claims/.tmp.$$
+			echo $$ > "$tmp"
+			if ln "$tmp" "$claims/$port" 2> /dev/null; then
+				rm -f "$tmp"
 				echo "$port"
 				return 0
 			fi
+			rm -f "$tmp"
 		fi
 		port=$((port + 1))
 		tries=$((tries + 1))
