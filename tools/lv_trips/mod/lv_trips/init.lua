@@ -166,7 +166,10 @@ local function route_snapshot(self)
 	if not route then return nil end
 	local planner = route.planner
 	return {
-		route = kind, status = route.status, mode = route.mode, reason = route.reason,
+		-- navigation.lua no longer names a route mode (#165): every route is the
+		-- planner's unless it never got going.
+		route = kind, status = route.status, mode = route.status ~= "retry" and "planner" or nil,
+		reason = route.reason,
 		planner_status = planner and planner.status, planner_searched = planner and planner.searched,
 		planner_closest = planner and planner.closest_distance,
 	}
@@ -478,7 +481,9 @@ local function run_trials(list)
 	for name in setting("stages", "home,work,tavern,church,bell,holiday_tavern"):gmatch("[^,]+") do wanted[name] = true end
 	for _, stage in ipairs(STAGES) do
 		if wanted[stage.name] then
-			local variants = stage.managed and {"A", "B"} or {"A"}
+			-- Variant B (engine silenced) meant something while navigation.lua asked
+			-- the engine first; since #165 it would repeat A.
+			local variants = {"A"}
 			for _, variant in ipairs(variants) do
 				for round = 1, ROUNDS do run_round(list, stage, variant, round) end
 			end

@@ -38,12 +38,10 @@ every villager is teleported beside another villager's bed (work stage) or jobsi
 stages), a different one each round, and then left to do what it does at that hour. Stages are
 `home` (bed), `work` (jobsite), `tavern`, `church`, `bell` and `holiday_tavern`.
 
-* **Variant A** is the mod as it is: engine route, then VoxeLibre's mover, then the planner.
-* **Variant B** (the stages navigation.lua routes itself: bed, jobsite, tavern) makes
-  `core.find_path` find nothing, so every trip takes the planner. The same starts as A give
-  matched pairs, and the follower is handed the planner's route.
-
-Church and bell trips never reach the planner in the mod today, so they run as A only.
+* **Variant A** is the mod as it is: the planner chooses the route and the follower walks it.
+* **Variant B** made `core.find_path` find nothing, so every trip took the planner. Since #165 the
+  engine's pathfinder is never asked, so B would repeat A and is no longer run. Results from
+  before #165 (`pl163_*`, `fl164*`) still have it.
 
 All villagers walk at once, as in play, so doors and corridors are shared. A round ends when
 every trip has ended, after 150 s, whichever is first.
@@ -56,7 +54,7 @@ and records the trips that happen.
 One JSON object per line. `type` is `village` (what was found), `trip`, `round`, `damage` (a
 villager hurt, with the reason) or `done`. A trip has `stage`, `variant`, `round`, `villager`, `kind`
 (bed, jobsite, tavern, church, bell, ...), `start`, `target`, `distance`, `rise`, `mode`
-(`legacy`, `engine` or `planner`, the route the mover was given), and `outcome`:
+(`planner` once a route got going; before #165 also `legacy` or `engine`), and `outcome`:
 
 | outcome | meaning |
 |---------|---------|

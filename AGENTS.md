@@ -15,7 +15,7 @@ their jobsite lose it, so vanilla demotes them.
 | `cells.lua` | The one passability model (#161): which cells a villager may stand in, on and move between (`is_open`, `has_floor`, `can_stand`, `can_move`, the box checks). `common.lua`, `navigation.lua`, `fisherman.lua` and `diagnostic.lua` all ask it |
 | `common.lua` | Shared helpers with no side effects: schedule stages, standing space, bed and jobsite lookups |
 | `births.lua` | Bed-limited births. The cooldown is stored in bed metadata |
-| `navigation.lua` | Trips to beds, jobsites, and targets. `planner.lua` chooses every route, through the route queue (#163); the setting `living_villages_planner_routes` off brings back the engine-first choice until #164 |
+| `navigation.lua` | Trips to beds, jobsites, and targets. `planner.lua` chooses every route, through the route queue (#163), and `follower.lua` walks it (#164) |
 | `follower.lua` | The route follower (#164): replaces `check_gowp` for routes the planner made (flagged by `follower.begin`). Walks cell centre to cell centre, turns on the spot, cuts a corner only along a line `cells.lua` says the body fits, works doors as a step, jumps rises, arrives on the final cell. When a villager makes no progress, is pushed off the route or is blocked by another villager it ends the walk with `_villages_follow_failed` and `navigation.lua` plans again (twice at most) |
 | `step.lua` | Lets a villager on a planned route jump a full step topped with carpet, which vanilla's `do_jump` reads as a two-block stack |
 | `planner.lua` | Limited A* search over walkable positions, including stairs and wooden doors. Calls `options.checkpoint` every few nodes so a search can pause |

@@ -150,14 +150,9 @@ local function route_status(route)
 	if not route then return "none" end
 	local details = {}
 	if route.id then table.insert(details, "id " .. route.id) end
-	if route.mode then table.insert(details, "mode " .. route.mode) end
 	if route.started_at then
 		table.insert(details, string.format("age %.0fs", math.max(core.get_gametime() - route.started_at, 0)))
 	end
-	if route.last_progress_at then
-		table.insert(details, string.format("progress %.0fs ago", math.max(core.get_gametime() - route.last_progress_at, 0)))
-	end
-	if route.last_progress_pos then table.insert(details, "last " .. pos_string(route.last_progress_pos)) end
 	local suffix = #details > 0 and " [" .. table.concat(details, ", ") .. "]" or ""
 	if route.status == "travelling" then
 		return "travelling to " .. pos_string(route.target) .. suffix
