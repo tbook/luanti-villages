@@ -1494,6 +1494,21 @@ do
 	assert(commuter.state == "gowp" and commuter.current_target == walk_target
 		and walk_target.failed_attempts == 50, "the walk is not restarted")
 
+	-- A target beyond the planner's range of the villager is still routed to
+	-- (#182): the church search finds a pulpit 41 from the bed, which can be
+	-- 55 from where the villager stands.
+	local far = new_entity()
+	far.object = {get_pos = function() return {x = -2663, y = 0.5, z = 266} end, set_velocity = function() end}
+	assert(planner_def.gopath(far, {x = -2608, y = 0, z = 254}, nil, true))
+	settle()
+	assert(far._villages_goto_route.status == "travelling" and far.state == "gowp",
+		"a target 55 away is planned: " .. tostring(far._villages_goto_route.status))
+	local unreachable = new_entity()
+	unreachable.object = far.object
+	assert(planner_def.gopath(unreachable, {x = -2663 + 300, y = 0, z = 266}, nil, true) ~= nil)
+	settle()
+	assert(unreachable._villages_goto_route.status == "retry", "the widened box is still capped")
+
 	-- A search still queued for one trip does not overwrite the next trip's route.
 	local switcher = new_entity(true)
 	assert(planner_def.gopath(switcher, {x = 8, y = 0, z = 0}, nil, true))
