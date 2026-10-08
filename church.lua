@@ -46,6 +46,9 @@ local INSIDE = 9
 local BACK_MIN = 3
 local BACK_MAX = 5
 local BACK_REACH = 8
+-- How far above a standing place to look for the roof: well past the stock
+-- nave's 11, for a taller church. Open ground scans all of it, a read a node.
+local ROOF_REACH = 32
 local FIELDS = {"_villages_church", "_villages_church_skipped", "_villages_church_checked"}
 
 local standing = {}
@@ -108,6 +111,26 @@ local function beside_chair(cell)
 	return false
 end
 
+-- Whether a roof is overhead: a loaded, solid node within ROOF_REACH above the
+-- cell that is not foliage, a tree trunk or a door. Inside a building, not in
+-- the open, which ground raised to floor height outside the back wall would
+-- otherwise pass for (#189). Any solid ceiling, stair, slab or glass counts, so
+-- a church of any plan whose roof is within ROOF_REACH of its floor qualifies;
+-- a flood of the floor would leak out of the doorway instead. An unloaded node
+-- is no roof. A balcony or a neighbouring building's overhang still counts.
+local function roofed(cell)
+	for h = 2, ROOF_REACH do
+		local above = {x = cell.x, y = cell.y + h, z = cell.z}
+		local node = core.get_node_or_nil(above)
+		local def = node and core.registered_nodes[node.name]
+		if def and def.walkable and core.get_item_group(node.name, "leaves") == 0
+			and core.get_item_group(node.name, "tree") == 0 and core.get_item_group(node.name, "door") == 0 then
+			return true
+		end
+	end
+	return false
+end
+
 -- Free places to stand at the back of the church, best first: out of the way of
 -- the pews, then farthest from the pulpit within the back, then nearest the
 -- middle.
@@ -124,7 +147,8 @@ local function back_places(pulpit, id)
 					local cell = {x = x, y = y, z = z}
 					-- A chair is solid enough to stand on; nobody stands on the pews.
 					local on_chair = is_chair({x = x, y = y - 1, z = z})
-					if not on_chair and not held_by_other(cell, id) and common.is_standing_space(cell, true) then
+					if not on_chair and not held_by_other(cell, id) and common.is_standing_space(cell, true)
+						and roofed(cell) then
 						found[#found + 1] = {
 							cell = cell, depth = depth, side = math.abs(dx * dir.z - dz * dir.x),
 							crowds = beside_chair(cell) and 1 or 0,
