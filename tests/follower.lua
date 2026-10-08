@@ -45,7 +45,7 @@ local DT = 0.1
 local function villager(x, z, path)
 	local pos, velocity, yaw = {x = x, y = -0.49, z = z}, 0, 0
 	local self = {
-		state = "gowp", jump = true, jump_height = 4, walk_velocity = 1.2, run_velocity = 3, rotate = 0,
+		state = "gowp", jump = true, jump_height = 4, walk_velocity = 1.2, run_velocity = 2.4, rotate = 0,
 		actions = {}, jumps = 0, arrived = false,
 	}
 	self.object = {
@@ -269,5 +269,131 @@ assert(v.current_target.pos.z == 0, "half a node above the landing does not turn
 v = descent(1, -1.49)
 v.tick()
 assert(v.current_target.pos.z == 1, "moves on once down")
+
+-- A hop down carries the villager on past the lower waypoint (it leaves the
+-- ledge at walking or running speed and falls with that speed still on it), and
+-- one that lands more than REACH beyond the centre used to turn round and walk
+-- back to it before going on down the stair (#186). On a stair of one-block drops
+-- nothing shortcuts the next waypoint, so every hop could turn it round. Having
+-- landed on the lower level beyond the waypoint, along the leg, counts as there.
+-- Each case runs on its own so that one failure does not hide the others.
+local planner = dofile("planner.lua")
+local failures = {}
+local function case(name, fn)
+	local ok, err = pcall(fn)
+	if not ok then table.insert(failures, name .. ": " .. tostring(err)) end
+end
+reset()
+for x = -5, 20 do
+	for z = -5, 10 do
+		nodes[key({x = x, y = -1, z = z})] = x <= 0 and "mcl_core:stone" or nil
+		nodes[key({x = x, y = -2, z = z})] = x == 1 and "mcl_core:stone" or nil
+		nodes[key({x = x, y = -3, z = z})] = x >= 2 and "mcl_core:stone" or nil
+	end
+end
+-- Cells (0,0,0) -> (1,-1,0) -> (2,-2,0), then `more` further cells on the level.
+local function stair(x, y, more, path_overrides)
+	local path = {{x = 1, y = -1, z = 0}, {x = 2, y = -2, z = 0}}
+	for i = 1, more or 0 do path[#path + 1] = {x = 2 + i, y = -2, z = 0} end
+	for i, p in pairs(path_overrides or {}) do path[i] = p end
+	local d = villager(0, 0, path)
+	follower.begin(d)
+	d.object.get_pos = function() return {x = x, y = y, z = 0} end
+	d.set_velocity = function(_, speed) d.speed = speed end
+	return d
+end
+case("lands past: goes on", function()
+	local d = stair(1.45, -1.49)
+	d.tick()
+	assert(d.current_target.pos.x == 2, "goes on to the next waypoint, not back (at " .. d.current_target.pos.x .. ")")
+	d.tick()
+	assert(d.object.get_yaw() < 0, "and faces on down the stair, not back")
+end)
+case("short of the waypoint: heads for it", function()
+	local d = stair(0.55, -1.49)
+	d.tick()
+	assert(d.current_target.pos.x == 1)
+end)
+case("falling past: dropped straight down", function()
+	local d = stair(1.45, -0.8)
+	d.vy = -4
+	d.tick()
+	assert(d.current_target.pos.x == 1, "not reached yet")
+	assert(d.object.get_yaw() == 0, "does not swing round to the waypoint")
+	assert(d.object_velocity and d.object_velocity.x == 0 and d.speed == 0, "drops straight down")
+end)
+case("held up past: faces on", function()
+	local d = stair(1.45, -0.8)
+	d.tick()
+	assert(d.object.get_yaw() < 0, "faces the next waypoint, not back")
+end)
+case("a small fall is not held (stair treads)", function()
+	-- Half a node above the floor and falling: on a stair this happens at every
+	-- step, and it must keep walking.
+	local d = stair(1.2, -1.0)
+	d.vy = -2
+	d.tick()
+	assert(d.speed ~= 0, "keeps its speed down a half-block tread")
+end)
+case("final cell: walks back", function()
+	local d = villager(0, 0, {{x = 1, y = -1, z = 0}})
+	follower.begin(d)
+	d.object.get_pos = function() return {x = 1.45, y = -1.49, z = 0} end
+	d.set_velocity = function() end
+	d.tick()
+	assert(d.state == "gowp" and not d.arrived, "not reached from beyond it")
+	assert(d.object.get_yaw() > 0, "turns back to the final cell")
+end)
+case("a door step is not skipped", function()
+	local d = stair(1.45, -1.49, 0, {[1] = {x = 1, y = -1, z = 0, action = {type = "door", action = "open", target = {x = 1, y = -1, z = 0}}}})
+	d.waypoints[1].action = nil
+	d.current_target.action = {type = "door", action = "open", target = {x = 1, y = -1, z = 0}}
+	d.tick()
+	assert(d.current_target.pos.x == 1 and #d.actions == 0, "the door waypoint stays current")
+end)
+case("a sharp turn beside a wall is walked from the centre", function()
+	-- Landed 0.4 past (1,-1,0); the next waypoint (2,-2,1) is diagonally on, past a
+	-- wall corner at (2,*,1) that the straight line from the landing spot clips.
+	local function landed_past()
+		local d = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 2, y = -2, z = 1}})
+		follower.begin(d)
+		d.object.get_pos = function() return {x = 1.4, y = -1.49, z = 0} end
+		d.set_velocity = function() end
+		d.tick()
+		return d
+	end
+	assert(landed_past().current_target.pos.x == 2, "control: open ground goes on")
+	for _, yy in ipairs({-1, 0}) do nodes[key({x = 2, y = yy, z = 1})] = "mcl_core:stone" end
+	local d = landed_past()
+	for _, yy in ipairs({-1, 0}) do nodes[key({x = 2, y = yy, z = 1})] = nil end
+	assert(d.current_target.pos.x == 1, "with a wall on the line it walks back to the centre first")
+end)
+case("a staircase routed by the planner is walked on down", function()
+	local function stand(pos)
+		return pos.z == 0 and pos.x >= 0 and pos.x <= 3 and pos.y == 1 - pos.x
+			and nodes[key({x = pos.x, y = pos.y - 1, z = 0})] == "mcl_core:stone"
+	end
+	for x = 0, 3 do nodes[key({x = x, y = -x, z = 0})] = "mcl_core:stone" end
+	local route = planner.find_path({x = 0, y = 1, z = 0}, stand, function(p) return p.x == 3 end, {range = 8})
+	assert(route and #route == 4)
+	local d = villager(0, 0, {route[2], route[3], route[4]})
+	follower.begin(d)
+	d.set_velocity = function(_, speed) d.speed = speed end
+	-- Half a node above each tread as it walks down: never held.
+	for _, wp in ipairs({route[2], route[3]}) do
+		d.object.get_pos = function() return {x = wp.x + 0.2, y = wp.y - 0.99 + 0.5, z = 0} end
+		d.vy = -2
+		d.speed = nil
+		d.tick()
+		assert(d.speed ~= 0, "a stair descent is not stopped step by step")
+	end
+end)
+case("at run speed the next hop is walked at run speed", function()
+	local d = stair(1.45, -1.49, 16)
+	d.tick()
+	d.tick()
+	assert(d.speed == 2.4, "runs on with " .. #d.waypoints .. " waypoints left, speed " .. tostring(d.speed))
+end)
+if #failures > 0 then error(table.concat(failures, "\n"), 0) end
 
 print("follower tests passed")

@@ -31,6 +31,11 @@ local STALL_RISE = 0.7
 -- A shortcut keeps this far from a villager the route was planned around: both
 -- half-widths and a margin.
 local AVOID_CLEARANCE = 1.0
+-- A hop down carries the villager on past the lower waypoint; having landed
+-- this near it and beyond it, along the leg, it is there (#186).
+local OVERSHOOT_REACH = 0.8
+-- Height above the lower waypoint's floor over which a falling villager is held.
+local FALL_HOLD_HEIGHT = 0.6
 -- Farther than this from the waypoint it is heading for, a villager has been
 -- pushed off its route (or loaded away from it).
 local OFF_ROUTE = 2.5
@@ -228,6 +233,42 @@ local function landed(pos, waypoint)
 	return pos.y <= waypoint.y - 1 + cells.collision_box_top(def) + 0.01 + LANDED
 end
 
+-- Whether the body fits along the straight line from `from` to `to` at the
+-- level of `from`: open air only, since `to` may be lower than the floor here.
+local function body_clear(from, to)
+	local feet = common.feet_node(from)
+	local dx, dz = to.x - from.x, to.z - from.z
+	local length = math.sqrt(dx * dx + dz * dz)
+	for step = 0, math.ceil(length / SAMPLE_STEP) do
+		local t = length == 0 and 0 or math.min(1, step * SAMPLE_STEP / length)
+		local at = {x = from.x + dx * t, z = from.z + dz * t}
+		if not (cells.box_is_open(at, feet, feet, true) and cells.box_is_open(at, feet + 1, feet + cells.HEIGHT_NODES - 1)) then
+			return false
+		end
+	end
+	return true
+end
+
+-- The height of the top of the floor under a waypoint cell.
+local function floor_top(waypoint)
+	local below = core.get_node_or_nil({x = waypoint.x, y = waypoint.y - 1, z = waypoint.z})
+	local def = below and core.registered_nodes[below.name]
+	return waypoint.y - 1 + cells.collision_box_top(def)
+end
+
+-- How far (x, z) is to the side of the line through the leg to the waypoint.
+local function off_leg(f, pos, waypoint)
+	local lx, lz = waypoint.x - f.leg_start.x, waypoint.z - f.leg_start.z
+	local length = math.sqrt(lx * lx + lz * lz)
+	if length < 1e-6 then return 0 end
+	return math.abs((pos.x - waypoint.x) * lz - (pos.z - waypoint.z) * lx) / length
+end
+
+-- Whether (x, z) is beyond the waypoint along the leg that led to it.
+local function past_waypoint(f, pos, waypoint)
+	return (pos.x - waypoint.x) * (waypoint.x - f.leg_start.x) + (pos.z - waypoint.z) * (waypoint.z - f.leg_start.z) > 0
+end
+
 local function follow(self, dtime)
 	local f = self._villages_follow
 	local pos = self.object:get_pos()
@@ -261,7 +302,19 @@ local function follow(self, dtime)
 	-- than the waypoint until the villager is down the stair, and turning early
 	-- runs its head into the floor over the lower cells (#173).
 	local descending = f.from_y and current.pos.y < f.from_y
-	local reached = distance < REACH and feet == current.pos.y and (not descending or landed(pos, current.pos))
+	-- It leaves the ledge with its walking speed still on it and lands past the
+	-- waypoint; turning back for the centre, with the next drop ahead, was the
+	-- hop-turn-walk-back of #186. The final cell is still arrived on.
+	-- Only near the leg, with the body clear to the next waypoint (a sharp turn
+	-- beside a wall is walked from the centre), and never at a door step.
+	nextwp = self.waypoints and self.waypoints[1]
+	local overshot = descending and nextwp and not current.action and distance < OVERSHOOT_REACH
+		and past_waypoint(f, pos, current.pos) and off_leg(f, pos, current.pos) < REACH
+		and body_clear(pos, nextwp.pos)
+	-- Head for the waypoint after, not back: also while still held up above the
+	-- cell, so blocker_ahead and rise_step see that direction too.
+	if overshot then dx, dz = nextwp.pos.x - pos.x, nextwp.pos.z - pos.z end
+	local reached = (distance < REACH or overshot) and feet == current.pos.y and (not descending or landed(pos, current.pos))
 	if reached then
 		if not self.waypoints or #self.waypoints == 0 then return arrive(self) end
 		-- A door is its own step: stop, work it, then cross.
@@ -289,6 +342,19 @@ local function follow(self, dtime)
 			elseif f.still > STALL_SECONDS then
 				return give_up(self, "no progress along the route")
 			end
+		end
+	end
+
+	-- Only a drop of most of a node: a stair's half-block treads are walked down.
+	if descending and distance < OVERSHOOT_REACH and pos.y - floor_top(current.pos) > FALL_HOLD_HEIGHT then
+		local v = self.object:get_velocity()
+		if v and v.y < -0.1 then
+			-- Falling into the waypoint's cell: drop straight down, facing on,
+			-- instead of carrying on past it with the walking speed still on, or
+			-- swinging round to its centre.
+			self:set_velocity(0)
+			self.object:set_velocity({x = 0, y = v.y, z = 0})
+			return
 		end
 	end
 
