@@ -554,6 +554,8 @@ dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_site.lua")
 dofile(core.get_modpath("living_villages") .. "/library_schematic.lua")
+-- After the schematic edits above: it builds its variants from whatever mts holds.
+dofile(core.get_modpath("living_villages") .. "/ground_layer.lua").install(rawget(_G, "settlements"))
 dofile(core.get_modpath("living_villages") .. "/village_index.lua")
 
 -- After church_site.lua: the planner reserves the church itself and replaces its wrapper.

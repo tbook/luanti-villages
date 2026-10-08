@@ -182,8 +182,10 @@ end
 
 -- What a village's ground is made of: the top node and the fill under it for a
 -- site's surface material. Sand sits on sandstone, as VoxeLibre builds foundations
--- (mcl_villages/foundation.lua), and a snow layer cannot top a column of dirt.
-local FOUNDATION = {["mcl_core:sand"] = "mcl_core:sandstone"}
+-- (mcl_villages/foundation.lua), red sand on red sandstone (VoxeLibre fills it
+-- with dirt, #151), and a snow layer cannot top a column of dirt. These cover
+-- every surface a village can have (settlements.surface_mat); the rest sit on dirt.
+local FOUNDATION = {["mcl_core:sand"] = "mcl_core:sandstone", ["mcl_core:redsand"] = "mcl_core:redsandstone"}
 local TOP = {["mcl_core:snow"] = "mcl_core:dirt_with_grass_snow"}
 function M.materials(surface)
 	surface = surface or "mcl_core:dirt_with_grass"
