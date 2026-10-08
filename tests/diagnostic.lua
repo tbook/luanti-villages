@@ -122,8 +122,8 @@ local object = {
 			_bed = {x = 1, y = 0, z = 0}, _jobsite = {x = 4, y = 0, z = 0},
 			order = "work", state = "stand", waypoints = {{x = 1}}, _villages_birth_check_day = 3,
 			_villages_bed_route = {
-				status = "travelling", target = {x = 1, y = 0, z = 0}, id = 7, mode = "planner",
-				started_at = 70, last_progress_at = 95, last_progress_pos = {x = 4, y = 0, z = 0},
+				status = "travelling", target = {x = 1, y = 0, z = 0}, id = 7,
+				started_at = 70,
 				planner = {start = {x = 10, y = 0, z = 0}, candidates = {{x = 1, y = 0, z = 0}},
 					status = "search_limit", searched = 4096, closest = {x = 2, y = 0, z = 0},
 					closest_distance = 1, closest_cost = 9.5, trail = {{x = 4, y = 0, z = 0}, {x = 2, y = 0, z = 0}}},
@@ -161,7 +161,7 @@ assert(shown.form:find("Jobsite owner: villager villager-2 (loaded cleric)", 1, 
 assert(shown.form:find("Jobsite claim: assigned jobsite is not claimed by this villager", 1, true))
 assert(shown.form:find("travelling to bed", 1, true))
 assert(shown.form:find("Bed route: travelling to (1.0, 0.0, 0.0)", 1, true))
-assert(shown.form:find("[id 7, mode planner, age 30s, progress 5s ago, last (4.0, 0.0, 0.0)]", 1, true))
+assert(shown.form:find("[id 7, age 30s]", 1, true))
 assert(shown.form:find("Planner: start (10.0, 0.0, 0.0); approaches (1.0, 0.0, 0.0); search_limit after 4096 nodes; closest (2.0, 0.0, 0.0) (1 steps from an approach, route cost 9.50)", 1, true))
 assert(shown.form:find("Planner trail: (4.0, 0.0, 0.0) -> (2.0, 0.0, 0.0)", 1, true))
 assert(shown.form:find("Jobsite route: retry in 20s to (3.0, 0.0, 0.0): test", 1, true))

@@ -2,8 +2,8 @@
 
 These manual scenarios complement the fast Lua tests. Run them in a disposable
 world with the Villages mod and VoxeLibre loaded. Use the privileged Lookup Tool
-on the villager after each step; the route line reports its ID, mode, age, last
-progress position, and failure reason.
+on the villager after each step; the route line reports its ID, age, and
+failure reason.
 
 ## 1. Multi-floor bed return
 
@@ -11,10 +11,11 @@ Build a two-floor house with a single stair flight, a landing, and a claimed bed
 on the upper floor. Put the villager on the ground floor at least 12 nodes from
 the bed, wait for night, and verify that it reaches the bed.
 
-Expected result: the bed route first reports `mode legacy` or `mode engine`.
-If the native mover gives up, it changes to `mode planner`, retains the same
-destination, and reaches the bed. A failure must identify either legacy
-pathfinding cancellation or a planner search limit/no-route outcome.
+Expected result: the bed route is planned and walked, and the villager reaches
+the bed. If the walk ends early (no progress, pushed off the route, blocked by
+another villager) the route is planned again from where the villager stands, up
+to twice, and keeps the same destination. A failure must identify either the
+walk's end reason or a planner search limit/no-route outcome.
 
 ## 2. Path-distance jobsite selection
 
@@ -41,8 +42,7 @@ Start a bed/jobsite trip, then use the game's normal follow interaction before
 arrival.
 
 Expected result: the managed route disappears and the villager follows the
-player. It must not switch back to `mode planner` or resume the old route while
-following.
+player. It must not plan a new route or resume the old one while following.
 
 ## 5. Shared wooden-door corridor
 
@@ -51,8 +51,9 @@ it in close succession. Optionally hold the door shut with a player to force a
 stall.
 
 Expected result: a passing villager opens the door and it is not closed on the
-other villager. If no positional progress occurs for 20 seconds, diagnostics
-show a replacement planner route or a retry with a concrete failure reason.
+other villager. If the villager makes no progress, the follower ends the walk
+and diagnostics show a replacement route or a retry with a concrete failure
+reason (`walk ended: ...`).
 
 ## 6. Bounded search exhaustion
 
@@ -186,7 +187,7 @@ Then watch villagers arrive for dinner at a generated tavern. The stairs either
 side of its front step sit under the wall posts that hold its torches, at head
 height. Villagers must climb to the door by the middle step, never pushing
 their heads into a post. A route that would pass under one is replanned before
-the villager sets off, so the diagnostic shows `mode planner` for that trip.
+the villager sets off.
 
 ## 16. A door whose cell is entered around a corner
 
@@ -230,10 +231,7 @@ hours, and the cleric joins once the service ends.
 
 ## Interpretation
 
-- `mode legacy`: VoxeLibre's native mover owns the route.
-- `mode engine`: Villages is using engine-generated waypoints directly.
-- `mode planner`: Villages' bounded stair/door planner owns the route.
-- `last` and `progress`: identify a physical collision or doorway where movement
-  stopped.
+- `walk ended: ...`: the follower gave up on the walk (no progress, off the
+  route, a villager in the way, a door that cannot be crossed).
 - `search limit`: the map layout exceeded the bounded fallback search; it is
   distinct from a destination proven unreachable inside that search.

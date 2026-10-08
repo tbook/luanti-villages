@@ -1,8 +1,4 @@
 local now = 100
-local gopath_target, arrived, preflight_start, preflight_range, preflight_found = nil, nil, nil, nil, nil
-local path_available = true
-local required_path_range = 0
-local engine_paths = nil
 local support_available = true
 local support_node = "stone"
 local wooden_door = false
@@ -23,10 +19,6 @@ local water_source_nodes = {}
 local water_scans = 0
 local raised_shore_nodes = {}
 local logged = {}
--- The planner chooses every route (#163). The first half of this file runs
--- with the setting off, which keeps today's engine-first route choice.
-local planner_routes = false
-
 -- Route planning runs from the route queue's globalstep (#162); settle() lets
 -- every pending search finish.
 local function settle()
@@ -54,10 +46,7 @@ minetest = {
 	},
 	settings = {
 		get = function() return nil end,
-		get_bool = function(_, name, default)
-			if name == "living_villages_planner_routes" then return planner_routes end
-			return default
-		end,
+		get_bool = function(_, _, default) return default end,
 	},
 	get_timeofday = function() return timeofday end,
 	get_gametime = function() return now end,
@@ -118,12 +107,6 @@ minetest = {
 			or group == "trapdoor" and name == "test:trapdoor" and 1
 			or group == "cactus" and name == "test:cactus" and 1 or 0
 	end,
-	find_path = function(start, target, range)
-		preflight_start, preflight_range = start, range
-		preflight_found = path_available and range >= required_path_range
-		if engine_paths then return engine_paths[target.x .. ":" .. target.y .. ":" .. target.z] end
-		return preflight_found and {{x = 1, y = 0, z = 0}} or nil
-	end,
 	get_objects_inside_radius = function() return nearby_objects end,
 	hash_node_position = function(pos) return pos.x .. ":" .. pos.y .. ":" .. pos.z end,
 	register_globalstep = function(callback) globalstep = callback; table.insert(all_steps, callback) end,
@@ -147,11 +130,6 @@ mcl_mobs = {mob_class = {}}
 local def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self, target, callback)
-		gopath_target, arrived = target, callback
-		self.state = "gowp"
-		return true
-	end,
 }
 dofile("navigation.lua")(def)
 
@@ -164,50 +142,11 @@ local entity = {
 }
 assert(def.gopath(entity, entity._bed, function() end, true))
 settle()
-assert(gopath_target and not (gopath_target.x == 0 and gopath_target.z == 0))
-assert(preflight_start.y == 1 and preflight_range == 40)
-assert(entity._villages_bed_route.status == "travelling")
-arrived(entity)
+assert(entity._villages_bed_route.status == "travelling" and entity.state == "gowp")
+assert(not (entity._target.x == 0 and entity._target.z == 0), "the walk ends beside the bed")
+entity.callback_arrived(entity)
 assert(entity.order == "sleep")
 assert(entity._villages_bed_route.status == "arrived")
-
--- Select the lowest-cost reachable bed approach rather than the first compass
--- direction returned by approaches().
-local function path_with_length(length)
-	local path = {}
-	for index = 1, length do table.insert(path, {x = index, y = 0, z = 0}) end
-	return path
-end
-engine_paths = {
-	["1:0:0"] = path_with_length(10),
-	["-1:0:0"] = path_with_length(2),
-}
-local cost_aware_bed_entity = {
-	_bed = {x = 0, y = 0, z = 0}, state = "stand",
-	object = {
-		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
-		set_velocity = function() end,
-	},
-}
-assert(def.gopath(cost_aware_bed_entity, cost_aware_bed_entity._bed, nil, true))
-settle()
-assert(gopath_target.x == -1 and gopath_target.z == 0)
-engine_paths = nil
-
--- Routes just beyond the legacy 25-node preflight remain eligible for the
--- engine path check under the expanded 40-node bound.
-required_path_range = 26
-local expanded_range_entity = {
-	_bed = {x = 0, y = 0, z = 0}, state = "stand",
-	object = {
-		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
-		set_velocity = function() end,
-	},
-}
-assert(def.gopath(expanded_range_entity, expanded_range_entity._bed, nil, true))
-settle()
-assert(preflight_range == 40 and preflight_found)
-required_path_range = 0
 
 -- A pane is non-walkable but has collision geometry, so it cannot be used as
 -- a standing position beside a bed.
@@ -221,7 +160,7 @@ local pane_entity = {
 }
 assert(def.gopath(pane_entity, pane_entity._bed, nil, true))
 settle()
-assert(gopath_target.x == -1 and gopath_target.z == 0)
+assert(pane_entity.state == "gowp" and not (pane_entity._target.x == 1 and pane_entity._target.z == 0))
 glass_pane = false
 
 -- The standing box needs a clear head node as well as a clear feet node.
@@ -235,23 +174,15 @@ local low_ceiling_entity = {
 }
 assert(def.gopath(low_ceiling_entity, low_ceiling_entity._bed, nil, true))
 settle()
-assert(gopath_target.x == -1 and gopath_target.z == 0)
+assert(low_ceiling_entity.state == "gowp" and not (low_ceiling_entity._target.x == 1 and low_ceiling_entity._target.z == 0))
 low_ceiling = false
 
--- core.find_path plans for a walker one node tall, so the legacy mover's own
--- route can pass under something at head height, like the wall posts beside
--- a tavern's steps (#93). Such a route is dropped for the planner's, which
--- keeps the whole villager clear, and the engine preflight path is not used.
+-- The planner keeps the whole villager clear of anything at head height, like
+-- the wall posts beside a tavern's steps (#93).
 low_ceiling = true
 local overhang_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self, target, callback)
-		self.current_target = {pos = {x = 2, y = 0, z = 0}}
-		self.waypoints = {{pos = {x = 1, y = 0, z = 0}}, {pos = vector.new(target)}}
-		self.state = "gowp"
-		return true
-	end,
 }
 dofile("navigation.lua")(overhang_def)
 local overhang_entity = {
@@ -263,16 +194,16 @@ local overhang_entity = {
 }
 assert(overhang_def.gopath(overhang_entity, overhang_entity._bed, nil, true))
 settle()
-assert(overhang_entity._villages_bed_route.mode == "planner", "a route under an overhang goes to the planner")
+assert(overhang_entity.state == "gowp")
 for _, waypoint in ipairs(overhang_entity.waypoints) do
 	assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "the planner's route keeps clear of the overhang")
 end
-assert(logged[#logged]:find("passes under mcl_panes:glass_pane at (1,1,0)", 1, true), "a replan is logged")
 
 -- A trip this module does not otherwise manage (a keeper to its jukebox, a
--- guest to its seat) is rerouted the same way, to the target itself when a
+-- guest to its seat) is planned the same way, to the target itself when a
 -- villager can stand there.
-local detour_arrived = function() end
+local detour_arrivals = 0
+local detour_arrived = function() detour_arrivals = detour_arrivals + 1 end
 local detour_entity = {
 	_jobsite = {x = 50, y = 0, z = 0}, state = "stand",
 	object = {
@@ -286,13 +217,13 @@ settle()
 timeofday = 0.8
 assert(detour_entity.state == "gowp" and detour_entity._target.x == -2 and detour_entity._target.z == 0,
 	"an unmanaged trip keeps its own target")
-assert(detour_entity.callback_arrived == detour_arrived, "and its own arrival callback")
+detour_entity.callback_arrived(detour_entity)
+assert(detour_arrivals == 1, "and its own arrival callback")
 for _, waypoint in ipairs(detour_entity.waypoints) do
 	assert(not (waypoint.pos.x == 1 and waypoint.pos.z == 0), "the detour keeps clear of the overhang")
 end
--- When no detour exists either, the failure is recorded so that vanilla's
--- ready_to_path holds off the next attempt; upstream saw its own route
--- succeed and set no cooldown of its own.
+-- When no route exists, the failure is recorded so that vanilla's
+-- ready_to_path holds off the next attempt.
 support_available = false
 local stuck_entity = {
 	_jobsite = {x = 50, y = 0, z = 0}, state = "stand",
@@ -302,11 +233,10 @@ local stuck_entity = {
 	},
 }
 timeofday = 0.3
-assert(overhang_def.gopath(stuck_entity, {x = -2, y = 0, z = 0}, nil, true), "the detour is planned later")
-assert(stuck_entity.state == "stand" and not stuck_entity._pf_last_failed, "and the villager waits meanwhile")
+assert(overhang_def.gopath(stuck_entity, {x = -2, y = 0, z = 0}, nil, true) == false, "nowhere to stand")
 settle()
 timeofday = 0.8
-assert(stuck_entity.state == "stand" and stuck_entity._pf_last_failed, "a failed detour sets the pathfinding cooldown")
+assert(stuck_entity.state == "stand" and stuck_entity._pf_last_failed, "a failed trip sets the pathfinding cooldown")
 support_available = true
 low_ceiling = false
 
@@ -317,10 +247,8 @@ assert(entity._villages_bed_route.status == "arrived")
 local failed_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 }
 dofile("navigation.lua")(failed_def)
-path_available = false
 support_available = false
 local failed_entity = {
 	_bed = {x = 0, y = 0, z = 0}, state = "stand",
@@ -334,7 +262,6 @@ assert(failed_entity.state == "stand")
 assert(failed_entity._villages_bed_route.status == "retry")
 assert(failed_entity._villages_bed_route.reason:find("no safe standing", 1, true))
 assert(not failed_entity._villages_bed_route.target)
-path_available = true
 support_available = true
 
 -- Fallback routes require floor-height, non-hazardous support. Low slabs,
@@ -363,14 +290,9 @@ assert(def.gopath(stair_support_entity, stair_support_entity._bed, nil, true))
 settle()
 support_node = "stone"
 
-local cooldown_called = false
 local cooldown_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function()
-		cooldown_called = true
-		return true
-	end,
 }
 dofile("navigation.lua")(cooldown_def)
 local cooldown_entity = {
@@ -382,13 +304,11 @@ local cooldown_entity = {
 	},
 }
 assert(not cooldown_def.gopath(cooldown_entity, cooldown_entity._bed, nil, true))
-assert(not cooldown_called)
-assert(cooldown_entity._villages_bed_route.reason == "legacy pathfinder cooldown")
+assert(cooldown_entity._villages_bed_route.reason == "pathfinder cooldown")
 
 local fallback_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 }
 dofile("navigation.lua")(fallback_def)
 local fallback_entity = {
@@ -406,10 +326,8 @@ assert(fallback_entity.current_target and fallback_entity.waypoints)
 local door_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 }
 dofile("navigation.lua")(door_def)
-path_available = false
 wooden_door = true
 local door_node = minetest.get_node_or_nil
 minetest.get_node_or_nil = function(pos)
@@ -434,7 +352,6 @@ end
 assert(opens_door)
 minetest.get_node_or_nil = door_node
 wooden_door = false
-path_available = true
 
 -- A waypoint's action fires when the mover leaves it for the next one. When
 -- the destination sits just past a door, the door is the second-to-last
@@ -444,11 +361,9 @@ local trailing_close_action = nil
 local trailing_door_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 	do_pathfind_action = function(_, action) trailing_close_action = action end,
 }
 dofile("navigation.lua")(trailing_door_def)
-path_available = false
 local trailing_door_node = minetest.get_node_or_nil
 minetest.get_node_or_nil = function(pos)
 	if pos.y == -1 and pos.z ~= 0 then return {name = "air"} end
@@ -494,7 +409,6 @@ settle()
 stale_trailing_arrived(superseded_trailing_entity)
 assert(not trailing_close_action, "a superseded route must not close its old trailing door")
 minetest.get_node_or_nil = trailing_door_node
-path_available = true
 
 -- A stair presents a full vertical face from the side, not just the low front
 -- face. The fallback planner must jump directly onto it from any cardinal
@@ -502,10 +416,8 @@ path_available = true
 local stair_side_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 }
 dofile("navigation.lua")(stair_side_def)
-path_available = false
 local stair_side_node = minetest.get_node_or_nil
 minetest.get_node_or_nil = function(pos)
 	if pos.x == 0 and pos.y == 1 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
@@ -540,17 +452,10 @@ assert(side_rise.x == 2 and side_rise.y == 0 and side_rise.z == 0
 	and side_arrival.x == 1 and side_arrival.y == 1 and side_arrival.z == 0,
 	"the route must rise directly from the stair's side, not some other approach")
 minetest.get_node_or_nil = stair_side_node
-path_available = true
 
-local proactive_target = nil
 local proactive_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self, target)
-		proactive_target = target
-		self.state = "gowp"
-		return true
-	end,
 }
 dofile("navigation.lua")(proactive_def)
 local proactive_entity = {
@@ -574,11 +479,10 @@ minetest.get_meta = function(pos)
 end
 proactive_def.do_custom(proactive_entity, 0.1)
 settle()
-assert(proactive_target and not (proactive_target.x == 0 and proactive_target.z == 0))
+assert(proactive_entity._target and not (proactive_entity._target.x == 0 and proactive_entity._target.z == 0))
 assert(proactive_entity._villages_bed_route.status == "travelling")
 
 top_claimed_by_player = true
-proactive_target = nil
 local blocked_entity = {
 	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "walk",
 	gopath = proactive_def.gopath,
@@ -589,14 +493,13 @@ local blocked_entity = {
 }
 proactive_def.do_custom(blocked_entity, 0.1)
 settle()
-assert(not proactive_target)
+assert(not blocked_entity._target)
 assert(not blocked_entity._villages_bed_route)
 
 -- A villager already standing near its claimed bed at nightfall needs no
 -- trip, but must still get order = "sleep" promptly rather than waiting on
 -- VoxeLibre's five-second do_activity poll (#61).
 top_claimed_by_player = false
-proactive_target = nil
 local already_home_entity = {
 	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
 	gopath = proactive_def.gopath,
@@ -607,22 +510,17 @@ local already_home_entity = {
 }
 proactive_def.do_custom(already_home_entity, 0.1)
 settle()
-assert(not proactive_target, "an already-close villager must not be sent on a bed trip")
+assert(not already_home_entity._target, "an already-close villager must not be sent on a bed trip")
 assert(already_home_entity.order == "sleep",
 	"an already-close villager must get order = sleep immediately, not after VoxeLibre's poll")
 
 -- VoxeLibre chooses and claims the jobsite. During its existing work periods,
 -- adapt only the trip to that claimed solid node into a safe approach route.
 timeofday = 0.4
-local job_target, job_arrived, callback_target = nil, nil, nil
+local callback_target = nil
 local job_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self, target, callback)
-		job_target, job_arrived = target, callback
-		self.state = "gowp"
-		return true
-	end,
 }
 dofile("navigation.lua")(job_def)
 local job_entity = {
@@ -635,16 +533,19 @@ local job_entity = {
 timeofday = 0.7
 assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
 settle()
-assert(job_target.x == 10 and job_target.z == 0)
+assert(job_entity._villages_goto_route and job_entity.state == "gowp", "outside work hours the trip is unmanaged")
 assert(not job_entity._villages_job_route)
+job_entity.state = "stand"
 
 timeofday = 0.4
 assert(job_def.gopath(job_entity, job_entity._jobsite, function(_, target)
 	callback_target = target
 end, true))
+settle()
+local job_target = job_entity._target
 assert(job_target and not (job_target.x == 10 and job_target.z == 0))
 assert(job_entity._villages_job_route.status == "travelling")
-job_arrived(job_entity)
+job_entity.callback_arrived(job_entity)
 assert(job_entity._villages_job_route.status == "arrived")
 assert(callback_target and callback_target.x == job_target.x and callback_target.z == job_target.z)
 
@@ -654,10 +555,8 @@ assert(callback_target and callback_target.x == job_target.x and callback_target
 local off_stair_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 }
 dofile("navigation.lua")(off_stair_def)
-path_available = false
 local off_stair_node = minetest.get_node_or_nil
 minetest.get_node_or_nil = function(pos)
 	if pos.x == 9 and pos.y == 0 and pos.z == 0 then return {name = "test:stair"} end
@@ -677,13 +576,13 @@ settle()
 assert(off_stair_entity.current_target and #off_stair_entity.waypoints == 0,
 	"stepping off the stair must be a direct one-node drop, not a detour")
 minetest.get_node_or_nil = off_stair_node
-path_available = true
 
 jobsite_present = false
 job_entity._villages_job_route = nil
+job_entity.state = "stand"
 assert(job_def.gopath(job_entity, job_entity._jobsite, nil, true))
 settle()
-assert(job_target.x == 10 and job_target.z == 0)
+assert(job_entity._villages_goto_route and not job_entity._villages_job_route, "a missing jobsite is no managed trip")
 
 -- When native look_for_job sends its nearest raw node to gopath, redirect the
 -- trip to the nearest *reachable* free station.  The first candidate lacks a
@@ -693,7 +592,8 @@ jobsite_claimed = false
 search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
 local original_node = minetest.get_node_or_nil
 minetest.get_node_or_nil = function(pos)
-	if pos.y == -1 and pos.x >= 19 and pos.x <= 21 then return {name = "air"} end
+	-- The four cells beside the site at x = 20 have no floor.
+	if pos.y == -1 and math.abs(pos.x - 20) + math.abs(pos.z) == 1 then return {name = "air"} end
 	return original_node(pos)
 end
 local searching_entity = {
@@ -705,32 +605,10 @@ local searching_entity = {
 }
 assert(job_def.gopath(searching_entity, {x = 10, y = 0, z = 0}, nil, true))
 settle()
-assert(job_target and job_target.x >= 29)
+assert(searching_entity._target and searching_entity._target.x >= 29)
 assert(searching_entity._villages_job_search_route.status == "travelling")
 assert(not searching_entity._jobsite)
 minetest.get_node_or_nil = original_node
-search_sites = {}
-jobsite_claimed = true
-
--- A first jobsite is selected by route cost, not straight-line distance. The
--- farther station has the short path and must win over the nearer long route.
-jobsite_claimed = false
-search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
-engine_paths = {
-	["21:0:0"] = path_with_length(10),
-	["31:0:0"] = path_with_length(2),
-}
-local cost_aware_job_entity = {
-	_id = "villager-1", state = "stand",
-	object = {
-		get_pos = function() return {x = 15, y = 0, z = 0} end,
-		set_velocity = function() end,
-	},
-}
-assert(job_def.gopath(cost_aware_job_entity, {x = 10, y = 0, z = 0}, nil, true))
-settle()
-assert(job_target.x == 31 and job_target.z == 0)
-engine_paths = nil
 search_sites = {}
 jobsite_claimed = true
 
@@ -739,7 +617,8 @@ jobsite_claimed = true
 jobsite_claimed = false
 search_sites = {{x = 20, y = 0, z = 0}}
 minetest.get_node_or_nil = function(pos)
-	if pos.y == -1 and pos.x >= 19 and pos.x <= 21 then return {name = "air"} end
+	-- The four cells beside the site at x = 20 have no floor.
+	if pos.y == -1 and math.abs(pos.x - 20) + math.abs(pos.z) == 1 then return {name = "air"} end
 	return original_node(pos)
 end
 local no_site_entity = {
@@ -763,8 +642,7 @@ jobsite_claimed = true
 
 -- A cleric's pulpit (cleric.lua) is claimed by this mod, not vanilla, but trips
 -- to it get the same managed routes: a search trip arrives beside the pulpit,
--- and the commute to a claimed one falls back to the planner when the legacy
--- pathfinder fails (#125).
+-- and so does the commute to a claimed one (#125).
 local pulpit_claimed = false
 local pulpit_node, pulpit_meta = minetest.get_node_or_nil, minetest.get_meta
 minetest.get_node_or_nil = function(pos)
@@ -786,45 +664,38 @@ local pulpit_seeker = {
 }
 assert(job_def.gopath(pulpit_seeker, {x = 40, y = 0, z = 0}, function() pulpit_arrivals = pulpit_arrivals + 1 end, true))
 settle()
-assert(job_target and math.abs(job_target.x - 40) + math.abs(job_target.z) == 1 and job_target.y == 0,
+local pulpit_target = pulpit_seeker._target
+assert(pulpit_target and math.abs(pulpit_target.x - 40) + math.abs(pulpit_target.z) == 1 and pulpit_target.y == 0,
 	"a pulpit trip ends on a cardinal neighbor, where the claim on arrival finds it")
 assert(pulpit_seeker._villages_job_search_route.status == "travelling")
-job_arrived(pulpit_seeker)
+pulpit_seeker.callback_arrived(pulpit_seeker)
 assert(pulpit_arrivals == 1 and pulpit_seeker._villages_job_search_route.status == "arrived")
 
 local failing_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return false end,
 }
 dofile("navigation.lua")(failing_def)
-path_available = false
 pulpit_claimed = true
 local pulpit_cleric = {
 	_id = "villager-1", _jobsite = {x = 40, y = 0, z = 0}, state = "stand",
 	object = {get_pos = function() return {x = 35, y = 0, z = 0} end, set_velocity = function() end},
 }
 assert(failing_def.gopath(pulpit_cleric, pulpit_cleric._jobsite, nil, true),
-	"the planner takes over when the legacy pathfinder fails")
+	"the planner routes the commute to a claimed pulpit")
 settle()
-assert(pulpit_cleric._villages_job_route.status == "travelling" and pulpit_cleric._villages_job_route.mode == "planner")
+assert(pulpit_cleric._villages_job_route.status == "travelling")
 minetest.get_node_or_nil, minetest.get_meta = pulpit_node, pulpit_meta
 pulpit_claimed = false
-path_available = true
 
 -- If an accepted bed route stalls, planner recovery must retain the original
 -- caller's arrival callback just as it does for jobsites.
 jobsite_present = true
-path_available = false
 top_claimed_by_player = false
 local bed_callback_called = false
 local recovery_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self)
-		self.state = "gowp"
-		return true
-	end,
 }
 dofile("navigation.lua")(recovery_def)
 local recovery_entity = {
@@ -844,7 +715,6 @@ settle()
 assert(recovery_entity.state == "gowp")
 recovery_entity.callback_arrived(recovery_entity)
 assert(bed_callback_called)
-path_available = true
 
 -- A fallback planner failure is preserved in route diagnostics instead of being
 -- reported as a generic native-path cancellation.
@@ -864,6 +734,7 @@ minetest.get_node_or_nil = function(pos)
 	if pos.y == -1 and pos.x >= 4 then return {name = "stone"} end
 	return no_bed_approach_node(pos)
 end
+exhausted_recovery_entity._villages_follow_failed = {reason = "no progress along the route"}
 recovery_def.do_custom(exhausted_recovery_entity, 0.1)
 settle()
 assert(exhausted_recovery_entity._villages_bed_route.status == "retry")
@@ -873,11 +744,11 @@ assert(exhausted_recovery_entity._villages_bed_route.planner.searched == 0)
 minetest.get_node_or_nil = no_bed_approach_node
 support_available = true
 
--- A wooden door that becomes iron after planning causes an immediate bounded
--- replan instead of waiting for the no-progress watchdog.
+-- A wooden door that becomes iron after planning ends the follower's walk
+-- (follower.lua gives up on a blocked door), and the planner plans again.
 local changed_door_entity = {
 	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "gowp",
-	_villages_bed_route = {status = "travelling", mode = "legacy", id = 1, target = {x = -1, y = 0, z = 0}},
+	_villages_bed_route = {status = "travelling", id = 1, target = {x = -1, y = 0, z = 0}},
 	object = {
 		get_pos = function() return {x = 5, y = 0, z = 0} end,
 		set_velocity = function() end,
@@ -888,10 +759,11 @@ recovery_def.do_pathfind_action(changed_door_entity, {
 	type = "door", action = "open", target = {x = 1, y = 0, z = 0},
 })
 assert(changed_door_entity._villages_blocked_door)
+changed_door_entity.state = "stand"
+changed_door_entity._villages_follow_failed = {reason = "door cannot be crossed"}
 recovery_def.do_custom(changed_door_entity, 0.1)
 settle()
-assert(changed_door_entity.state == "gowp")
-assert(changed_door_entity._villages_bed_route.mode == "planner")
+assert(changed_door_entity.state == "gowp" and changed_door_entity._villages_bed_route.replans == 1)
 iron_door = false
 
 -- A work-period interruption invalidates a farm route and its chosen crop as
@@ -927,16 +799,18 @@ local fish_arrived_called = false
 assert(job_def.gopath(fish_entity, fish_entity._villages_fish_target, function()
 	fish_arrived_called = true
 end, true))
-assert(job_target and not (job_target.x == fish_site.x and job_target.z == fish_site.z),
+settle()
+assert(fish_entity._target and not (fish_entity._target.x == fish_site.x and fish_entity._target.z == fish_site.z),
 	"the fisherman must stand beside the water, not on it")
 assert(fish_entity._villages_fish_route.status == "travelling")
-job_arrived(fish_entity)
+fish_entity.callback_arrived(fish_entity)
 assert(fish_entity._villages_fish_route.status == "arrived")
 assert(fish_arrived_called)
 
 -- A stand already occupied by another loaded villager is skipped for an
 -- unoccupied one instead of failing the whole route.
 fish_entity._villages_fish_route = nil
+fish_entity.state = "stand"
 local original_objects_near = minetest.get_objects_inside_radius
 local occupied_stand = {x = fish_site.x + 1, y = 0, z = fish_site.z}
 minetest.get_objects_inside_radius = function(pos)
@@ -947,13 +821,14 @@ minetest.get_objects_inside_radius = function(pos)
 end
 assert(job_def.gopath(fish_entity, fish_entity._villages_fish_target, nil, true))
 settle()
-assert(not (job_target.x == occupied_stand.x and job_target.z == occupied_stand.z),
+assert(not (fish_entity._target.x == occupied_stand.x and fish_entity._target.z == occupied_stand.z),
 	"an occupied stand must be skipped for another candidate")
 minetest.get_objects_inside_radius = original_objects_near
 
 -- Every candidate stand occupied is reported as no safe standing space,
 -- exactly like a bed or jobsite with no free approach.
 fish_entity._villages_fish_route = nil
+fish_entity.state = "stand"
 nearby_objects = {{get_luaentity = function() return {name = "mobs_mc:villager"} end}}
 assert(not job_def.gopath(fish_entity, fish_entity._villages_fish_target, nil, true))
 assert(fish_entity._villages_fish_route.status == "retry")
@@ -981,7 +856,8 @@ local raised_fish_entity = {
 }
 assert(job_def.gopath(raised_fish_entity, raised_fish_entity._villages_fish_target, nil, true),
 	"a raised (sand-at-water-level) shore must still yield a route, not \"no safe standing space\"")
-assert(job_target and job_target.y == 1,
+settle()
+assert(raised_fish_entity._target and raised_fish_entity._target.y == 1,
 	"the stand must be one block above the water's own height, on top of the shore")
 water_source_nodes[raised_fish_site.x .. ":" .. raised_fish_site.y .. ":" .. raised_fish_site.z] = nil
 raised_shore_nodes = {}
@@ -1010,7 +886,6 @@ local closed_action = nil
 local door_action_def = {
 	on_activate = function() end,
 	do_custom = function() return false end,
-	gopath = function() end,
 	do_pathfind_action = function(_, action) closed_action = action end,
 }
 dofile("navigation.lua")(door_action_def)
@@ -1045,7 +920,6 @@ local turn_actions = {}
 local turn_def = {
 	on_activate = function() end,
 	do_custom = function() return false end,
-	gopath = function() end,
 	do_pathfind_action = function(_, action) table.insert(turn_actions, action) end,
 }
 dofile("navigation.lua")(turn_def)
@@ -1097,39 +971,10 @@ assert(#turn_actions == 1 and turn_actions[1] == open_door)
 wooden_door = false
 door_name, door_param2 = "mcl_doors:wooden_door_b_1", nil
 
--- A native gopath implementation may set its active state before returning a
--- falsey value. That is still a successfully started route to callers.
-local falsey_def = {
-	on_activate = function() end,
-	do_custom = function() end,
-	gopath = function(self)
-		self.state = "gowp"
-		return false
-	end,
-}
-dofile("navigation.lua")(falsey_def)
-timeofday = 0.8
-local falsey_entity = {
-	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
-	object = {
-		get_pos = function() return {x = 5, y = 0, z = 0} end,
-		set_velocity = function() end,
-	},
-}
-assert(falsey_def.gopath(falsey_entity, falsey_entity._bed, nil, true))
-settle()
-assert(falsey_entity._villages_bed_route.status == "travelling")
-
 -- A canceled or superseded route must not run its old arrival callback.
-local callbacks = {}
 local ownership_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self, _, callback)
-		self.state = "gowp"
-		table.insert(callbacks, callback)
-		return true
-	end,
 }
 dofile("navigation.lua")(ownership_def)
 local ownership_callback_calls = 0
@@ -1140,19 +985,23 @@ local ownership_entity = {
 		set_velocity = function() end,
 	},
 }
+timeofday = 0.8
 assert(ownership_def.gopath(ownership_entity, ownership_entity._bed, function()
 	ownership_callback_calls = ownership_callback_calls + 1
 end, true))
+settle()
+local stale_callback = ownership_entity.callback_arrived
 local first_route_id = ownership_entity._villages_bed_route.id
 ownership_entity.state = "stand"
 assert(ownership_def.gopath(ownership_entity, ownership_entity._bed, function()
 	ownership_callback_calls = ownership_callback_calls + 1
 end, true))
+settle()
 assert(ownership_entity._villages_bed_route.id ~= first_route_id)
-callbacks[1](ownership_entity)
+stale_callback(ownership_entity)
 assert(ownership_entity._villages_bed_route.status == "travelling")
 assert(ownership_callback_calls == 0)
-callbacks[2](ownership_entity)
+ownership_entity.callback_arrived(ownership_entity)
 assert(ownership_entity._villages_bed_route.status == "arrived")
 assert(ownership_callback_calls == 1)
 
@@ -1171,34 +1020,11 @@ settle()
 assert(not following_entity._villages_bed_route)
 assert(following_entity.state == "stand")
 
--- If the native mover remains in gowp without positional progress, hand the
--- route to the planner rather than leaving the villager stuck forever.
 local stalled_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function(self)
-		self.state = "gowp"
-		return true
-	end,
 }
 dofile("navigation.lua")(stalled_def)
-local stalled_entity = {
-	_id = "villager-1", _bed = {x = 0, y = 0, z = 0}, state = "stand",
-	object = {
-		get_pos = function() return {x = 5, y = 0, z = 0} end,
-		set_velocity = function() end,
-	},
-}
-now = 500
-assert(stalled_def.gopath(stalled_entity, stalled_entity._bed, nil, true))
-settle()
-local stalled_route_id = stalled_entity._villages_bed_route.id
-now = now + 21
-stalled_def.do_custom(stalled_entity, 0.1)
-settle()
-assert(stalled_entity.state == "gowp")
-assert(stalled_entity._villages_bed_route.mode == "planner")
-assert(stalled_entity._villages_bed_route.id ~= stalled_route_id)
 
 -- Reloading a villager with an owned route clears the native waypoint state as
 -- well as Villages' bookkeeping, avoiding an unmanaged resumed trip.
@@ -1237,12 +1063,10 @@ assert(not activated_fisherman._villages_fish_target)
 -- path.
 timeofday = 0.4
 now = 1000
-path_available = true
 support_available = true
 support_node = "stone"
 jobsite_present = false
 search_sites = {}
-engine_paths = nil
 jobsite_claimed = true
 
 local function place_pond(min_x, max_x, min_z, max_z, y)
@@ -1268,7 +1092,6 @@ math.random = function() return 0 end
 local promotion_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return true end,
 }
 dofile("navigation.lua")(promotion_def)
 
@@ -1378,10 +1201,6 @@ water_scans = 0
 place_pond(5, 7, -1, 1, 0)
 jobsite_claimed = false
 search_sites = {{x = 20, y = 0, z = 0}, {x = 30, y = 0, z = 0}}
-engine_paths = {
-	["21:0:0"] = path_with_length(5),
-	["31:0:0"] = path_with_length(5),
-}
 local workstation_entity = new_promotion_entity({
 	object = {
 		get_pos = function() return {x = 15, y = 0, z = 0} end,
@@ -1393,29 +1212,22 @@ settle()
 assert(workstation_entity._profession == "unemployed", "a reachable workstation must suppress promotion")
 assert(not workstation_entity._villages_fisherman)
 assert(water_scans == 1, "water is checked before the workstation search")
-engine_paths = nil
 search_sites = {}
 jobsite_claimed = true
 clear_pond()
 
 -- With no water near its bed, a villager never pays for the workstation
--- search, which pathfinds to every free site in range (#113).
+-- search, which plans a route to every free site in range (#113).
 water_scans = 0
 jobsite_claimed = false
 search_sites = {{x = 20, y = 0, z = 0}}
-local path_calls = 0
-local counted_find_path = minetest.find_path
-minetest.find_path = function(...)
-	path_calls = path_calls + 1
-	return counted_find_path(...)
-end
+local scans_before = job_search_scans
 local dry_entity = new_promotion_entity()
 promotion_def.do_custom(dry_entity, 0.1)
 settle()
 assert(water_scans == 1, "the water is checked")
-assert(path_calls == 0, "no water means no workstation search")
+assert(job_search_scans == scans_before, "no water means no workstation search")
 assert(dry_entity._profession == "unemployed")
-minetest.find_path = counted_find_path
 search_sites = {}
 jobsite_claimed = true
 
@@ -1504,7 +1316,6 @@ local saved_fields
 local staticdata_def = {
 	on_activate = function() end,
 	do_custom = function() end,
-	gopath = function() return true end,
 	get_staticdata = function(self)
 		saved_fields = {}
 		for field, value in pairs(self) do saved_fields[field] = value end
@@ -1534,13 +1345,6 @@ do
 	local hold_def = {
 		on_activate = function() end,
 		do_custom = function() end,
-		gopath = function(self, target, callback)
-			self.callback_arrived = callback
-			self.current_target = {pos = {x = 2, y = 0, z = 0}}
-			self.waypoints = {{pos = {x = 1, y = 0, z = 0}}, {pos = vector.new(target)}}
-			self.state = "gowp"
-			return true
-		end,
 	}
 	dofile("navigation.lua")(hold_def)
 	local function new_entity()
@@ -1563,11 +1367,13 @@ do
 	assert(hold_def.do_custom(polled, 0.1) == false, "a planning villager skips vanilla's states")
 	assert(polled.state == "stand", "and stands still")
 	settle()
-	assert(polled._villages_bed_route.status == "travelling" and polled._villages_bed_route.mode == "planner")
+	assert(polled._villages_bed_route.status == "travelling")
 	assert(polled._villages_bed_route.id == first_id)
 
 	-- A detour that a later trip superseded must not start.
-	local first_callback, second_callback = function() end, function() end
+	local called = {}
+	local first_callback = function() called.first = true end
+	local second_callback = function() called.second = true end
 	local detoured = new_entity()
 	detoured._bed = nil
 	detoured._jobsite = {x = 50, y = 0, z = 0}
@@ -1578,25 +1384,19 @@ do
 	assert(hold_def.gopath(detoured, {x = 8, y = 0, z = 0}, second_callback, true))
 	settle()
 	timeofday = 0.8
-	assert(detoured._target == nil or detoured._target.x == 8 or detoured.callback_arrived == second_callback)
-	assert(detoured.callback_arrived == second_callback, "the superseded detour does not restore its callback")
-	assert(detoured.waypoints[#detoured.waypoints].pos.x == 8, "nor its path")
+	detoured.callback_arrived(detoured)
+	assert(called.second and not called.first, "the superseded detour does not restore its callback")
+	assert(detoured.waypoints[#detoured.waypoints].pos.x == 8 or detoured._target.x == 8, "nor its path")
 	low_ceiling = false
 end
 
--- With the setting on (#163) the planner chooses every route: the engine's
--- pathfinder and vanilla's gopath are never asked.
+-- The planner chooses every route (#163) and the follower walks it (#164).
 do
-	planner_routes = true
 	timeofday = 0.8
 	low_ceiling, wooden_door, glass_pane = false, false, false
-	local engine_calls, vanilla_calls = 0, 0
-	local plain_find_path = minetest.find_path
-	minetest.find_path = function(...) engine_calls = engine_calls + 1 return plain_find_path(...) end
 	local planner_def = {
 		on_activate = function() end,
 		do_custom = function() end,
-		gopath = function() vanilla_calls = vanilla_calls + 1 return false end,
 	}
 	dofile("navigation.lua")(planner_def)
 	local function new_entity(bed)
@@ -1611,10 +1411,10 @@ do
 		return last.pos.x == x
 	end
 
-	-- A managed trip is planned, then walked by the legacy mover.
+	-- A managed trip is planned, then walked by the follower.
 	local sleeper = new_entity(true)
 	assert(planner_def.gopath(sleeper, sleeper._bed, nil, true))
-	assert(sleeper._villages_bed_route.status == "planning" and sleeper._villages_bed_route.mode == "planner")
+	assert(sleeper._villages_bed_route.status == "planning")
 	assert(sleeper.state == "stand", "a villager waits where it is while the search runs")
 	settle()
 	assert(sleeper._villages_bed_route.status == "travelling" and sleeper.state == "gowp")
@@ -1702,13 +1502,6 @@ do
 	assert(switcher._villages_goto_route == nil, "the superseded search is dropped")
 	assert(switcher._villages_bed_route.status == "travelling" and switcher._target.x ~= 8)
 
-	-- A walk that stops making progress is given up on.
-	local stuck = new_entity()
-	assert(planner_def.gopath(stuck, {x = 8, y = 0, z = 0}, nil, true))
-	settle()
-	now = now + 60
-	assert(planner_def.do_custom(stuck, 0.1) ~= false)
-	assert(stuck._villages_goto_route.status == "retry" and stuck.state == "stand")
 	-- A trip another module's mover took over is dropped without a word.
 	local taken = new_entity()
 	assert(planner_def.gopath(taken, {x = 8, y = 0, z = 0}, nil, true))
@@ -1751,10 +1544,6 @@ do
 	assert(gave_up._villages_bed_route.status == "retry"
 		and gave_up._villages_bed_route.reason:find("blocked by another villager", 1, true), "then backs off")
 
-	assert(engine_calls == 0, "the engine's pathfinder is never asked")
-	assert(vanilla_calls == 0, "nor is vanilla's gopath")
-	minetest.find_path = plain_find_path
-	planner_routes = false
 end
 
 math.random = real_random

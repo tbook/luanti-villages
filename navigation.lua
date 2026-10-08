@@ -1,7 +1,7 @@
--- Bed-directed navigation on top of VoxeLibre's legacy gopath API.  Keep the
--- game's bed claims and movement implementation, but direct trips to an open
--- square beside a bed and retain enough state for useful diagnostics. The
--- planner chooses every route (#163); the legacy mover only walks it.
+-- Bed-directed navigation on top of VoxeLibre's gopath API.  Keep the game's
+-- bed claims, but direct trips to an open square beside a bed and retain
+-- enough state for useful diagnostics. The planner chooses every route (#163)
+-- and the follower walks it (#164).
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_work_time = common.is_work_time
@@ -15,15 +15,10 @@ local doors = dofile(core.get_modpath("living_villages") .. "/doors.lua")
 local route_queue = dofile(core.get_modpath("living_villages") .. "/route_queue.lua")
 local follower = dofile(core.get_modpath("living_villages") .. "/follower.lua")
 local RETRY_SECONDS = 30
-local LEGACY_FAILURE_WAIT = 30
-local NO_PROGRESS_SECONDS = 20
-local PROGRESS_DISTANCE = 0.35
+local FAILURE_WAIT = 30
 -- A walk the follower gave up on (no progress, a villager in the way, off the
 -- route) is planned again from where the villager stands, this many times.
 local MAX_REPLANS = 2
--- Allow ordinary multi-room trips beyond the legacy 25-node preflight while
--- staying inside the planner's search boundary.
-local PATH_RANGE = 40
 -- The planner's reach: one setting for the search box and one for the number of
 -- nodes it may expand (#162).
 local function planner_range()
@@ -33,13 +28,6 @@ local function planner_max_nodes()
 	return tonumber(core.settings and core.settings:get("living_villages_route_max_nodes")) or 4096
 end
 local PATHFINDING = "gowp"
--- The planner chooses every route (#163). Off brings back the engine-first
--- route choice, until the legacy mover is replaced (#164) and this goes.
-local function planner_routes()
-	local settings = core.settings
-	if not (settings and settings.get_bool) then return true end
-	return settings:get_bool("living_villages_planner_routes", true)
-end
 local DOOR_USE_RADIUS = 2.5
 -- Door closes must outlive the villager that scheduled them: an entity can be
 -- unloaded or despawned while another villager is still passing through.
@@ -54,9 +42,8 @@ local WATER_ABOVE_BAND = 2
 local WATER_POND_MIN_SPAN = 3
 local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
--- job_search_target pathfinds to every free workstation within 48 nodes, and
--- falls back to the Lua planner for each one the engine cannot reach with
--- headroom, so one search can take hundreds of milliseconds. At a few seconds'
+-- job_search_target plans a route to every free workstation within 48 nodes,
+-- so one search can take hundreds of milliseconds. At a few seconds'
 -- spacing, a village of unemployed villagers stalled the server for seconds at
 -- a time (#113). Spread out, and jittered so villagers do not line up.
 local FISHERMAN_PROMOTION_INTERVAL = 60
@@ -127,18 +114,6 @@ end
 
 if core.register_globalstep then
 	core.register_globalstep(flush_deferred_door_closes)
-end
-
--- Mirror the legacy gopath start normalization. Villagers on stairs often have
--- their rounded position inside the stair's walkable node, so gopath starts
--- from the open node above rather than from the entity's raw position.
-local function legacy_path_start(pos)
-	local start = vector.round(pos)
-	local def = node_def(start)
-	if def and not def.walkable then return start end
-	local above = {x = start.x, y = start.y + 1, z = start.z}
-	if cells.is_open(above) then return above end
-	return core.find_node_near(start, 1, {"air"})
 end
 
 -- raised_ok additionally checks node_pos.y + 1 at each offset: a fishing
@@ -291,55 +266,6 @@ local function path_cost(path)
 	return cost
 end
 
--- core.find_path treats a walker as one node tall (mcl_mobs/pathfinding.lua
--- says as much), so its routes pass under anything at head height -- the
--- wall posts that hold the torches beside a tavern's steps, say -- and the
--- villager walks into it and keeps pushing (#93). Each waypoint is the node
--- the feet are in; the node above it must be open too.
-local function has_headroom(path)
-	for _, point in ipairs(path) do
-		local pos = point.pos or point
-		local head = vector.round({x = pos.x, y = pos.y + 1, z = pos.z})
-		if not cells.is_open(head, {door = true}) then return false, head end
-	end
-	return true
-end
-
--- Returns false and the obstructing node when the legacy mover's route has
--- the villager walk under something.
-local function legacy_route_has_headroom(self)
-	local route = {}
-	if self.current_target and self.current_target.pos then table.insert(route, self.current_target) end
-	for _, waypoint in ipairs(self.waypoints or {}) do table.insert(route, waypoint) end
-	return has_headroom(route)
-end
-
-local function log_overhang(self, target, head)
-	local node = core.get_node_or_nil(head)
-	core.log("action", string.format("[living_villages] villager %s: route to %s passes under %s at %s; replanning",
-		tostring(self._id), core.pos_to_string(vector.round(target)), node and node.name or "?", core.pos_to_string(head)))
-end
-
-local function choose_approach(self, candidates)
-	local start = self.object:get_pos()
-	if not start then return nil end
-	start = legacy_path_start(start)
-	if not start then return nil end
-	local best_candidate, best_path, best_cost
-	for _, candidate in ipairs(candidates) do
-		local path = core.find_path(start, candidate, PATH_RANGE, 1, 4)
-		if path and not has_headroom(path) then path = nil end
-		local cost = path and path_cost(path)
-		if cost and (not best_cost or cost < best_cost) then
-			best_candidate, best_path, best_cost = candidate, path, cost
-		end
-	end
-	if best_path then return best_candidate, best_path, best_cost end
-	-- The legacy gopath has limited door stitching of its own. Let it attempt a
-	-- safe candidate even when the plain engine route cannot see one.
-	return candidates[1]
-end
-
 local function nearest_walk_position(pos)
 	local origin = vector.round(pos)
 	local best, best_distance
@@ -471,19 +397,10 @@ local function job_search_target(self)
 			-- Native employ uses find_node_near(..., 1, ...); a diagonal
 			-- destination is not close enough to complete the native claim.
 			local candidates = approaches(site, true)
-			local approach, engine_path, engine_cost
-			if not planner_routes() then approach, engine_path, engine_cost = choose_approach(self, candidates) end
-			if engine_path then
-				if better_jobsite(pos, site, engine_cost, best) then
-					best = {site = site, candidates = candidates, target = approach,
-						engine_path = engine_path, cost = engine_cost}
-				end
-			else
-				local stair_target, stair_path, _, stair_cost = plan_stair_route(self, candidates)
-				if stair_target and stair_path and better_jobsite(pos, site, stair_cost, best) then
-					best = {site = site, candidates = candidates, target = stair_target,
-						planner_path = stair_path, cost = stair_cost}
-				end
+			local stair_target, stair_path, _, stair_cost = plan_stair_route(self, candidates)
+			if stair_target and stair_path and better_jobsite(pos, site, stair_cost, best) then
+				best = {site = site, candidates = candidates, target = stair_target,
+					planner_path = stair_path, cost = stair_cost}
 			end
 		end
 	end
@@ -602,10 +519,9 @@ local function evaluate_fisherman_promotion(self)
 	})
 end
 
--- gopath occasionally rejects a path that minetest.find_path has returned,
--- particularly from stair landings. Reuse its waypoint mover directly for that
--- narrow case, rather than abandoning a known-valid route.
-local function start_engine_path(self, target, path, arrived, door_actions, route_field, route_id)
+-- Sets the villager walking the planner's `path`: waypoints, door actions, and
+-- the follower (follower.lua) in state gowp.
+local function start_route(self, target, path, arrived, route_field, route_id)
 	if not path or #path == 0 then return false end
 	local waypoints = {}
 	for _, pos in ipairs(path) do
@@ -616,17 +532,15 @@ local function start_engine_path(self, target, path, arrived, door_actions, rout
 	-- destination sits just past the door) would never run; close on arrival
 	-- instead (#60).
 	local trailing_door
-	if door_actions then
-		for i = 2, #waypoints do
-			local door = wooden_door_at(waypoints[i].pos)
-			if door then
-				waypoints[i - 1].action = {type = "door", action = "open", target = vector.new(door)}
-				if waypoints[i + 1] then
-					if i + 1 == #waypoints then
-						trailing_door = vector.new(door)
-					else
-						waypoints[i + 1].action = {type = "door", action = "close", target = vector.new(door)}
-					end
+	for i = 2, #waypoints do
+		local door = wooden_door_at(waypoints[i].pos)
+		if door then
+			waypoints[i - 1].action = {type = "door", action = "open", target = vector.new(door)}
+			if waypoints[i + 1] then
+				if i + 1 == #waypoints then
+					trailing_door = vector.new(door)
+				else
+					waypoints[i + 1].action = {type = "door", action = "close", target = vector.new(door)}
 				end
 			end
 		end
@@ -653,8 +567,7 @@ local function start_engine_path(self, target, path, arrived, door_actions, rout
 	self.current_target = current
 	self.waypoints = waypoints
 	self.state = PATHFINDING
-	-- A route the planner made (door actions on) is walked by follower.lua.
-	if door_actions then follower.begin(self) end
+	follower.begin(self)
 	return true
 end
 
@@ -674,14 +587,11 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 			local route = current()
 			if not route then return end
 			if target and path then
-				route.status, route.mode, route.planner = "travelling", "planner", report
+				route.status, route.planner = "travelling", report
 				route.replans = opts.replans
 				route.target = vector.new(target)
-				local pos = self.object:get_pos()
-				route.last_progress_at = core.get_gametime()
-				route.last_progress_pos = pos and vector.new(pos) or nil
-				if start_engine_path(self, target, path,
-					arrival_callback(route_field, route_id, target, opts.callback, opts.sleep), true,
+				if start_route(self, target, path,
+					arrival_callback(route_field, route_id, target, opts.callback, opts.sleep),
 					route_field, route_id) then
 					if self._villages_follow then self._villages_follow.avoid = opts.avoid end
 					return
@@ -727,14 +637,14 @@ local function plan_trip(self, destination, candidates, callback_arrived)
 	self.order = nil
 	supersede_planning(self, field)
 	local route = set_route(self, field, {
-		status = destination.planner_path and "travelling" or "planning", mode = "planner",
+		status = destination.planner_path and "travelling" or "planning",
 		target = vector.new(first), goal = destination.goal and vector.new(destination.goal) or nil,
 		started_at = core.get_gametime(), wall_started_at = os.time(), callback = callback_arrived,
 		site = destination.site and vector.new(destination.site) or nil,
 	})
 	if destination.planner_path then
-		if start_engine_path(self, first, destination.planner_path,
-			arrival_callback(field, route.id, first, callback_arrived, destination.sleep), true, field, route.id) then
+		if start_route(self, first, destination.planner_path,
+			arrival_callback(field, route.id, first, callback_arrived, destination.sleep), field, route.id) then
 			return true
 		end
 		self._pf_last_failed = os.time()
@@ -756,19 +666,14 @@ local function recover_route(self, destination)
 	self._villages_follow_failed = nil
 	local replans = (route.replans or 0) + (gave_up and 1 or 0)
 	local replan = gave_up and replans <= MAX_REPLANS
-	-- A legacy route may start successfully, then wedge on stairs or a door.
-	-- Hand that case to the Villages planner before backing off.
-	if destination.claimed(self) and (route.mode ~= "planner" or replan) then
+	local reason = gave_up and ("walk ended: " .. gave_up.reason)
+		or destination.kind .. " route was canceled before arrival"
+	if destination.claimed(self) and replan then
 		local candidates = destination.candidates
 			or approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
-		local failed_at = self._pf_last_failed
-		local reason = gave_up and ("walk ended: " .. gave_up.reason)
-			or failed_at and failed_at >= (route.wall_started_at or failed_at)
-			and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
-			or destination.kind .. " route was canceled before arrival"
 		local planning = set_route(self, destination.route_field, {
-			status = "planning", mode = "planner", target = route.target and vector.new(route.target) or nil,
+			status = "planning", target = route.target and vector.new(route.target) or nil,
 			goal = route.goal and vector.new(route.goal) or nil,
 			started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
 			site = route.site and vector.new(route.site) or nil,
@@ -779,43 +684,13 @@ local function recover_route(self, destination)
 		})
 		return true
 	end
-	local failed_at = self._pf_last_failed
-	local reason = gave_up and ("walk ended: " .. gave_up.reason)
-		or failed_at and failed_at >= (route.wall_started_at or failed_at)
-		and "legacy pathfinder gave up on the " .. destination.kind .. " approach"
-		or destination.kind .. " route was canceled before arrival"
 	fail(self, destination.route_field, reason, route.target)
 	return false
-end
-
-local function recover_stalled_route(self, destination)
-	local route = self[destination.route_field]
-	if not route or route.status ~= "travelling" or self.state ~= PATHFINDING then return false end
-	if self._villages_blocked_door then
-		self._villages_blocked_door = nil
-		stop(self)
-		return recover_route(self, destination)
-	end
-	local pos = self.object:get_pos()
-	if not pos then return false end
-	if not route.last_progress_pos or vector.distance(pos, route.last_progress_pos) >= PROGRESS_DISTANCE then
-		route.last_progress_pos = vector.new(pos)
-		route.last_progress_at = core.get_gametime()
-		return false
-	end
-	if core.get_gametime() - (route.last_progress_at or core.get_gametime()) < NO_PROGRESS_SECONDS then
-		return false
-	end
-	-- A mover that remains in gowp can otherwise be stuck forever. Stop it
-	-- before recovery so the planner may take ownership of the trip.
-	stop(self)
-	return recover_route(self, destination)
 end
 
 -- Every field this module keeps on the villager describes a trip in progress.
 -- None of it survives a mapblock unload (on_activate below discards all of it),
 -- and a route additionally holds its arrival callback -- a live Lua function.
-local detours = setmetatable({}, {__mode = "k"})
 -- A finished workstation search, handed back to the gopath call that asked for it.
 local job_selections = setmetatable({}, {__mode = "k"})
 
@@ -827,7 +702,6 @@ local TRIP_FIELDS = {
 }
 
 local function install(def)
-	local original_gopath = def.gopath or mcl_mobs.mob_class.gopath
 	local original_custom = def.do_custom
 	local original_activate = def.on_activate
 	local original_staticdata = def.get_staticdata or mcl_mobs.mob_class.get_staticdata
@@ -938,13 +812,10 @@ local function install(def)
 
 	def.gopath = function(self, target, callback_arrived, prioritised)
 		-- Like vanilla's, a request does not interrupt a walk in progress.
-		if planner_routes() and self.state == PATHFINDING then return end
+		if self.state == PATHFINDING then return end
 		local destination
 		local selected = job_selections[self]
 		job_selections[self] = nil
-		-- Any new request supersedes a queued detour, unless it is the same one.
-		local pending_detour = detours[self]
-		detours[self] = nil
 		local no_jobsite_candidate = false
 		local now = core.get_gametime()
 		if self._bed and same_pos(target, self._bed) and is_home_time(self) then
@@ -995,7 +866,7 @@ local function install(def)
 					-- The search runs from the route queue (#162); this call
 					-- resumes with its result.
 					local searching = set_route(self, "_villages_job_search_route", {
-						status = "planning", mode = "planner", target = vector.new(target),
+						status = "planning", target = vector.new(target),
 					})
 					local function current()
 						local active = self._villages_job_search_route
@@ -1021,7 +892,7 @@ local function install(def)
 				if selection then
 					destination = {
 						pos = selection.site, site = selection.site, candidates = selection.candidates,
-						target = selection.target, engine_path = selection.engine_path, planner_path = selection.planner_path,
+						target = selection.target, planner_path = selection.planner_path,
 						route_field = "_villages_job_search_route", kind = "jobsite search",
 						cardinal_only = true,
 					}
@@ -1033,7 +904,7 @@ local function install(def)
 				end
 			end
 		end
-		if not destination and planner_routes() then
+		if not destination then
 			-- Every trip this module does not otherwise manage -- a keeper walking
 			-- to its jukebox, a guest to its seat, vanilla's own -- is planned the
 			-- same way, to the target itself when a villager can stand there, or
@@ -1054,43 +925,6 @@ local function install(def)
 				candidates = cells.can_stand(goal) and {goal} or approaches(goal),
 			}
 		end
-		if not destination then
-			-- A detour for this very target is still being planned.
-			if pending_detour and same_pos(pending_detour.target, vector.round(target)) then
-				detours[self] = pending_detour
-				return true
-			end
-			local started = original_gopath(self, target, callback_arrived, prioritised)
-			if not (started or self.state == PATHFINDING) then return started end
-			local clear, head = legacy_route_has_headroom(self)
-			if clear then return started end
-			-- Trips this module does not otherwise manage -- a keeper walking
-			-- to its jukebox, a guest to its seat, vanilla's own -- still must
-			-- not walk under anything. Reroute to the target itself when a
-			-- villager can stand there, or else to a spot beside it.
-			log_overhang(self, target, head)
-			stop(self)
-			local candidates = approaches(target)
-			local cell = vector.round(target)
-			if cells.can_stand(cell) then
-				candidates = {cell}
-			end
-			local token = {target = vector.round(target)}
-			detours[self] = token
-			route_queue.submit(function() return plan_stair_route(self, candidates) end, function(detour, path)
-				if detours[self] ~= token then return end
-				detours[self] = nil
-				if detour and start_engine_path(self, detour, path, callback_arrived, true) then return end
-				-- Upstream saw its own route succeed, so it set no failure cooldown.
-				-- Set one, or every caller's next poll repeats the whole search.
-				self._pf_last_failed = os.time()
-			end, {
-				valid = function() return detours[self] == token and self.object:get_pos() ~= nil end,
-				on_error = function() if detours[self] == token then detours[self] = nil end end,
-			})
-			return true
-		end
-
 		local route = self[destination.route_field]
 		-- A search for this trip is already queued; polling must not replace it.
 		if route and route.status == "planning" then
@@ -1110,67 +944,19 @@ local function install(def)
 		-- approach so that a restart or a quick retry is reported accurately.
 		if not destination.goal and self.ready_to_path and not self:ready_to_path(true) then
 			local elapsed = self._pf_last_failed and os.time() - self._pf_last_failed or 0
-			local retry = math.max(1, LEGACY_FAILURE_WAIT - elapsed)
-			fail(self, destination.route_field,
-				planner_routes() and "pathfinder cooldown" or "legacy pathfinder cooldown", nil, retry)
+			local retry = math.max(1, FAILURE_WAIT - elapsed)
+			fail(self, destination.route_field, "pathfinder cooldown", nil, retry)
 			return false
 		end
 
 		local candidates = destination.candidates or approaches(destination.pos, destination.cardinal_only, destination.raised_ok)
 		if destination.candidate_filter then candidates = destination.candidate_filter(self, candidates) end
-		if planner_routes() then return plan_trip(self, destination, candidates, callback_arrived) end
-		local candidate, engine_path = destination.target, destination.engine_path
-		if not candidate then candidate, engine_path = choose_approach(self, candidates) end
-		if not candidate then
-			fail(self, destination.route_field, "no safe standing space beside " .. destination.kind)
-			return false
-		end
-
-		local route = set_route(self, destination.route_field, {
-			status = "travelling", mode = "legacy", target = vector.new(candidate), started_at = now,
-			wall_started_at = os.time(), callback = callback_arrived,
-			site = destination.site and vector.new(destination.site) or nil,
-		})
-		local arrived = arrival_callback(destination.route_field, route.id, candidate, callback_arrived, destination.sleep)
-		local started = original_gopath(self, candidate, arrived, true)
-		if started or self.state == PATHFINDING then
-			local clear, head = legacy_route_has_headroom(self)
-			if clear then return true end
-			log_overhang(self, candidate, head)
-			-- The legacy mover plans its own route, door stitching included, so
-			-- the preflight above cannot vouch for it. Take the planner's
-			-- instead, which keeps the whole villager clear.
-			stop(self)
-		end
-		if start_engine_path(self, candidate, engine_path, arrived, nil, destination.route_field, route.id) then
-			self[destination.route_field].mode = "engine"
-			return true
-		end
-		if destination.planner_path then
-			if start_engine_path(self, destination.target, destination.planner_path,
-				arrival_callback(destination.route_field, route.id, destination.target, callback_arrived, destination.sleep), true,
-				destination.route_field, route.id) then
-				self[destination.route_field].mode = "planner"
-				return true
-			end
-			fail(self, destination.route_field, "pathfinder could not start a route to " .. destination.kind, candidate)
-			return false
-		end
-		-- No engine route: plan one from the route queue while the villager
-		-- stands still (#162).
-		self[destination.route_field].status = "planning"
-		self[destination.route_field].mode = "planner"
-		plan_route_later(self, destination.route_field, route.id, candidates, {
-			callback = callback_arrived, sleep = destination.sleep, fail_target = candidate,
-			reason = "pathfinder could not start a route to " .. destination.kind,
-		})
-		return true
+		return plan_trip(self, destination, candidates, callback_arrived)
 	end
 
 	-- A villager waiting for a route stays where its search started: vanilla's
 	-- do_states would otherwise walk it off on its own order.
 	local function planning_hold(self)
-		if detours[self] then return true end
 		for _, field in ipairs(ROUTE_FIELDS) do
 			local route = self[field]
 			if route and route.status == "planning" then return true end
@@ -1204,33 +990,25 @@ local function install(def)
 			cancel_route(self, "_villages_goto_route")
 			self._villages_farm_target = nil
 			self._villages_fish_target = nil
-			detours[self] = nil
 			return result
 		end
 		-- Another module's own mover may take over a trip it asked for; only a
 		-- walk that stalls on this one's route is this module's to give up on.
 		local walk = self._villages_goto_route
-		if walk and walk.status == "travelling" then
-			if self.state ~= PATHFINDING then
-				-- A walk the follower gave up on is planned again; any other
-				-- walk that left gowp was taken over by another module.
-				if self._villages_follow_failed then
-					local goal = walk.goal
-					if recover_route(self, {
-						pos = goal, route_field = "_villages_goto_route", kind = "destination",
-						candidates = goal and (cells.can_stand(goal) and {goal} or approaches(goal)) or nil,
-						claimed = function() return goal ~= nil end,
-					}) then
-						return result
-					end
+		if walk and walk.status == "travelling" and self.state ~= PATHFINDING then
+			-- A walk the follower gave up on is planned again; any other
+			-- walk that left gowp was taken over by another module.
+			if self._villages_follow_failed then
+				local goal = walk.goal
+				if recover_route(self, {
+					pos = goal, route_field = "_villages_goto_route", kind = "destination",
+					candidates = goal and (cells.can_stand(goal) and {goal} or approaches(goal)) or nil,
+					claimed = function() return goal ~= nil end,
+				}) then
+					return result
 				end
-				self._villages_goto_route = nil
-			elseif recover_stalled_route(self, {
-				pos = walk.goal, route_field = "_villages_goto_route", kind = "destination",
-				claimed = function() return false end,
-			}) then
-				return result
 			end
+			self._villages_goto_route = nil
 		end
 		if not is_home_time(self) then
 			cancel_route(self, "_villages_bed_route")
@@ -1253,7 +1031,7 @@ local function install(def)
 				pos = self._bed, route_field = "_villages_bed_route", kind = "bed", sleep = true,
 				claimed = has_claimed_bed,
 			}
-			if recover_stalled_route(self, bed_destination) or recover_route(self, bed_destination) then return result end
+			if recover_route(self, bed_destination) then return result end
 		end
 
 		if not is_tavern_time(self) then
@@ -1263,7 +1041,7 @@ local function install(def)
 				pos = self._villages_tavern_target, route_field = "_villages_tavern_route", kind = "tavern",
 				claimed = has_tavern_target,
 			}
-			if recover_stalled_route(self, tavern_destination) or recover_route(self, tavern_destination) then
+			if recover_route(self, tavern_destination) then
 				return result
 			end
 		end
@@ -1281,19 +1059,19 @@ local function install(def)
 			pos = self._jobsite, route_field = "_villages_job_route", kind = "jobsite",
 			claimed = has_claimed_jobsite,
 			}
-			if recover_stalled_route(self, job_destination) or recover_route(self, job_destination) then return result end
+			if recover_route(self, job_destination) then return result end
 		end
 		local farm_destination = {
 			pos = self._villages_farm_target, route_field = "_villages_farm_route", kind = "farm plot",
 			claimed = has_farm_target,
 		}
-		if working and (recover_stalled_route(self, farm_destination) or recover_route(self, farm_destination)) then return result end
+		if working and (recover_route(self, farm_destination)) then return result end
 		local fish_destination = {
 			pos = self._villages_fish_target, route_field = "_villages_fish_route", kind = "fishing spot",
 			cardinal_only = true, raised_ok = true, candidate_filter = unoccupied_candidates,
 			claimed = has_fish_target,
 		}
-		if working and (recover_stalled_route(self, fish_destination) or recover_route(self, fish_destination)) then return result end
+		if working and (recover_route(self, fish_destination)) then return result end
 		if self._jobsite or is_home_time(self) then
 			cancel_route(self, "_villages_job_search_route")
 		else
@@ -1308,7 +1086,7 @@ local function install(def)
 							and core.get_meta(route.site):get_string("villager") == ""
 					end,
 				}
-				if recover_stalled_route(self, search_destination) or recover_route(self, search_destination) then
+				if recover_route(self, search_destination) then
 					return result
 				end
 			end
