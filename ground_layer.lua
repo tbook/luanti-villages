@@ -43,9 +43,12 @@ function M.variant(mts, engine)
 	return schematic
 end
 
--- Wraps settlements.place_schematics. Returns true if installed.
+local wrappers = setmetatable({}, {__mode = "k"}) -- our wrappers, so a second install is a no-op
+
+-- Wraps settlements.place_schematics. Returns true if installed (or already is).
 function M.install(settlements, engine)
 	engine = engine or core
+	if type(settlements) == "table" and wrappers[settlements.place_schematics] then return true end
 	if type(settlements) ~= "table" or type(settlements.place_schematics) ~= "function"
 			or type(settlements.schematic_table) ~= "table" then
 		return false
@@ -57,7 +60,9 @@ function M.install(settlements, engine)
 			if entry.name == name then return entry end
 		end
 	end
-	settlements.place_schematics = function(info, ...)
+	local warned = {}
+	local wrapper
+	wrapper = function(info, ...)
 		local sandy = false
 		for _, building in ipairs(info) do
 			if M.SANDY[building.surface_mat] then sandy = true break end
@@ -68,6 +73,12 @@ function M.install(settlements, engine)
 		local result
 		for _, building in ipairs(info) do
 			local entry = M.SANDY[building.surface_mat] and entry_of(building.name)
+			if M.SANDY[building.surface_mat] and not entry and not warned[building.name] then
+				-- Placed as VoxeLibre would, with the stock entry.
+				warned[building.name] = true
+				engine.log("warning", "[living_villages] no schematic_table entry for building '"
+					.. tostring(building.name) .. "', its ground layer stays dirt")
+			end
 			local stock = entry and entry.mts
 			local variant = stock and cache[stock]
 			if stock and variant == nil then
@@ -77,10 +88,12 @@ function M.install(settlements, engine)
 			if variant then entry.mts = variant end
 			local ok, err = pcall(function(...) result = original({building}, ...) end, ...)
 			if variant then entry.mts = stock end
-			if not ok then error(err, 0) end
+			if not ok then error(err) end
 		end
 		return result
 	end
+	wrappers[wrapper] = true
+	settlements.place_schematics = wrapper
 	return true
 end
 

@@ -71,11 +71,57 @@ assert(#c == 2 and c[1].ground == "mcl_core:dirt", "grass villages place the sto
 c = place("mcl_core:snow")
 assert(c[1].ground == "mcl_core:dirt", "snow villages too")
 
+-- Mixed info: each building gets the schematic of its own surface, in order.
+calls = {}
+settlements.place_schematics({
+	{name = "house", surface_mat = "mcl_core:dirt_with_grass"},
+	{name = "house", surface_mat = "mcl_core:sand"},
+	{name = "house", surface_mat = "mcl_core:snow"},
+}, "pr")
+assert(#calls == 3 and calls[1].ground == "mcl_core:dirt" and calls[2].ground == "mcl_core:dirt_with_grass"
+	and calls[3].ground == "mcl_core:dirt", "mixed surfaces")
+
+-- A second install does not wrap again.
+local wrapped = settlements.place_schematics
+assert(ground.install(settlements, engine) and settlements.place_schematics == wrapped, "double install")
+
+-- A building missing from schematic_table is placed as VoxeLibre would, and logged once.
+local logs = 0
+local noisy = {serialize_schematic = engine.serialize_schematic, log = function() logs = logs + 1 end}
+local missing = {schematic_table = {}}
+local seen = 0
+missing.place_schematics = function(info) seen = seen + #info end
+assert(ground.install(missing, noisy))
+for _ = 1, 2 do missing.place_schematics({{name = "ghost", surface_mat = "mcl_core:sand"}}) end
+assert(seen == 2 and logs == 1, "missing entry: placed, logged once")
+
+-- A real stock building: only the bottom slice differs.
+local fixture = dofile("tests/fixtures/buildings/large_house.lua")
+local real = {size = fixture.size, data = {}}
+for i, id in ipairs(fixture.ids) do
+	real.data[i] = {name = fixture.names[id + 1], prob = 255, param2 = fixture.param2 and fixture.param2[i] or 0}
+end
+local rv = ground.variant(real, engine)
+local size = real.size
+for z = 0, size.z - 1 do
+	for y = 0, size.y - 1 do
+		for x = 0, size.x - 1 do
+			local i = index(size, x, y, z)
+			if y == 0 and real.data[i].name == "mcl_core:dirt" then
+				assert(rv.data[i].name == "mcl_core:dirt_with_grass")
+			else
+				assert(rv.data[i].name == real.data[i].name, "only the bottom slice differs")
+			end
+		end
+	end
+end
+
 -- A failing placement still restores the schematic.
 settlements = {schematic_table = {{name = "house", mts = stock}}}
 settlements.place_schematics = function() error("boom") end
 assert(ground.install(settlements, engine))
-assert(not pcall(settlements.place_schematics, {{name = "house", surface_mat = "mcl_core:sand"}}))
+local ok, err = pcall(settlements.place_schematics, {{name = "house", surface_mat = "mcl_core:sand"}})
+assert(not ok and tostring(err):find("boom"), "the original error comes through")
 assert(settlements.schematic_table[1].mts == stock, "restored after an error")
 
 assert(not ground.install(nil) and not ground.install({}), "nothing to wrap, nothing installed")

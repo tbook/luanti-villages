@@ -102,7 +102,7 @@ local function scan_terrain(area)
 				elseif kind == "water" then sees_water = true end
 			end
 			if found then
-				for y = found, found - CENSUS_DEPTH + 1, -1 do
+				for y = found, math.max(found - CENSUS_DEPTH + 1, area.y1), -1 do
 					local name = core.get_name_from_content_id(data[va:index(x, y, z)])
 					census[name] = (census[name] or 0) + 1
 					if name == "mcl_core:dirt" then
