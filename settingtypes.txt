@@ -21,7 +21,9 @@ living_villages_path_trip_weight (Path trip step weight) float 3
 # villagers waiting for a route (#162). More means routes arrive sooner and
 # steps run longer.
 living_villages_route_budget_ms (Route planning budget per step, ms) float 4 0.5 50
-# How far from its start (in nodes, each axis) the route planner searches.
+# How far from its start (in nodes, each axis) the route planner searches. A
+# target farther than this is still reached: the search widens to cover it,
+# with a margin, up to 128.
 living_villages_route_range (Route planner range) int 48 8 96
 # The most positions one route search expands before giving up.
 living_villages_route_max_nodes (Route planner node cap) int 4096 256 32768

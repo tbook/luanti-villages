@@ -24,6 +24,12 @@ local MAX_REPLANS = 2
 local function planner_range()
 	return tonumber(core.settings and core.settings:get("living_villages_route_range")) or 48
 end
+-- The search box is centred on the villager, but a target found by a wider
+-- rule (the church is searched 48 from the bed, the villager may be elsewhere)
+-- can lie outside it (#182). The box grows to cover the farthest target plus a
+-- margin for detours, up to a hard cap that keeps searches cheap.
+local RANGE_MARGIN = 16
+local RANGE_CAP = 128
 local function planner_max_nodes()
 	return tonumber(core.settings and core.settings:get("living_villages_route_max_nodes")) or 4096
 end
@@ -324,10 +330,16 @@ local function plan_stair_route(self, candidates, avoid)
 		end
 		return cells.can_stand(pos)
 	end
+	local range = planner_range()
+	for _, target in pairs(targets) do
+		local reach = math.max(math.abs(target.x - start.x), math.abs(target.y - start.y),
+			math.abs(target.z - start.z))
+		range = math.max(range, math.min(RANGE_CAP, reach + RANGE_MARGIN))
+	end
 	local path, visited, status, details = planner.find_path(start, can_stand, function(pos)
 		return targets[pos.x .. ":" .. pos.y .. ":" .. pos.z] ~= nil
 	end, {
-		range = planner_range(),
+		range = range,
 		max_nodes = planner_max_nodes(),
 		checkpoint = route_queue.checkpoint,
 		heuristic = distance_to_target,
