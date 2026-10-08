@@ -356,8 +356,9 @@ local function test_building(name, rotation, doors_open, roads)
 	-- choose them (#159). seat.lua picks a reachable chair by what is beside it,
 	-- and the cell to stand at to sit down from; the cleric stands where
 	-- church.lua's cleric_stand puts it. Both are walks to a cell, not to a node.
-	local ok_seat, seat = pcall(dofile, "seat.lua")
-	if ok_seat then
+	do
+		local seat = dofile("seat.lua")
+		local church_module = dofile("church.lua")
 		local original_find = minetest.find_nodes_in_area
 		minetest.find_nodes_in_area = function(minp, maxp, names)
 			local found = {}
@@ -374,12 +375,13 @@ local function test_building(name, rotation, doors_open, roads)
 			end end end
 			return found
 		end
+		local seat_counts = {}
 		local centers = {}
 		for _, target in ipairs(targets) do
 			if target.kind == "jukebox" then table.insert(centers, {pos = target.pos, kind = "table"}) end
 			if target.kind == "jobsite pulpit" then table.insert(centers, {pos = target.pos, kind = "pulpit"}) end
 		end
-		for _, center in ipairs(centers) do
+		local ok_centers, problem = pcall(function() for _, center in ipairs(centers) do
 			-- Reserve until the chairs run out: each guest holds its own.
 			local guests = {}
 			for n = 1, 100 do
@@ -387,9 +389,7 @@ local function test_building(name, rotation, doors_open, roads)
 				if not seat.reserve(guest, center.pos, center.kind) then break end
 				table.insert(guests, guest._villages_seat)
 			end
-			if #guests == 0 then
-				table.insert(unexpected, prefix .. ": no seat reserved around the " .. center.kind .. " at " .. cell_string(center.pos))
-			end
+			seat_counts[center.kind] = #guests
 			for _, held in ipairs(guests) do
 				for _, direction in ipairs(DIRECTIONS) do
 					local id = ("%s %s seat %s from %s"):format(prefix, center.kind == "pulpit" and "pew" or "dinner",
@@ -403,14 +403,9 @@ local function test_building(name, rotation, doors_open, roads)
 					end
 				end
 			end
-			seat.reservations = {}
+			for held_key in pairs(seat.reservations) do seat.reservations[held_key] = nil end
 			if center.kind == "pulpit" then
-				local dir = minetest.facedir_to_dir(world.get(center.pos).param2 % 32)
-				local stand
-				for _, offset in ipairs({{x = -dir.x, z = -dir.z}, {x = dir.z, z = -dir.x}, {x = -dir.z, z = dir.x}}) do
-					local cell = {x = center.pos.x + offset.x, y = center.pos.y, z = center.pos.z + offset.z}
-					if common.is_standing_space(cell, true) then stand = cell break end
-				end
+				local stand = church_module.cleric_stand(center.pos, "cleric")
 				if not stand then
 					record(prefix .. " cleric place", false, "no place to stand beside the pulpit")
 				else
@@ -426,8 +421,17 @@ local function test_building(name, rotation, doors_open, roads)
 					end
 				end
 			end
-		end
+		end end)
 		minetest.find_nodes_in_area = original_find
+		if not ok_centers then error(problem, 0) end
+		-- The stock tavern has 6 dinner seats, the stock church 12 pews: fewer
+		-- means seats went unfound, and their routes were not tried.
+		local wanted = {tavern = {table = 6}, church = {pulpit = 12}}
+		for kind, count in pairs(wanted[name] or {}) do
+			if seat_counts[kind] ~= count then
+				table.insert(unexpected, ("%s: %s seats found %s, wanted %d"):format(prefix, kind, tostring(seat_counts[kind]), count))
+			end
+		end
 	end
 
 	-- From a chair. A villager sitting in one is at the chair's node, half a
