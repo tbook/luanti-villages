@@ -17,6 +17,8 @@
 --                    "day" (natural schedule at lv_trips_speed, observed only)
 --   lv_trips_rounds  rounds per stage and variant; lv_trips_stages the stages to run
 --   lv_trips_label   names the run in the result lines
+--   lv_trips_spot    "sx,sy,sz;bx,by,bz": mode "spot" teleports the villager that owns the bed at
+--                    b to the start s at the `home` hour and logs it every step (see README)
 local core = minetest
 local modpath = core.get_modpath("lv_trips")
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
@@ -510,6 +512,62 @@ local function run_days(list)
 	end
 end
 
+-- One villager, one start, one bed: the owner of the bed at the spot's bed is
+-- teleported to its start in the evening and left to walk home. Every quarter
+-- second it logs `[lv_trips] spot t=... ` with position, velocity, state, the
+-- follower's current waypoint, the waypoints left and the planned final cell,
+-- until the trip ends (150 s at most). The trip is recorded like any other.
+local function parse_spot()
+	local spec = setting("spot", "")
+	local a, b, c, d, e, f = spec:match("^(-?[%d.]+),(-?[%d.]+),(-?[%d.]+);(-?[%d.]+),(-?[%d.]+),(-?[%d.]+)$")
+	if not a then return nil end
+	return {x = tonumber(a), y = tonumber(b), z = tonumber(c)}, {x = tonumber(d), y = tonumber(e), z = tonumber(f)}
+end
+
+local function run_spot(list)
+	local start, bed = parse_spot()
+	if not start then error("lv_trips_spot must be sx,sy,sz;bx,by,bz") end
+	local owner
+	for _, v in ipairs(list) do
+		if v._bed and v._bed.x == bed.x and v._bed.y == bed.y and v._bed.z == bed.z then owner = v end
+	end
+	if not owner then error("no villager owns the bed at " .. core.pos_to_string(bed)) end
+	holiday = false
+	silence_engine = false
+	local stage = STAGES[1]
+	round_info = {stage = stage, variant = "A", round = 1, village = LABEL}
+	trips = {}
+	release_seat(owner)
+	reset_villager(owner)
+	-- A sleeper wakes on its next step and is put back at the bed exit; let it, so
+	-- the teleport below is the last word.
+	local woke_by = elapsed_real + 5
+	while owner._villages_sleeping and elapsed_real < woke_by do coroutine.yield() end
+	core.set_timeofday(stage.tod)
+	owner.object:set_pos(start)
+	local began = elapsed_real
+	local last_logged = -1
+	local function snapshot()
+		local pos, v = owner.object:get_pos(), owner.object:get_velocity() or {x = 0, y = 0, z = 0}
+		local follow = owner._villages_follow
+		local route = route_snapshot(owner)
+		core.log("action", string.format(
+			"[lv_trips] spot t=%.2f pos=(%.2f,%.2f,%.2f) v=(%.2f,%.2f,%.2f) state=%s order=%s route=%s target=%s wp_left=%d follow=%s final=%s",
+			elapsed_real - began, pos.x, pos.y, pos.z, v.x, v.y, v.z, tostring(owner.state), tostring(owner.order),
+			route and (route.status .. "/" .. tostring(route.reason)) or "-",
+			owner.current_target and owner.current_target.pos and core.pos_to_string(owner.current_target.pos, 1) or "-",
+			owner.waypoints and #owner.waypoints or 0, tostring(follow ~= nil),
+			follow and follow.final and core.pos_to_string(follow.final, 1) or "-"))
+	end
+	while elapsed_real - began < ROUND_LIMIT do
+		coroutine.yield()
+		if elapsed_real - last_logged >= 0.25 then last_logged = elapsed_real; snapshot() end
+		if elapsed_real - began > 5 and next(trips) == nil then break end
+	end
+	for _, trip in pairs(trips) do close_trip(trip, "round_end") end
+	snapshot()
+end
+
 local function finish()
 	emit({type = "done", village = LABEL})
 	out:close()
@@ -544,7 +602,9 @@ local function main()
 	emit(summary)
 	log("village " .. core.write_json(summary))
 	if #list > 0 then
-		if MODE == "day" then run_days(list) else run_trials(list) end
+		if MODE == "day" then run_days(list)
+		elseif MODE == "spot" then run_spot(list)
+		else run_trials(list) end
 	end
 	finish()
 end
