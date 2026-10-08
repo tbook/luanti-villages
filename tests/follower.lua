@@ -240,4 +240,21 @@ v.object.get_pos = function() bob = bob + 1; return {x = 0, y = -0.49 + (bob % 2
 run(v, 6)
 assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "bobbing is a stall")
 
+-- On a descent the waypoint is not reached while the feet are still above it:
+-- the villager keeps on, and a stall there ends the walk (#173).
+reset()
+v = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 2, y = -1, z = 0}})
+follower.begin(v)
+v.object.get_pos = function() return {x = 1, y = -0.49, z = 0} end
+v.set_velocity = function() end
+run(v, 1)
+assert(v.current_target.pos.x == 1, "still heading for the lower waypoint while high on the stair")
+run(v, 6)
+assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "a stall on the stair ends the walk")
+v = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 2, y = -1, z = 0}})
+follower.begin(v)
+v.object.get_pos = function() return {x = 1, y = -1.49, z = 0} end
+v.tick()
+assert(v.current_target.pos.x == 2, "moves on once the feet are down")
+
 print("follower tests passed")

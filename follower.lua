@@ -229,7 +229,10 @@ local function follow(self, dtime)
 		distance = math.sqrt(dx * dx + dz * dz)
 	end
 
-	local reached = distance < REACH and feet >= current.pos.y
+	-- Level with the waypoint, not above it: on a descent the feet are higher
+	-- than the waypoint until the villager is down the stair, and turning early
+	-- runs its head into the floor over the lower cells (#173).
+	local reached = distance < REACH and feet == current.pos.y
 	if reached then
 		if not self.waypoints or #self.waypoints == 0 then return arrive(self) end
 		-- A door is its own step: stop, work it, then cross.
