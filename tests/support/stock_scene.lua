@@ -17,6 +17,7 @@ local ORIGIN, MARGIN = M.ORIGIN, M.MARGIN
 -- the village generator is absent. Not every branch has all of them.
 local FURNISHERS = {
 	tavern = "tavern_schematic.lua", church = "church_schematic.lua", library = "library_schematic.lua",
+	belltower = "belltower_schematic.lua",
 }
 
 -- Returns {world, size, rise, prefix, beds, outdoors}. slope is 1 for a basin,
