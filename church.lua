@@ -46,6 +46,8 @@ local INSIDE = 9
 local BACK_MIN = 3
 local BACK_MAX = 5
 local BACK_REACH = 8
+-- How far above a standing place to look for the roof.
+local ROOF_REACH = 12
 local FIELDS = {"_villages_church", "_villages_church_skipped", "_villages_church_checked"}
 
 local standing = {}
@@ -108,6 +110,17 @@ local function beside_chair(cell)
 	return false
 end
 
+-- Whether something is overhead within ROOF_REACH: inside a building, not in
+-- the open, which ground raised to floor height outside the back wall would
+-- otherwise pass for (#189). Any ceiling or roof counts, so this holds for a
+-- church of any plan, unlike a flood of the floor, which leaks out of the door.
+local function roofed(cell)
+	for h = 2, ROOF_REACH do
+		if not common.is_clear_node({x = cell.x, y = cell.y + h, z = cell.z}) then return true end
+	end
+	return false
+end
+
 -- Free places to stand at the back of the church, best first: out of the way of
 -- the pews, then farthest from the pulpit within the back, then nearest the
 -- middle.
@@ -124,7 +137,8 @@ local function back_places(pulpit, id)
 					local cell = {x = x, y = y, z = z}
 					-- A chair is solid enough to stand on; nobody stands on the pews.
 					local on_chair = is_chair({x = x, y = y - 1, z = z})
-					if not on_chair and not held_by_other(cell, id) and common.is_standing_space(cell, true) then
+					if not on_chair and not held_by_other(cell, id) and common.is_standing_space(cell, true)
+						and roofed(cell) then
 						found[#found + 1] = {
 							cell = cell, depth = depth, side = math.abs(dx * dir.z - dz * dir.x),
 							crowds = beside_chair(cell) and 1 or 0,
