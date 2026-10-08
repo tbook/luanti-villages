@@ -375,6 +375,15 @@ local function follow(self, dtime)
 	push_through_rise(self, f, dx, dz)
 end
 
+-- do_jump is the only thing that keeps `in_water` fresh, so ask the map.
+local function in_water(self)
+	local pos = self.object:get_pos()
+	local node = pos and core.get_node_or_nil({
+		x = math.floor(pos.x + 0.5), y = math.floor(pos.y + 0.5), z = math.floor(pos.z + 0.5),
+	})
+	return node ~= nil and core.get_item_group(node.name, "water") > 0
+end
+
 function follower.install(def)
 	local original = def.check_gowp or mcl_mobs.mob_class.check_gowp
 	def.check_gowp = function(self, dtime)
@@ -382,14 +391,16 @@ function follower.install(def)
 		return original(self, dtime)
 	end
 	-- A followed walk jumps its own rises (rise_step). Vanilla's do_jump runs after
-	-- it on every step and hops straight up whenever a solid node is within about
-	-- 1.3 nodes ahead, from a standstill, that is while the villager stops to turn
-	-- at the foot of a rise or is held there. The hops carry it nowhere, and
-	-- rise_step's own jump starts only within RISE_REACH of the step, so a
-	-- villager just outside that hopped in place until the walk gave up (#194).
+	-- it on every step and hops straight up whenever a solid node is ahead, from
+	-- about 1.3 nodes of the node's centre at rest to 1.6 walking: while the
+	-- villager stops to turn at the foot of a rise or is held there, hops that
+	-- carry it nowhere. rise_step's own jump starts only within 1.1 nodes of the
+	-- step's centre, so a villager just outside that hopped in place until the walk
+	-- gave up (#194). In water vanilla's hop is how a villager swims out, and it
+	-- keeps do_jump's bookkeeping (in_water, facing_fence) fresh, so it stays.
 	local original_jump = def.do_jump or mcl_mobs.mob_class.do_jump
 	def.do_jump = function(self, ...)
-		if self._villages_follow then return false end
+		if self._villages_follow and not in_water(self) then return false end
 		if original_jump then return original_jump(self, ...) end
 	end
 end

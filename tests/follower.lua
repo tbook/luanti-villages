@@ -230,6 +230,45 @@ local plain_walk = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
 plain_walk:turn_in_direction(1, 0)
 plain_walk.tick()
 assert((plain_walk.hops or 0) > 0, "control: without the follower the villager hops at the step")
+
+-- In water vanilla's hop stays (it is how a villager swims out).
+local real_group = minetest.get_item_group
+minetest.get_item_group = function(name, group) return (name == "default:water" and group == "water") and 1 or 0 end
+nodes[key({x = 1, y = 0, z = 0})] = "default:water"
+local swimmer = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
+follower.begin(swimmer)
+swimmer.object.get_pos = function() return {x = 0.7, y = 0, z = 0.3} end
+swimmer:turn_in_direction(1, 0)
+swimmer:do_jump()
+assert((swimmer.hops or 0) > 0, "in water vanilla's jump still runs on a followed walk")
+nodes[key({x = 1, y = 0, z = 0})] = nil
+minetest.get_item_group = real_group
+
+-- Once the walk is over (arrived or given up) the wrapper is vanilla's again.
+reset()
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+local ended = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
+follower.begin(ended)
+ended:turn_in_direction(1, 0)
+ended:do_jump()
+assert((ended.hops or 0) == 0, "followed: suppressed")
+ended.object.get_pos = function() return {x = 0, y = -0.49, z = 6} end
+ended.tick()
+assert(ended._villages_follow_failed.reason == "off the planned route", "gave up")
+ended.object.get_pos = function() return {x = 0.7, y = -0.49, z = 0.3} end
+ended:do_jump()
+assert((ended.hops or 0) > 0, "after give_up vanilla's jump runs again")
+reset()
+local done = villager(0, 0, {cell(0, 0), cell(1, 0)})
+follower.begin(done)
+done.object.get_pos = function() return {x = 1, y = -0.49, z = 0} end
+done.tick()
+assert(done.arrived, "arrived")
+done.object.get_pos = function() return {x = 0.7, y = -0.49, z = 0.3} end
+done:turn_in_direction(1, 0)
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+done:do_jump()
+assert((done.hops or 0) > 0, "after arrive vanilla's jump runs again")
 vanilla_jump = false
 
 -- The pushes scheduled with a jump end with the walk: after arriving on the
