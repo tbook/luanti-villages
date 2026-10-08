@@ -1317,12 +1317,28 @@ local staticdata_def = {
 	on_activate = function() end,
 	do_custom = function() end,
 	get_staticdata = function(self)
+		-- mcl_mobs' own: it sets the live mob's state to "stand" as well.
+		self.state = "stand"
 		saved_fields = {}
 		for field, value in pairs(self) do saved_fields[field] = value end
 		return "saved"
 	end,
 }
 dofile("navigation.lua")(staticdata_def)
+
+-- #195: the engine saves a block's villagers whenever the block is written, and a
+-- door opening or closing writes it. mcl_mobs' get_staticdata sets the live state
+-- to "stand", which ended the walk through the door a few seconds later: the route
+-- was cancelled and the villager stood short of its bed. The save says "stand"
+-- (a reload must not resume a walk) but the live villager keeps walking.
+local walking = {_id = "walker", state = "gowp", _villages_follow = {final = {x = 1, y = 0, z = 1}}}
+staticdata_def.get_staticdata(walking)
+assert(saved_fields.state == "stand", "the saved copy of a walking villager says stand")
+assert(walking.state == "gowp", "a save must not end the live villager's walk")
+assert(walking._villages_follow, "nor drop the follower's state")
+local standing = {_id = "stander", state = "walk"}
+staticdata_def.get_staticdata(standing)
+assert(standing.state == "stand", "other states are mcl_mobs' own to reset")
 
 local travelling = {
 	_villages_bed_route = {status = "travelling", callback = function() end},

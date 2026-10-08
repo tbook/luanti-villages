@@ -767,7 +767,14 @@ local function install(def)
 			for _, field in ipairs(TRIP_FIELDS) do
 				saved[field], self[field] = self[field], nil
 			end
+			-- mcl_mobs' get_staticdata also sets the live mob's state to "stand" (it only
+			-- means the saved copy to say so). The engine saves the villagers of a block
+			-- when it writes the block (it happens mid-walk, now and then), so a walking
+			-- villager lost its walk: the route was cancelled and the villager stopped
+			-- short of its bed (#195).
+			local state = self.state
 			local data = original_staticdata(self)
+			if state == PATHFINDING then self.state = state end
 			for _, field in ipairs(TRIP_FIELDS) do self[field] = saved[field] end
 			return data
 		end

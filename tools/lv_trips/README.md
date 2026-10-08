@@ -75,6 +75,23 @@ The user directory (`worlds/`, `mods/`) is found through git, which needs git 2.
 `tools/lv_probe/run.sh` takes the same `--mod-dir` (it implies `--with-mod`) and has the same port and
 scratch handling.
 
+## One villager from one spot
+
+To watch a single trip that went wrong, teleport the owner of a bed to a start and log it:
+
+```sh
+tools/lv_trips/run.sh Testlandia 570,17,-2145 spot --spot 599,17.5,-2137:590,20,-2177
+```
+
+`--spot SX,SY,SZ:BX,BY,BZ` (mode `spot`; `--rounds` and `--stages` are ignored) wakes the villager that
+owns the bed at B, puts it at S at the `home` hour and leaves it to walk home. Every quarter second the
+server log gets a line `[lv_trips] spot t=... pos=(...) v=(...) state=... order=... route=status/reason
+target=... wp_left=N follow=bool final=...`: the villager's position and velocity, its mover state, the
+bed route's status, the follower's current waypoint, the waypoints left and the planned final cell. The
+trip is also written as a normal `trip` line. It runs until the trip ends or for 150 s, and the
+other villagers carry on as they like, so a run can start with a route cancelled by something else
+(look at the `route=` column). The log path is printed when the run starts.
+
 ## What a trial does
 
 Time is frozen at each stage's hour and the moon is made to say holiday or not. For each round
