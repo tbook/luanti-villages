@@ -112,6 +112,7 @@ function follower.begin(self, avoid)
 		final = last and last.pos and vector.new(last.pos) or nil,
 		avoid = avoid, progress_pos = self.object:get_pos(), still = 0, blocked = 0,
 		leg_start = self.object:get_pos() or {x = 0, z = 0},
+		from_y = self.object:get_pos() and common.feet_node(self.object:get_pos()) or nil,
 	}
 end
 
@@ -120,6 +121,7 @@ end
 local function advance(self, from)
 	local f = self._villages_follow
 	f.leg_start = {x = from.x, z = from.z}
+	f.from_y = self.current_target and self.current_target.pos and self.current_target.pos.y or f.from_y
 	self.current_target = table.remove(self.waypoints, 1)
 end
 
@@ -201,6 +203,18 @@ local function push_through_rise(self, f, dx, dz)
 	self.object:set_velocity({x = dx / length * speed, y = v.y, z = dz / length * speed})
 end
 
+-- Whether the feet are down at the height the waypoint's floor puts them: the
+-- floor's top (a stair tread is half a node lower than a block) plus the
+-- collision box's sliver. The feet cell alone rounds up a quarter node early, so
+-- it cannot say the villager has come down a step (#173).
+local LANDED = 0.1
+local function landed(pos, waypoint)
+	local below = core.get_node_or_nil({x = waypoint.x, y = waypoint.y - 1, z = waypoint.z})
+	local def = below and core.registered_nodes[below.name]
+	if not (def and def.walkable) then return true end
+	return pos.y <= waypoint.y - 1 + cells.collision_box_top(def) + 0.01 + LANDED
+end
+
 local function follow(self, dtime)
 	local f = self._villages_follow
 	local pos = self.object:get_pos()
@@ -221,6 +235,7 @@ local function follow(self, dtime)
 	-- A shortcut past this waypoint, only along a line the whole body fits.
 	local nextwp = self.waypoints and self.waypoints[1]
 	if nextwp and not current.action and nextwp.pos and current.pos.y == feet and nextwp.pos.y == feet
+		and landed(pos, current.pos)
 		and follower.line_is_clear({x = pos.x, y = feet, z = pos.z}, nextwp.pos)
 		and not passes_avoided(f, pos, nextwp.pos) then
 		advance(self, pos)
@@ -229,7 +244,11 @@ local function follow(self, dtime)
 		distance = math.sqrt(dx * dx + dz * dz)
 	end
 
-	local reached = distance < REACH and feet >= current.pos.y
+	-- Level with the waypoint, not above it: on a descent the feet are higher
+	-- than the waypoint until the villager is down the stair, and turning early
+	-- runs its head into the floor over the lower cells (#173).
+	local descending = f.from_y and current.pos.y < f.from_y
+	local reached = distance < REACH and feet == current.pos.y and (not descending or landed(pos, current.pos))
 	if reached then
 		if not self.waypoints or #self.waypoints == 0 then return arrive(self) end
 		-- A door is its own step: stop, work it, then cross.
