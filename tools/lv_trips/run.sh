@@ -39,20 +39,32 @@ stages=
 radius=64
 speed=72
 spot=
+mode_given=
 mod_dir=$repo_root
 while [ $# -gt 0 ]; do
 	case $1 in
-		--mode) mode=$2; shift 2 ;;
+		--mode) mode=$2; mode_given=1; shift 2 ;;
 		--rounds) rounds=$2; shift 2 ;;
 		--stages) stages=$2; shift 2 ;;
 		--radius) radius=$2; shift 2 ;;
 		--speed) speed=$2; shift 2 ;;
-		--spot) spot=$(printf %s "$2" | tr ':' ';'); mode=spot; shift 2 ;;
+		--spot)
+			case $2 in
+				*[!0-9.,:-]* | '') echo "--spot wants SX,SY,SZ:BX,BY,BZ (numbers), not '$2'" >&2; exit 2 ;;
+			esac
+			if ! printf %s "$2" | grep -Eq '^-?[0-9.]+(,-?[0-9.]+){2}:-?[0-9.]+(,-?[0-9.]+){2}$'; then
+				echo "--spot wants SX,SY,SZ:BX,BY,BZ, not '$2'" >&2; exit 2
+			fi
+			spot=$(printf %s "$2" | tr ':' ';'); shift 2 ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 
+if [ -n "$spot" ]; then
+	if [ -n "$mode_given" ]; then echo "--spot is its own mode; drop --mode" >&2; exit 2; fi
+	mode=spot
+fi
 mod_dir=$(cd "$mod_dir" && pwd)
 if [ ! -f "$mod_dir/mod.conf" ] || [ ! -f "$mod_dir/init.lua" ]; then
 	echo "$mod_dir is not the living_villages mod" >&2
