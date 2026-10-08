@@ -8,6 +8,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
+local follower = dofile(core.get_modpath("living_villages") .. "/follower.lua")
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local PULPIT = "living_villages:pulpit"
 -- How far from its bed a villager looks for a church: its own village, as for
@@ -36,9 +37,6 @@ local CLIMB_SECONDS = 30
 -- node short on the place's own level.
 local AT_PLACE = 1.5
 local LEG_REACH = 1.1
--- check_gowp also ends a walk within 1.8 nodes of its target, so the walk along
--- the dais can stop that far from the cleric's place, on the dais's level.
-local AT_PULPIT = 1.8
 -- How far along the dais from the cleric's place to look for a way up.
 local DAIS_REACH = 6
 -- Inside the church: close enough to the pulpit to look for a pew.
@@ -174,6 +172,8 @@ local function stop_walking(self)
 		self._target, self.current_target, self.waypoints, self.callback_arrived = nil, nil, nil, nil
 		self.object:set_velocity(vector.zero())
 	end
+	-- A walk the follower was walking ends with it, or the next route is its too.
+	self._villages_follow = nil
 end
 
 local function skip(self, pulpit, why)
@@ -370,21 +370,17 @@ end
 
 -- The way up onto the dais: the edge cell nearest the cleric's place along the
 -- dais that has church floor in front of it on the congregation's side, with
--- room overhead to jump, and that is at least 2.5 nodes from the place, so that
--- check_gowp's 1.8-node arrival around the place cannot end the walk mid-jump.
+-- room overhead to jump.
 -- Returns the dais cells, the edge and the floor cell in front of it.
 local function plan(pulpit, stand, dir)
 	local cells, order = dais_cells(stand)
 	for _, edge in ipairs(order) do
-		local far = (edge.x - stand.x) ^ 2 + (edge.z - stand.z) ^ 2 >= 2.5 ^ 2
-		if far then
-			for _, side in ipairs(SIDES) do
-				local floor = {x = edge.x + side.x, y = edge.y - 1, z = edge.z + side.z}
-				local front = (floor.x - pulpit.x) * dir.x + (floor.z - pulpit.z) * dir.z > 0
-				if front and not is_chair(floor) and common.is_standing_space(floor, true)
-					and common.is_clear_node({x = floor.x, y = floor.y + 2, z = floor.z}) then
-					return cells, edge, floor
-				end
+		for _, side in ipairs(SIDES) do
+			local floor = {x = edge.x + side.x, y = edge.y - 1, z = edge.z + side.z}
+			local front = (floor.x - pulpit.x) * dir.x + (floor.z - pulpit.z) * dir.z > 0
+			if front and not is_chair(floor) and common.is_standing_space(floor, true)
+				and common.is_clear_node({x = floor.x, y = floor.y + 2, z = floor.z}) then
+				return cells, edge, floor
 			end
 		end
 	end
@@ -413,13 +409,11 @@ local function along(cells, from)
 end
 
 -- Inside the church the cleric does not use the pathfinder, which routes over
--- the pews, onto the walkable pulpit's top, and ends walks within check_gowp's
--- 1.8 nodes of their target, which at the dais edge is mid-jump (vanilla stops a
--- mob dead when a walk ends). From any church floor cell, the dais, or a chair
--- it walks one route of its own: across the floor to the cell in front of the
--- dais edge, up the step (step.lua), and along the dais to its place. The
--- waypoints are what gopath sets up (mcl_mobs/pathfinding.lua), so check_gowp
--- walks them. Returns false once the church is given up, and "outside" when the
+-- the pews and onto the walkable pulpit's top. From any church floor cell, the
+-- dais, or a chair it walks one route of its own: across the floor to the cell
+-- in front of the dais edge, up the step, and along the dais to its place. The
+-- follower (follower.lua, #174) walks it cell to cell and jumps the carpeted
+-- step. Returns false once the church is given up, and "outside" when the
 -- cleric is not in the church to walk it.
 local function walk_inside(self, church, pos)
 	if now() - church.since > church.limit then
@@ -459,6 +453,7 @@ local function walk_inside(self, church, pos)
 	self.waypoints = waypoints
 	self.order = nil
 	self.state = "gowp"
+	follower.begin(self)
 	church.goal = church.stand
 	return true
 end
@@ -486,13 +481,8 @@ local function conduct(self, pulpit)
 	local pos = self.object:get_pos()
 	if not pos then return end
 	if standing_on_level(self, pos, cell) then
-		-- There, or within a step of it: line up exactly behind the pulpit. Only
-		-- when the dais itself joins the two within a cell or two, so that a wall
-		-- or a pulpit between them is walked around, not snapped through.
-		local from = cell_at(church.cells, pos)
-		local close = from and along(church.cells, from)
-		if near(pos, cell, 0.3) or (near(pos, cell, AT_PULPIT) and close and #close <= 2) then
-			if not near(pos, cell, 0.3) then self.object:set_pos({x = cell.x, y = pos.y, z = cell.z}) end
+		-- There: the follower arrives on the cell itself.
+		if near(pos, cell, 0.3) then
 			church.failures = nil
 			return hold_still(self, dir.x, dir.z)
 		end

@@ -19,6 +19,7 @@ vector = {
 	distance = function(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2) end,
 	round = function(a) return {x = math.floor(a.x + 0.5), y = math.floor(a.y + 0.5), z = math.floor(a.z + 0.5)} end,
 	zero = function() return {x = 0, y = 0, z = 0} end,
+	new = function(a) return {x = a.x, y = a.y, z = a.z} end,
 }
 
 local groups = {["mcl_decor:chair_wooden"] = {chair = 1}}
@@ -41,6 +42,9 @@ minetest = {
 		["mcl_decor:chair_wooden"] = {walkable = true, collision_box = {type = "fixed", fixed = {-0.25, -0.5, -0.25, 0.25, 0.5, 0.25}}},
 	},
 	log = function() end,
+	get_us_time = function() return now * 1e6 end,
+	get_objects_inside_radius = function() return {} end,
+	after = function() end,
 	get_node_or_nil = function(pos)
 		local node = nodes[key(pos)]
 		if type(node) == "string" then return {name = node, param2 = 0} end
@@ -106,6 +110,7 @@ for k, node in pairs(nodes) do
 end
 
 local seat = dofile("seat.lua")
+local follower = dofile("follower.lua")
 local church = dofile("church.lua")
 
 local gopaths, blocked = {}, nil
@@ -118,6 +123,8 @@ local def = {
 		return saved
 	end,
 	set_animation = function(self, name) self.animation_name = name end,
+	turn_in_direction = function() end,
+	set_velocity = function() end,
 	gopath = function(self, target, callback)
 		-- Vanilla marks a failed route search (mcl_mobs/pathfinding.lua).
 		if blocked and vector.equals(target, blocked) then
@@ -134,7 +141,7 @@ church.install(def, seat)
 local function villager(id, pos, profession)
 	local self = {
 		_id = id, _profession = profession or "farmer", state = "stand", _bed = {x = 1, y = 2, z = 6},
-		collisionbox = {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}, bones = {},
+		collisionbox = {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}, bones = {}, walk_velocity = 1, run_velocity = 2,
 	}
 	self.set_yaw = function(entity, yaw) entity.target_yaw = yaw end
 	local velocity = {x = 0, y = 0, z = 0}
@@ -142,6 +149,7 @@ local function villager(id, pos, profession)
 		get_pos = function() return pos end,
 		set_pos = function(_, p) pos = p end,
 		get_velocity = function() return velocity end,
+		get_yaw = function() return 0 end,
 		set_velocity = function(_, v) velocity = v end,
 		set_acceleration = function() end,
 		set_properties = function() end,
@@ -238,6 +246,21 @@ local function chair_at(cell)
 	local node = nodes[key(cell)]
 	return type(node) == "table" and node.name == "mcl_decor:chair_wooden"
 end
+-- Walks the route with the real follower (follower.lua), the engine stubbed
+-- out: each tick the villager is where it was heading, as when it is on time.
+-- Returns the cells it stood on.
+local function drive(v)
+	local stood = {}
+	for _ = 1, 200 do
+		if not v._villages_follow then break end
+		local waypoint = v.current_target.pos
+		v.object:set_pos(at(waypoint))
+		stood[#stood + 1] = waypoint
+		follower.follow(v, 0.1)
+	end
+	return stood
+end
+
 -- A route inside the church: one step at a time, on the floor and never on or
 -- into a chair, to the floor in front of the dais edge at (8,3,5), up that step,
 -- then along the dais to the cell behind the pulpit.
@@ -305,10 +328,14 @@ walked = route(cleric)
 assert(walked[1].y == 2 and not chair_at(walked[1]) and math.abs(walked[1].x - 3) + math.abs(walked[1].z - 9) == 1,
 	"steps down off the chair")
 walks_in(cleric, {x = 3, y = 2, z = 9}, "after stepping down")
--- A node short of its place, on the dais: lined up behind the pulpit, facing
--- the pews, and held there.
+-- A node short of its place, on the dais: it walks the last cell with the
+-- follower, then stands behind the pulpit, facing the pews, and is held there.
 count = #gopaths
 still(cleric, {x = 9, y = 3, z = 7})
+def.do_custom(cleric, 0.1)
+assert(cleric.state == "gowp" and cleric._villages_follow and #route(cleric) == 1, "walks the last cell")
+drive(cleric)
+assert(cleric.state == "stand" and not cleric._villages_follow, "the follower arrives on the cell")
 def.do_custom(cleric, 0.1)
 local stood = cleric.object:get_pos()
 assert(stood.x == 9 and stood.z == 8 and cleric.order == "stand", "behind the pulpit")
@@ -407,19 +434,60 @@ end
 local places = church.back_places(pulpit, "someone")
 assert(places[1] and not vector.equals(places[1].cell, second._villages_church.place), "the held place is skipped")
 
+-- The follower walks the cleric's whole route on the real church nodes, from the
+-- door to the cell behind the pulpit: every cell it stands on is somewhere cells.lua
+-- says a villager can stand (the carpeted floor, the carpeted dais), every move
+-- is one it says can be made, and it ends there.
+local cells = dofile("cells.lua")
+local walker = cleric_named("walker", at(start))
+def.do_custom(walker, 0.1)
+local first_route = route(walker)
+assert(walker._villages_follow and walker._villages_follow.final.x == first_route[#first_route].x, "the follower walks it")
+local stood = drive(walker)
+assert(#stood > 8 and not walker._villages_follow and walker.state == "stand", "arrives")
+local previous = start
+for _, c in ipairs(stood) do
+	assert(cells.can_stand(c), "can stand at " .. key(c))
+	if math.abs(c.x - previous.x) + math.abs(c.z - previous.z) == 1 then
+		assert(cells.can_move(previous, c), "can move to " .. key(c))
+	end
+	previous = c
+end
+assert(vector.equals(previous, behind_cell), "ends behind the pulpit")
+def.do_custom(walker, 0.1)
+assert(walker.order == "stand" and walker.object:get_pos().x == 9, "and holds there")
+
+-- At the foot of the dais, the follower jumps the carpeted step itself (the step
+-- vanilla's do_jump refuses, #126) with forward speed.
+local jumper = cleric_named("jumper", at(floor_leg))
+jumper.jump, jumper.jump_height = true, 6
+def.do_custom(jumper, 0.1)
+local jump_route = route(jumper)
+assert(vector.equals(jump_route[1], edge) or vector.equals(jump_route[1], floor_leg), "starts at the foot")
+if vector.equals(jumper.current_target.pos, floor_leg) then follower.follow(jumper, 0.1) end
+jumper.object.get_yaw = function() return -math.pi / 2 end
+jumper.object:set_pos(at(floor_leg))
+assert(vector.equals(jumper.current_target.pos, edge), "heading up the step")
+follower.follow(jumper, 0.1)
+local launched = jumper.object:get_velocity()
+assert(launched.y > 5 and launched.x > 0.5, "jumps the carpeted step")
+
 -- Final alignment is a short step along the dais, never through a wall.
 local dais_carpet = nodes[key({x = 9, y = 3, z = 7})]
 nodes[key({x = 9, y = 3, z = 7})] = "mcl_core:stone"
 local obstructed = cleric_named("obstructed", {x = 9, y = 2.58, z = 6.3})
 def.do_custom(obstructed, 0.1)
-assert(obstructed.object:get_pos().z == 6.3, "final alignment must not cross the wall at z=7")
+assert(obstructed.object:get_pos().z == 6.3, "nothing snaps it across the wall at z=7")
 assert(obstructed.state == "gowp" and vector.equals(obstructed._target, behind_cell), "walks round it instead")
 local detour = route(obstructed)
 for _, c in ipairs(detour) do assert(not (c.x == 9 and c.z == 7), "through the wall") end
 nodes[key({x = 9, y = 3, z = 7})] = dais_carpet
 local unblocked = cleric_named("unblocked", {x = 9, y = 2.58, z = 6.3})
 def.do_custom(unblocked, 0.1)
-assert(unblocked.object:get_pos().z == 8 and unblocked.order == "stand", "and lined up when the dais is clear")
+assert(unblocked.state == "gowp" and vector.equals(unblocked._target, behind_cell), "and walks straight along when the dais is clear")
+drive(unblocked)
+def.do_custom(unblocked, 0.1)
+assert(unblocked.object:get_pos().z == 8 and unblocked.order == "stand", "and stands there")
 metas[key(pulpit)] = {villager = "cleric"}
 
 -- Trading stops a church walk, for the cleric and for members: vanilla stands
