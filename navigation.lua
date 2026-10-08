@@ -531,6 +531,12 @@ local function evaluate_fisherman_promotion(self)
 	})
 end
 
+-- Whether `pos` is on a bed whose headroom is too low to walk from.
+local function on_cramped_bed(pos)
+	local node = core.get_node_or_nil({x = math.floor(pos.x + 0.5), y = common.feet_node(pos), z = math.floor(pos.z + 0.5)})
+	return node ~= nil and core.get_item_group(node.name, "bed") > 0 and not cells.has_head_room(pos)
+end
+
 -- Sets the villager walking the planner's `path`: waypoints, door actions, and
 -- the follower (follower.lua) in state gowp.
 local function start_route(self, target, path, arrived, route_field, route_id)
@@ -558,6 +564,15 @@ local function start_route(self, target, path, arrived, route_field, route_id)
 		end
 	end
 	local pos = self.object:get_pos()
+	-- A villager on a bed top under a low ceiling (a woken sleeper left where it
+	-- lay) cannot walk: its head is in the ceiling. Set it down on the cell the
+	-- planner started from, as waking does (#191).
+	if pos and self.object.set_pos and on_cramped_bed(pos) then
+		pos = cells.standing_position(path[1])
+		core.log("action", string.format("[living_villages] villager %s stood on a bed it cannot walk from; set down at %s",
+			tostring(self._id), core.pos_to_string(pos, 1)))
+		self.object:set_pos(pos)
+	end
 	local current = table.remove(waypoints, 1)
 	while current and pos and vector.distance(pos, current.pos) < 0.5 do
 		current = table.remove(waypoints, 1)

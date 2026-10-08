@@ -14,6 +14,13 @@ local cells = {}
 local HALF_WIDTH = 0.3
 local HEIGHT_NODES = 2
 local EDGE = 0.001
+-- The collisionbox's vertical extent from the entity position: {..., -0.01, ..., 1.94, ...}.
+local BODY_BOTTOM = -0.01
+local BODY_TOP = 1.94
+-- A box this close to the feet or less above them is what the villager stands
+-- on, not something in its way; a head overlap smaller than the tolerance is a touch.
+local FLOOR_SLOP = 0.1
+local HEAD_TOLERANCE = 0.005
 -- The lowest floor top, in node units from the node's center, a villager walks
 -- on as a floor. A bottom slab tops out at 0.0 and is not one. A grass path and
 -- farmland top out a sixteenth short of a full node (0.4375): the villager's feet
@@ -47,6 +54,51 @@ function cells.collision_box_top(def)
 		if type(part) == "table" and type(part[5]) == "number" then top = math.max(top, part[5]) end
 	end
 	return top
+end
+
+-- The collision boxes of a node, as {x1, y1, z1, x2, y2, z2} from its center, or
+-- nil for one that collides as a whole node.
+local function boxes_of(def)
+	local box = def and (def.collision_box or (def.drawtype == "nodebox" and def.node_box))
+	if not box or box.type ~= "fixed" or type(box.fixed) ~= "table" then return nil end
+	local fixed = box.fixed
+	if type(fixed[1]) == "number" then return {fixed} end
+	return fixed
+end
+
+-- Whether the villager's head clears everything over a continuous position
+-- `pos` (an entity position, its collision box bottom a hair below). The
+-- node-layer checks (has_standing_space) read a bed as the floor of a cell, but
+-- a villager on a bed top stands 0.56 up in its cell, and its head then reaches
+-- 0.01 into a top-half slab ceiling two nodes up, which stops it walking at all
+-- (#191). Only collision above what the villager stands on counts.
+function cells.has_head_room(pos)
+	local bottom, top = pos.y + BODY_BOTTOM, pos.y + BODY_TOP
+	for x = round(pos.x - HALF_WIDTH + EDGE), round(pos.x + HALF_WIDTH - EDGE) do
+		for z = round(pos.z - HALF_WIDTH + EDGE), round(pos.z + HALF_WIDTH - EDGE) do
+			for y = round(bottom), round(top) do
+				local node = core.get_node_or_nil({x = x, y = y, z = z})
+				local def = node and core.registered_nodes[node.name]
+				if def and def.walkable and core.get_item_group(node.name, "door") == 0 then
+					for _, part in ipairs(boxes_of(def) or {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}) do
+						if y + part[5] > bottom + FLOOR_SLOP and y + part[2] < top - HEAD_TOLERANCE then return false end
+					end
+				end
+			end
+		end
+	end
+	return true
+end
+
+-- Where an entity stands in the walk position `cell`: its centre, on the floor
+-- (or the carpet in the cell), the collision box's sliver above.
+function cells.standing_position(cell)
+	local below = core.get_node_or_nil({x = cell.x, y = cell.y - 1, z = cell.z})
+	local floor_y = cell.y - 1 + cells.collision_box_top(below and core.registered_nodes[below.name])
+	local feet = core.get_node_or_nil(cell)
+	local feet_def = feet and core.registered_nodes[feet.name]
+	if feet_def and feet_def.walkable then floor_y = cell.y + cells.collision_box_top(feet_def) end
+	return {x = cell.x, y = floor_y - BODY_BOTTOM, z = cell.z}
 end
 
 function cells.is_hazard(name, def)

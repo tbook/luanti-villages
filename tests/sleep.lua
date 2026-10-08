@@ -27,6 +27,10 @@ local registered_nodes = {
 	["mcl_core:dirt"] = {walkable = true},
 	["mcl_core:stone"] = {walkable = true},
 	["mcl_beds:bed_red_bottom"] = {walkable = true},
+	["mcl_wool:green_carpet"] = {
+		walkable = true, drawtype = "nodebox",
+		node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}},
+	},
 	-- Fire fits a villager perfectly well: not walkable, no collision box, not
 	-- a liquid. Only its group marks it as somewhere a villager must not be put.
 	["mcl_fire:fire"] = {walkable = false},
@@ -82,6 +86,7 @@ minetest = {
 	get_node_or_nil = function(pos) return nodes[key(pos)] end,
 	get_item_group = function(name, group)
 		if group == "fire" then return name:find("fire", 1, true) and 1 or 0 end
+		if group == "carpet" then return name:find("carpet", 1, true) and 1 or 0 end
 		if group == "opaque" then return name:find("mcl_core:", 1, true) and 1 or 0 end
 		return group == "bed" and name:find("_bottom", 1, true) and 1 or 0
 	end,
@@ -520,5 +525,22 @@ assert(death_log:find("environment", 1, true) and death_log:find("mcl_core:stone
 -- since nothing else in the game reports it.
 assert(death_log:find("6.0 below", 1, true),
 	"the death log must say how far the villager was from where it loaded: " .. death_log)
+
+-- #191: the large house lays carpet all round its bed, so a villager steps into
+-- bed from a carpet cell. That exit is somewhere it fits and must be used on
+-- waking; refusing it left the villager standing on the bed, where it could not
+-- walk away.
+time = 0.9
+nodes[key({x = 1, y = 0, z = 0})] = {name = "mcl_wool:green_carpet", param2 = 0}
+local rue = make_villager("alice", false, {x = 1, y = 0, z = 0})
+objects = {rue.object}
+entity_def.on_activate(rue, "", 0)
+assert(rue._villages_sleeping)
+time = 0.5
+entity_def.do_custom(rue, 1)
+assert(not rue._villages_sleeping)
+assert(vector.equals(rue.object:get_pos(), {x = 1, y = 0, z = 0}),
+	"an exit on carpet must be returned to on waking")
+nodes[key({x = 1, y = 0, z = 0})] = {name = "air", param2 = 0}
 
 print("villager sleep tests passed")

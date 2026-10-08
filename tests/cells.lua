@@ -72,4 +72,38 @@ world = {}; put(0, 0, 0, "mcl_core:stone"); put(1, 1, 0, "mcl_core:stone")
 assert(cells.has_standing_space({x = 0, y = 1, z = 0}), "centered")
 assert(not cells.has_standing_space({x = 0.45, y = 1, z = 0}), "box reaches into the wall")
 
+-- Head room over a bed top (#191): the bed's collision tops out at 0.0625 over
+-- its node's centre, so a villager on it has its head 0.0125 into a top-half
+-- slab two nodes up; a full node over the feet cell blocks it as well.
+defs["mcl_beds:bed_red_bottom"] = {walkable = true, collision_box = box(0.06)}
+defs["mcl_stairs:slab_wood_top"] = {
+	walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, 0, -0.5, 0.5, 0.5, 0.5}},
+}
+world = {}
+put(0, 0, 0, "mcl_core:stone"); put(0, 1, 0, "mcl_beds:bed_red_bottom")
+local on_bed = {x = 0, y = 1.0725, z = 0}
+assert(cells.has_head_room(on_bed), "open air over a bed")
+put(0, 3, 0, "mcl_stairs:slab_wood_top")
+assert(not cells.has_head_room(on_bed), "a top slab two nodes above the bed is in the villager's head")
+put(2, 0, 0, "mcl_core:stone"); put(2, 3, 0, "mcl_stairs:slab_wood_top")
+assert(cells.has_head_room({x = 2, y = 0.51, z = 0}), "the same ceiling clears a villager on the floor")
+put(0, 3, 0, "air"); put(0, 4, 0, "mcl_stairs:slab_wood_top")
+assert(cells.has_head_room(on_bed), "a ceiling one node higher is clear")
+put(0, 3, 0, "mcl_core:stone")
+assert(not cells.has_head_room(on_bed), "a full node above blocks")
+put(0, 3, 0, "air")
+-- Off centre, the box reaches into the next column.
+put(1, 3, 0, "mcl_stairs:slab_wood_top"); put(0, 4, 0, "air")
+assert(not cells.has_head_room({x = 0.3, y = 1.0725, z = 0}), "the box reaches under the neighbouring ceiling")
+assert(cells.has_head_room({x = 0.1, y = 1.0725, z = 0}), "but not from the middle of the cell")
+
+-- Where an entity stands in a cell: on the floor, or on the carpet in the cell.
+world = {}
+put(5, 0, 5, "mcl_core:stone")
+local at = cells.standing_position({x = 5, y = 1, z = 5})
+assert(at.x == 5 and at.z == 5 and math.abs(at.y - 0.51) < 1e-9, "on the floor's top: " .. at.y)
+put(5, 1, 5, "mcl_wool:carpet")
+at = cells.standing_position({x = 5, y = 1, z = 5})
+assert(math.abs(at.y - 0.5725) < 1e-9, "on the carpet's top: " .. at.y)
+
 print("cells.lua: ok")
