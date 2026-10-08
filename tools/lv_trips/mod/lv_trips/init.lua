@@ -19,6 +19,7 @@
 --   lv_trips_label   names the run in the result lines
 --   lv_trips_spot    "sx,sy,sz;bx,by,bz": mode "spot" teleports the villager that owns the bed at
 --                    b to the start s at the `home` hour and logs it every step (see README)
+--   lv_trips_goto    "gx;gy;gz": spot mode sends that villager to g instead of letting it choose
 local core = minetest
 local modpath = core.get_modpath("lv_trips")
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
@@ -56,6 +57,8 @@ local STAGES = {
 	{name = "church", tod = 0.35, holiday = true},
 	{name = "bell", tod = 0.50, holiday = true},
 	{name = "holiday_tavern", tod = 0.62, holiday = true, managed = true},
+	-- Only for --spot: late evening, when every villager's schedule says home.
+	{name = "night", tod = 0.79, managed = true},
 }
 
 local round_info = {} -- the stage, variant and round being run
@@ -527,14 +530,25 @@ end
 local function run_spot(list)
 	local start, bed = parse_spot()
 	if not start then error("lv_trips_spot must be sx,sy,sz;bx,by,bz") end
+	-- The beds in the village, to choose a spot's bed from.
+	for _, v in ipairs(list) do
+		core.log("action", string.format("[lv_trips] villager %s bed=%s jobsite=%s", villager_id(v),
+			v._bed and core.pos_to_string(v._bed) or "-", v._jobsite and core.pos_to_string(v._jobsite) or "-"))
+	end
 	local owner
 	for _, v in ipairs(list) do
 		if v._bed and v._bed.x == bed.x and v._bed.y == bed.y and v._bed.z == bed.z then owner = v end
 	end
 	if not owner then error("no villager owns the bed at " .. core.pos_to_string(bed)) end
-	holiday = false
-	silence_engine = false
+	-- The stage is the first of lv_trips_stages that names one (home by default).
 	local stage = STAGES[1]
+	for name in setting("stages", ""):gmatch("[^,]+") do
+		for _, candidate in ipairs(STAGES) do
+			if candidate.name == name and stage == STAGES[1] then stage = candidate end
+		end
+	end
+	holiday = stage.holiday and true or false
+	silence_engine = false
 	round_info = {stage = stage, variant = "A", round = 1, village = LABEL}
 	trips = {}
 	release_seat(owner)
@@ -544,7 +558,16 @@ local function run_spot(list)
 	local woke_by = elapsed_real + 5
 	while owner._villages_sleeping and elapsed_real < woke_by do coroutine.yield() end
 	core.set_timeofday(stage.tod)
+	-- --build FILE: a Lua file that edits the clone's map (a test staircase) first.
+	local build = io.open(modpath .. "/build.lua", "r")
+	if build then build:close(); dofile(modpath .. "/build.lua"); wait(1) end
 	owner.object:set_pos(start)
+	-- --goto: walk to this position instead of what the schedule says.
+	local gx, gy, gz = setting("goto", ""):match("^(-?[%d.]+);(-?[%d.]+);(-?[%d.]+)$")
+	if gx then
+		wait(1)
+		owner:gopath({x = tonumber(gx), y = tonumber(gy), z = tonumber(gz)}, nil, true)
+	end
 	local began = elapsed_real
 	local last_logged = -1
 	local function snapshot()
