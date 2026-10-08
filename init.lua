@@ -297,7 +297,10 @@ core.register_on_mods_loaded(function()
 		local exit, bed = self._villages_bed_exit, self._villages_bed_exit_bed
 		if not exit then return end
 		if not bed or vector.distance(exit, bed) > BED_EXIT_RADIUS then return end
-		if not is_standing_space(exit) then return end
+		-- Carpet in the exit's own cell is fine: the large house lays it all
+		-- round the bed, and refusing it left the sleeper where it lay, on a
+		-- bed it could not walk from (#191).
+		if not is_standing_space(exit, true) then return end
 		return exit
 	end
 
