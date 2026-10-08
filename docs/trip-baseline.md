@@ -108,6 +108,20 @@ Trips of under 3 nodes in the work stage fell from 651 to 27: a villager already
 Trips of 3+ nodes also fell (about 277 to 149) and more home trips end `superseded`; I did not find why, and
 the totals depend on timing in the probe, so treat them as unexplained rather than as a regression.
 
+## After #165
+
+Same villages and trials, variant A only (`cl165`; the legacy route choice, the stall watchdog and
+the route modes are gone, so variant B would repeat A). Compared with `fl164c` variant A:
+
+| | #164 (`fl164c`) | #165 (`cl165`) |
+|--|--:|--:|
+| routes that started and arrived | 171 of 207 (83%) | 187 of 220 (85%) |
+| stuck with a route | 29 | 24 |
+
+No regression: removing the fallback paths changed no arrival rate beyond the run-to-run spread.
+The tavern, home and church stages are as uneven as before (church 3 of 11 arrived, 7 stuck); those
+are for the follow-up tickets, not this cleanup.
+
 ## Rerun
 
 ```sh
