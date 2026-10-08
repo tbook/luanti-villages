@@ -9,7 +9,23 @@ vector = {
 	distance = function(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2) end,
 }
 local vanilla_ticks = 0
-mcl_mobs = {mob_class = {check_gowp = function() vanilla_ticks = vanilla_ticks + 1 end}}
+-- Vanilla's do_jump (mcl_mobs/movement.lua), as far as it matters here: from where
+-- it stands it hops straight up when a solid node is about to be walked into
+-- (within 0.8 nodes ahead at knee height), stopping what it was doing. It runs
+-- after check_gowp on every step. Off unless a test turns it on.
+local vanilla_jump
+mcl_mobs = {mob_class = {
+	check_gowp = function() vanilla_ticks = vanilla_ticks + 1 end,
+	do_jump = function(self)
+		if not vanilla_jump then return end
+		local pos, yaw = self.object:get_pos(), self.object:get_yaw() + self.rotate
+		local ahead = {x = math.floor(pos.x - math.sin(yaw) * 0.8 + 0.5), y = 0, z = math.floor(pos.z + math.cos(yaw) * 0.8 + 0.5)}
+		if nodes[ahead.x .. "," .. ahead.y .. "," .. ahead.z] then
+			self.hops = (self.hops or 0) + 1
+			self:set_velocity(0)
+		end
+	end,
+}}
 
 local objects_near = {}
 local clock = 0
@@ -37,7 +53,7 @@ local function reset()
 end
 
 local follower = dofile("follower.lua")
-local def = {}
+local def = setmetatable({}, {__index = mcl_mobs.mob_class})
 follower.install(def)
 
 -- Feet cell y = 0 stands on the floor at y = -1; entity y is the floor's top.
@@ -72,6 +88,7 @@ local function villager(x, z, path)
 	self.tick = function()
 		clock = clock + DT * 1e6
 		def.check_gowp(self, DT)
+		self:do_jump()
 		pos.x = pos.x - math.sin(yaw) * velocity * DT
 		pos.z = pos.z + math.cos(yaw) * velocity * DT
 		table.insert(self.walked, {x = pos.x, z = pos.z})
@@ -195,6 +212,64 @@ v.vy = -4
 run(v, 1.2)
 assert(v.jumps == 1, "jumps once toward a rise, not " .. v.jumps)
 assert(v.jumped.x > 1 and math.abs(v.jumped.z) < 0.01, "with forward speed along the heading")
+
+-- Vanilla's own jump must not run on a followed walk: it hops straight up in
+-- place near a rise (while the villager turns to face it, or stands just outside
+-- the distance the follower's own jump starts at) and never gets anywhere (#194).
+-- The villager starts 1.3 nodes from the step, as the stalled ones were.
+reset()
+vanilla_jump = true
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+v = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
+follower.begin(v)
+run(v, 1)
+assert((v.hops or 0) == 0, "vanilla's hops do not run on a followed walk, " .. tostring(v.hops))
+assert(v.jumps >= 1, "its own jump does")
+-- Off the follower it is vanilla's, and it hops.
+local plain_walk = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
+plain_walk:turn_in_direction(1, 0)
+plain_walk.tick()
+assert((plain_walk.hops or 0) > 0, "control: without the follower the villager hops at the step")
+
+-- In water vanilla's hop stays (it is how a villager swims out).
+local real_group = minetest.get_item_group
+minetest.get_item_group = function(name, group) return (name == "default:water" and group == "water") and 1 or 0 end
+nodes[key({x = 1, y = 0, z = 0})] = "default:water"
+local swimmer = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
+follower.begin(swimmer)
+swimmer.object.get_pos = function() return {x = 0.7, y = 0, z = 0.3} end
+swimmer:turn_in_direction(1, 0)
+swimmer:do_jump()
+assert((swimmer.hops or 0) > 0, "in water vanilla's jump still runs on a followed walk")
+nodes[key({x = 1, y = 0, z = 0})] = nil
+minetest.get_item_group = real_group
+
+-- Once the walk is over (arrived or given up) the wrapper is vanilla's again.
+reset()
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+local ended = villager(0.7, 0.3, {cell(1, 0), {x = 2, y = 1, z = 0}})
+follower.begin(ended)
+ended:turn_in_direction(1, 0)
+ended:do_jump()
+assert((ended.hops or 0) == 0, "followed: suppressed")
+ended.object.get_pos = function() return {x = 0, y = -0.49, z = 6} end
+ended.tick()
+assert(ended._villages_follow_failed.reason == "off the planned route", "gave up")
+ended.object.get_pos = function() return {x = 0.7, y = -0.49, z = 0.3} end
+ended:do_jump()
+assert((ended.hops or 0) > 0, "after give_up vanilla's jump runs again")
+reset()
+local done = villager(0, 0, {cell(0, 0), cell(1, 0)})
+follower.begin(done)
+done.object.get_pos = function() return {x = 1, y = -0.49, z = 0} end
+done.tick()
+assert(done.arrived, "arrived")
+done.object.get_pos = function() return {x = 0.7, y = -0.49, z = 0.3} end
+done:turn_in_direction(1, 0)
+nodes[key({x = 2, y = 0, z = 0})] = "mcl_core:stone"
+done:do_jump()
+assert((done.hops or 0) > 0, "after arrive vanilla's jump runs again")
+vanilla_jump = false
 
 -- The pushes scheduled with a jump end with the walk: after arriving on the
 -- raised final cell, a late callback does not move the villager again.
