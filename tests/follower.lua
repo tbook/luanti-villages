@@ -240,21 +240,29 @@ v.object.get_pos = function() bob = bob + 1; return {x = 0, y = -0.49 + (bob % 2
 run(v, 6)
 assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "bobbing is a stall")
 
--- On a descent the waypoint is not reached while the feet are still above it:
--- the villager keeps on, and a stall there ends the walk (#173).
+-- On a descent the waypoint is not reached while the body is still above its
+-- floor: the villager keeps on, and a stall there ends the walk (#173). The feet
+-- cell rounds up a quarter node early, so height is judged on the floor's top.
 reset()
-v = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 2, y = -1, z = 0}})
-follower.begin(v)
-v.object.get_pos = function() return {x = 1, y = -0.49, z = 0} end
-v.set_velocity = function() end
+for x = -5, 10 do for z = -5, 10 do nodes[key({x = x, y = -2, z = z})] = "mcl_core:stone" end end
+local function descent(x, y)
+	local d = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 1, y = -1, z = 1}})
+	follower.begin(d)
+	d.object.get_pos = function() return {x = x, y = y, z = 0} end
+	d.set_velocity = function() end
+	return d
+end
+v = descent(1, -0.49)
 run(v, 1)
-assert(v.current_target.pos.x == 1, "still heading for the lower waypoint while high on the stair")
+assert(v.current_target.pos.z == 0, "still heading for the lower waypoint while high on the stair")
 run(v, 6)
 assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "a stall on the stair ends the walk")
-v = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 2, y = -1, z = 0}})
-follower.begin(v)
-v.object.get_pos = function() return {x = 1, y = -1.49, z = 0} end
+-- Halfway down: the feet cell already reads -1, the body is still 0.5 high.
+v = descent(0.75, -0.99)
 v.tick()
-assert(v.current_target.pos.x == 2, "moves on once the feet are down")
+assert(v.current_target.pos.z == 0, "half a node above the landing does not turn yet")
+v = descent(1, -1.49)
+v.tick()
+assert(v.current_target.pos.z == 1, "moves on once down")
 
 print("follower tests passed")
