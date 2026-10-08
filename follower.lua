@@ -86,6 +86,19 @@ end
 
 -- Ends the walk without arriving: navigation.lua sees the reason and plans again.
 local function give_up(self, reason, blocker)
+	local pos, target = self.object:get_pos(), self._target
+	local f = self._villages_follow
+	-- Kept after navigation.lua consumes `_villages_follow_failed`, for the
+	-- diagnostic and the log: why a villager turned back is otherwise lost.
+	self._villages_last_walk_failure = {
+		reason = reason, pos = pos and vector.new(pos) or nil,
+		target = f and f.final or target and vector.new(target) or nil,
+		day = core.get_day_count(), tod = core.get_timeofday(),
+	}
+	core.log("action", string.format("[living_villages] walk ended (%s) at %s heading for %s, day %d time %.0f",
+		reason, pos and core.pos_to_string(pos, 1) or "?",
+		self._villages_last_walk_failure.target and core.pos_to_string(self._villages_last_walk_failure.target) or "?",
+		core.get_day_count(), core.get_timeofday() * 24000))
 	clear_walk(self)
 	self.state = "stand"
 	self._villages_follow_failed = {

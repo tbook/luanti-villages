@@ -210,6 +210,13 @@ local function target_string(target)
 	return target and tostring(target) or "none"
 end
 
+local function walk_failure_string(failure)
+	if type(failure) ~= "table" then return "none" end
+	return string.format("%s at %s heading for %s (day %s, %02d:%02d)", tostring(failure.reason),
+		target_string(failure.pos), target_string(failure.target), tostring(failure.day),
+		math.floor((failure.tod or 0) * 24), math.floor((failure.tod or 0) * 1440) % 60)
+end
+
 local function last_local_birth(pos)
 	if not pos or not core.find_nodes_in_area then return nil end
 	local minp = {x = pos.x - BIRTH_RADIUS, y = pos.y - BIRTH_HEIGHT, z = pos.z - BIRTH_RADIUS}
@@ -531,6 +538,7 @@ local function show(player, villager)
 		"Cell: " .. cell_status(pos and {x = pos.x, y = common.feet_node(pos), z = pos.z}),
 		"Next cell: " .. cell_status(villager.current_target and villager.current_target.pos),
 		"Path target: " .. target_string(villager._target) .. "    Waypoints: " .. path_count,
+		"Last walk failure: " .. walk_failure_string(villager._villages_last_walk_failure),
 		"Births: " .. birth_check,
 	}
 	show_form(player, "living_villages:diagnostic", lines)
