@@ -3,10 +3,10 @@
 -- furnishing applied, at every rotation and with its doors shut and open. Then
 -- villagers are sent to every bed, jobsite and the tavern's jukebox from outside,
 -- to each dinner chair and church pew (the cell seat.lua has a guest stand at) and
--- the cleric's place at the pulpit, and from the rooms inside to the outdoors. The
--- church also gets church.lua's own service walks (church_service below).
--- The stub world is flat ground except for a one-block step all round, up or down,
--- two cells out from the building (not covered: longer or steeper slopes).
+-- the cleric's place at the pulpit, and from the rooms inside to the outdoors.
+-- The church's own service walks are in tests/stock_church.lua.
+-- The stub world is flat ground, a road, or flat but for a one-block step all round,
+-- up or down, two cells out from the building (tests/support/stock_scene.lua).
 -- The routes come from navigation.lua's real gopath with the engine's own
 -- pathfinder stubbed out, so this exercises the planner and the passability
 -- checks it uses. Whatever route comes back is then checked here, by rules that
@@ -16,161 +16,25 @@
 --   lua tests/stock_buildings.lua
 --   STOCK_ONLY=tavern STOCK_VERBOSE=1 lua tests/stock_buildings.lua
 local stock_world = dofile("tests/support/stock_world.lua")
+local scene = dofile("tests/support/stock_scene.lua")
+local check = dofile("tests/support/stock_check.lua")
 -- The cases that do not pass yet, as patterns over the case names printed below.
 -- A case that starts passing fails the test until its pattern is removed, and so
 -- does a pattern that matches nothing, so the list only ever shrinks.
 local known = dofile("tests/support/stock_buildings_known.lua")
-local known_hits = {}
-
 local verbose = os.getenv("STOCK_VERBOSE")
 local only = os.getenv("STOCK_ONLY")
+local recorder = check.recorder(known, verbose)
+local record, unexpected = recorder.record, recorder.unexpected
+local cell_string, check_route = check.cell_string, check.check_route
 
 local BUILDINGS = {
 	"belltower", "blacksmith", "butcher", "church", "farm", "lamp", "large_house",
 	"library", "medium_house", "small_house", "tavern", "well",
 }
-local DIRECTIONS = {"north", "south", "west", "east"}
--- Where the building goes, and how far beyond each side the outdoor beds are.
-local ORIGIN = 30
-local MARGIN = 7
+local DIRECTIONS, ORIGIN, MARGIN = scene.DIRECTIONS, scene.ORIGIN, scene.MARGIN
 -- The time of day each kind of trip is scheduled for (common.lua's SCHEDULE).
 local HOME, WORK, TAVERN = 0.8, 0.3, 0.7
-
--- Furnishing this mod gives newly generated buildings (#20, #21, #152), loaded
--- once the engine stubs are in. Each module returns its furnish function when
--- the village generator is absent. Not every branch has all of them.
-local FURNISHERS = {
-	tavern = "tavern_schematic.lua", church = "church_schematic.lua", library = "library_schematic.lua",
-}
-
-local passes, failures, unexpected = 0, 0, {}
-
-local function known_rule(id)
-	for index, rule in ipairs(known) do
-		if id:find(rule.match) then
-			known_hits[index] = true
-			return rule
-		end
-	end
-end
-
-local function record(id, ok, detail)
-	if ok then
-		passes = passes + 1
-		if known_rule(id) then
-			table.insert(unexpected, id .. " passes now; remove its rule from tests/support/stock_buildings_known.lua")
-		end
-		if verbose then print("ok   " .. id) end
-	else
-		failures = failures + 1
-		if not known_rule(id) then table.insert(unexpected, id .. ": " .. tostring(detail)) end
-		if verbose then print("FAIL " .. id .. ": " .. tostring(detail)) end
-	end
-end
-
-local function cell_string(pos)
-	return ("(%d,%d,%d)"):format(pos.x, pos.y, pos.z)
-end
-
--- Facts about mcl_doors (api_doors.lua), verified for #121 and kept here rather
--- than taken from doors.lua so that a regression there cannot excuse itself: every
--- variant's leaf lies on one edge of its node, which for facedir p is north, west,
--- south or east for p 0..3; toggling a door turns it a quarter, forward when it is
--- closed and not mirrored or open and mirrored, back otherwise. The variants are
--- named _b_ or _t_ then 1 closed, 2 open, 3 closed mirrored, 4 open mirrored.
-local LEAF_EDGE = {[0] = "n", "w", "s", "e"}
-
-local function door_blocks(node, entry_edge, exit_edge)
-	local variant = tonumber(node.name:match("_[bt]_(%d)$"))
-	local open, mirrored = variant % 2 == 0, variant > 2
-	local forward = open == mirrored
-	local toggled = (node.param2 + (forward and 1 or -1)) % 4
-	for _, leaf in ipairs({LEAF_EDGE[node.param2 % 4], LEAF_EDGE[toggled]}) do
-		if leaf ~= entry_edge and leaf ~= exit_edge then return false end
-	end
-	return true
-end
-
-local function edge_toward(from, to)
-	if to.x > from.x then return "e" elseif to.x < from.x then return "w" end
-	return to.z > from.z and "s" or "n"
-end
-
--- How high a node's collision reaches above the node's center: 0.5 for a full
--- cube, less for a slab or carpet, more for a fence.
-local function collision_top(def)
-	local box = def.collision_box or (def.drawtype == "nodebox" and def.node_box)
-	if not box or box.type ~= "fixed" then return 0.5 end
-	local fixed = box.fixed
-	if type(fixed[1]) == "number" then return fixed[5] end
-	local top = -0.5
-	for _, part in ipairs(fixed) do top = math.max(top, part[5]) end
-	return top
-end
-
--- The rules a route is held to, none of them the planner's own: each step is to
--- a neighboring cell at most a level up or down; every cell has floor to stand on
--- (a full-height solid that is not a fence, wall or trapdoor); no feet cell is
--- inside something solid, and the head cell over each is free, carpet at the feet
--- being the one thing a villager stands in; a step up has the cell above the
--- departure head free, since the jump swings the head through it (#56); a door
--- is crossed by an entry and exit its leaf lets through in one state or the other;
--- and the route ends beside the target.
-local function check_route(world, cells, target)
-	local defs = stock_world.defs
-	local function group(pos, name)
-		local found = defs[world.get(pos).name].groups[name]
-		return found and found > 0
-	end
-	local function solid(pos, feet)
-		local def = defs[world.get(pos).name]
-		if group(pos, "door") then return false end
-		if feet and group(pos, "carpet") then return false end
-		return def.walkable or (def.collision_box and def.collision_box.type ~= "none")
-	end
-	local function floor_under(cell)
-		local below = {x = cell.x, y = cell.y - 1, z = cell.z}
-		local def = defs[world.get(below).name]
-		-- A full block, or the sixteenth or two short of one that a grass path or
-		-- farmland is.
-		if not def.walkable or collision_top(def) < 0.4 or (def.damage_per_second or 0) > 0 then return false end
-		return not (group(below, "fence") or group(below, "fence_gate") or group(below, "wall") or group(below, "trapdoor"))
-	end
-	for i, cell in ipairs(cells) do
-		local previous = cells[i - 1]
-		if previous then
-			local dx, dz, dy = math.abs(cell.x - previous.x), math.abs(cell.z - previous.z), cell.y - previous.y
-			if dx + dz ~= 1 or math.abs(dy) > 1 then
-				return false, "steps from " .. cell_string(previous) .. " to " .. cell_string(cell)
-			end
-			local over = {x = previous.x, y = previous.y + 2, z = previous.z}
-			if dy == 1 and solid(over) then
-				return false, ("jumps from %s into %s at %s"):format(cell_string(previous), world.get(over).name, cell_string(over))
-			end
-		end
-		local head = {x = cell.x, y = cell.y + 1, z = cell.z}
-		if not floor_under(cell) then
-			return false, ("no floor under %s, which is %s"):format(cell_string(cell),
-				world.get({x = cell.x, y = cell.y - 1, z = cell.z}).name)
-		end
-		if solid(cell, true) then
-			return false, ("feet inside %s at %s"):format(world.get(cell).name, cell_string(cell))
-		end
-		if solid(head) then
-			return false, ("head inside %s at %s"):format(world.get(head).name, cell_string(head))
-		end
-		if group(cell, "door") and previous and cells[i + 1] then
-			if door_blocks(world.get(cell), edge_toward(cell, previous), edge_toward(cell, cells[i + 1])) then
-				return false, "the leaf of the door at " .. cell_string(cell) .. " blocks the turn"
-			end
-		end
-	end
-	local last = cells[#cells]
-	if math.abs(last.x - target.x) > 1 or math.abs(last.z - target.z) > 1 or last.y ~= target.y then
-		return false, "ends at " .. cell_string(last) .. ", away from the target"
-	end
-	return true
-end
 
 -- Sends a villager standing at `start` (a position, as an entity's is) to
 -- `target`, which it claims as `field` says. Returns the cells of its route, or
@@ -205,242 +69,15 @@ local function route(world, def, start, target, field, route_field, timeofday)
 	return cells
 end
 
--- The church service's own walks (#159), through church.lua's do_custom with the
--- real planner and follower (the engine stubbed out): a member from the door to
--- each pew and then each standing place at the back, the cleric from the door
--- and from every cell of the church floor to its place behind the pulpit, and
--- from outdoors to the floor in front of the dais. Every route is held to
--- check_route, and the follower is driven along it to the end.
-local function church_service(world, prefix, pulpit, stand, door, outdoors, seat, church_module)
-	local follower = dofile("follower.lua")
-	local cdef = {
-		on_activate = function() end, do_custom = function() end, get_staticdata = function() return {} end,
-		set_animation = function() end, turn_in_direction = function() end, set_velocity = function() end,
-		gopath = function() return false end,
-	}
-	dofile("navigation.lua")(cdef)
-	church_module.install(cdef, seat)
-	minetest.get_day_count = function() return 4 end
-	minetest.get_us_time = minetest.get_us_time or function() return 0 end
-	table.copy = table.copy or function(value)
-		local copy = {}
-		for k, v in pairs(value) do copy[k] = v end
-		return copy
-	end
-	world.timeofday = 8000 / 24000
-	local function villager(id, pos, profession)
-		local self = {
-			_id = id, _profession = profession or "farmer", state = "stand",
-			collisionbox = {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}, bones = {}, walk_velocity = 1, run_velocity = 2,
-		}
-		self.set_yaw = function(entity, yaw) entity.target_yaw = yaw end
-		local velocity = {x = 0, y = 0, z = 0}
-		self.object = {
-			get_pos = function() return pos end,
-			set_pos = function(_, p) pos = p end,
-			get_velocity = function() return velocity end,
-			get_yaw = function() return 0 end,
-			set_velocity = function(_, v) velocity = v end,
-			set_acceleration = function() end,
-			set_properties = function() end,
-			set_bone_override = function() end,
-		}
-		return setmetatable(self, {__index = cdef})
-	end
-	local function at(cell) return {x = cell.x, y = cell.y - 0.49, z = cell.z} end
-	-- Lets the route queue finish the villager's search, then returns its route.
-	local function planned(v)
-		for _ = 1, 100000 do
-			if (v._villages_goto_route or {}).status ~= "planning" then break end
-			for _, step in ipairs(world.globalsteps) do step(0.1) end
-		end
-		if (v._villages_goto_route or {}).status == "retry" then return nil, v._villages_goto_route.reason end
-		if not v.current_target then return nil, "no route" end
-		local cells = {v.current_target.pos}
-		for _, waypoint in ipairs(v.waypoints or {}) do table.insert(cells, waypoint.pos) end
-		return cells
-	end
-	-- Walks the follower down the route, the villager on the cell it heads for
-	-- each tick. Returns whether it arrived.
-	local function drive(v)
-		for _ = 1, 400 do
-			if not v._villages_follow then return true end
-			v.object:set_pos(at(v.current_target.pos))
-			follower.follow(v, 0.1)
-		end
-		return false
-	end
-	local function cell_key(cell) return cell.x .. "," .. cell.y .. "," .. cell.z end
-	local function shown(cell) return cell_string(world.fixture_pos(cell) or cell) .. (world.fixture_pos(cell) and "" or " outside") end
-	local function settle(id, cells, reason, target, v)
-		if not cells then return record(id, false, reason) end
-		local ok, detail = check_route(world, cells, target)
-		if ok and not drive(v) then ok, detail = false, "the follower never arrived" end
-		record(id, ok, detail)
-	end
-	local function walking(v)
-		local cells = {v.current_target.pos}
-		for _, waypoint in ipairs(v.waypoints) do table.insert(cells, waypoint.pos) end
-		return cells
-	end
-
-	-- The member's walks. Each takes a pew in turn from the door, then, with the
-	-- pews full, the next standing place at the back.
-	for n = 1, 12 do
-		local v = villager("member" .. n, at(door))
-		cdef.do_custom(v, 0.1)
-		local held = v._villages_seat
-		if not held then
-			record(("%s church member %d to a pew from the door"):format(prefix, n), false, "no pew reserved")
-		else
-			settle(("%s church member to pew %s from the door"):format(prefix, shown(held.chair)),
-				planned(v), nil, held.approach, v)
-		end
-	end
-	local back = church_module.back_places(pulpit, "anyone")
-	if #back == 0 then table.insert(unexpected, prefix .. ": the church has no standing place at the back") end
-	for n = 1, math.min(#back, 6) do
-		local v = villager("standee" .. n, at(door))
-		cdef.do_custom(v, 0.1)
-		local place = v._villages_church and v._villages_church.place
-		if not place then
-			record(("%s church member %d to a standing place from the door"):format(prefix, n), false, "no standing place")
-		else
-			settle(("%s church member to standing place %s from the door"):format(prefix, shown(place)),
-				planned(v), nil, place, v)
-		end
-	end
-	-- And every place at the back from the door and, turn about, from one side
-	-- outdoors (the planner costs most of this suite's time).
-	for index, found in ipairs(back) do
-		local direction = DIRECTIONS[index % #DIRECTIONS + 1]
-		local starts = {{"door", at(door)}, {direction, outdoors(direction)}}
-		for _, from in ipairs(starts) do
-			local v = villager("walker", from[2])
-			local id = ("%s church back place %s from %s"):format(prefix, shown(found.cell), from[1])
-			if cdef.gopath(v, found.cell, nil, true) then
-				local cells, reason = planned(v)
-				if cells then record(id, check_route(world, cells, found.cell)) else record(id, false, reason) end
-			else
-				record(id, false, "gopath refused")
-			end
-		end
-	end
-
-	-- The cleric: from the door through the whole walk, then from every cell of
-	-- the floor, and from each side of the building.
-	local function cleric(pos)
-		local v = villager("cleric", pos, "cleric")
-		v._jobsite = {x = pulpit.x, y = pulpit.y, z = pulpit.z}
-		world.claim(pulpit, "cleric")
-		return v
-	end
-	local first = cleric(at(door))
-	cdef.do_custom(first, 0.1)
-	local state = first._villages_church
-	if not (state and state.floor_cells and first.current_target) then
-		return record(prefix .. " cleric walk from the door", false, "no route up onto the dais")
-	end
-	settle(prefix .. " cleric walk from the door", walking(first), nil, stand, first)
-	local there = first.object:get_pos()
-	record(prefix .. " cleric ends behind the pulpit", there.x == stand.x and there.z == stand.z
-		and there.y == stand.y - 0.49, cell_string(there))
-	local floor = {}
-	for k in pairs(state.floor_cells) do
-		local x, y, z = k:match("^(-?%d+),(-?%d+),(-?%d+)$")
-		table.insert(floor, {x = tonumber(x), y = tonumber(y), z = tonumber(z)})
-	end
-	table.sort(floor, function(a, b) if a.z ~= b.z then return a.z < b.z end return a.x < b.x end)
-	for _, cell in ipairs(floor) do
-		local v = cleric(at(cell))
-		cdef.do_custom(v, 0.1)
-		local id = ("%s cleric walk from the floor at %s"):format(prefix, shown(cell))
-		if v.state ~= "gowp" or not v.current_target then
-			record(id, false, "no walk")
-		else
-			settle(id, walking(v), nil, stand, v)
-		end
-	end
-	for _, direction in ipairs(DIRECTIONS) do
-		local v = cleric(outdoors(direction))
-		cdef.do_custom(v, 0.1)
-		local id = ("%s cleric walk to the dais front from %s"):format(prefix, direction)
-		local cells, reason = planned(v)
-		local front = v._villages_church and v._villages_church.floor
-		if not front then
-			record(id, false, "no dais front")
-		elseif not cells then
-			record(id, false, reason)
-		else
-			record(id, check_route(world, cells, front))
-		end
-	end
-end
-
 local function test_building(name, rotation, doors_open, roads, slope)
-	local fixture = dofile("tests/fixtures/buildings/" .. name .. ".lua")
-	local world = stock_world.new()
-	stock_world.install(world)
+	local built = scene.build(name, rotation, doors_open, roads, slope)
+	local world, size, prefix, beds, outdoors = built.world, built.size, built.prefix, built.beds, built.outdoors
 	local common = dofile("common.lua")
-	local furnish = {}
-	for module, file in pairs(FURNISHERS) do
-		local handle = io.open(file, "r")
-		if handle then
-			handle:close()
-			furnish[module] = dofile(file)
-		end
-	end
-	local size = world.place(fixture, ORIGIN, ORIGIN, furnish, rotation)
-	if doors_open then world.open_doors() end
-	if roads then
-		-- Village roads are grass path, a sixteenth lower than a full block: the
-		-- ground all round the building, as a generated village lays it (#156).
-		for x = ORIGIN - MARGIN - 4, ORIGIN + size.x + MARGIN + 4 do
-			for z = ORIGIN - MARGIN - 4, ORIGIN + size.z + MARGIN + 4 do
-				local inside = x >= ORIGIN and x < ORIGIN + size.x and z >= ORIGIN and z < ORIGIN + size.z
-				if not inside then world.set({x = x, y = world.ground_y, z = z}, "mcl_core:grass_path") end
-			end
-		end
-	end
-	-- The ground beyond two cells of the building a block higher (+1: the building
-	-- in a basin, the way in climbs a step) or lower (-1: on a plateau, the way
-	-- in drops one). Every approach from outdoors crosses it.
-	local rise = slope or 0
-	if rise ~= 0 then
-		for x = ORIGIN - MARGIN - 4, ORIGIN + size.x + MARGIN + 4 do
-			for z = ORIGIN - MARGIN - 4, ORIGIN + size.z + MARGIN + 4 do
-				local gap_x = math.max(ORIGIN - x, x - (ORIGIN + size.x - 1), 0)
-				local gap_z = math.max(ORIGIN - z, z - (ORIGIN + size.z - 1), 0)
-				if math.max(gap_x, gap_z) > 2 then
-					if rise > 0 then
-						world.set({x = x, y = world.ground_y + 1, z = z}, "mcl_core:dirt")
-					else
-						world.set({x = x, y = world.ground_y, z = z}, "air")
-					end
-				end
-			end
-		end
-	end
-	local prefix = ("%s r%d%s%s%s"):format(name, rotation * 90, doors_open and "o" or "", roads and " roads" or "",
-		rise > 0 and " slope up" or rise < 0 and " slope down" or "")
 
 	local def = {on_activate = function() end, do_custom = function() end, gopath = function() return false end}
 	dofile("navigation.lua")(def)
 	local seat_def = def
 
-	-- Outdoor beds, one beyond each side, for a route out to end at; a villager
-	-- stands two cells from each, as it would after walking up.
-	local mid_x, mid_z = ORIGIN + math.floor(size.x / 2), ORIGIN + math.floor(size.z / 2)
-	local beds = {
-		north = world.add_bed(mid_x, ORIGIN - MARGIN, rise),
-		south = world.add_bed(mid_x, ORIGIN + size.z + MARGIN, rise),
-		west = world.add_bed(ORIGIN - MARGIN - 1, mid_z, rise),
-		east = world.add_bed(ORIGIN + size.x + MARGIN, mid_z, rise),
-	}
-	local function outdoors(direction)
-		local bed = beds[direction]
-		return {x = bed.x, y = bed.y - 0.49, z = bed.z + 2}
-	end
 	local function nearest_bed(pos)
 		local best, best_distance
 		for _, direction in ipairs(DIRECTIONS) do
@@ -599,21 +236,7 @@ local function test_building(name, rotation, doors_open, roads, slope)
 			end
 			for held_key in pairs(seat.reservations) do seat.reservations[held_key] = nil end
 			if center.kind == "pulpit" then
-				-- Just inside the stock church's door: (1,2,6) in the fixture.
-				local door
-				for x = ORIGIN, ORIGIN + size.x - 1 do
-					for z = ORIGIN, ORIGIN + size.z - 1 do
-						local from = world.fixture_pos({x = x, y = 2, z = z})
-						if from and from.x == 1 and from.z == 6 then door = {x = x, y = 2, z = z} end
-					end
-				end
 				local stand = church_module.cleric_stand(center.pos, "cleric")
-				if door and stand then
-					church_service(world, prefix, center.pos, stand, door, outdoors, seat, church_module)
-					for held_key in pairs(seat.reservations) do seat.reservations[held_key] = nil end
-				else
-					table.insert(unexpected, prefix .. ": no door cell or cleric place to walk the service from")
-				end
 				if not stand then
 					record(prefix .. " cleric place", false, "no place to stand beside the pulpit")
 				else
@@ -765,14 +388,4 @@ for _, name in ipairs(BUILDINGS) do
 	end
 end
 
-for index, rule in ipairs(known) do
-	if not known_hits[index] and (not only or rule.match:find("^%^" .. only)) then
-		table.insert(unexpected, "known failure " .. rule.match .. " matched no case; remove it")
-	end
-end
-if #unexpected > 0 then
-	print(#unexpected .. " unexpected result(s):")
-	for _, line in ipairs(unexpected) do print("  " .. line) end
-	os.exit(1)
-end
-print(("stock buildings: %d routes passed, %d known failures"):format(passes, failures))
+recorder.finish("stock buildings", only)
