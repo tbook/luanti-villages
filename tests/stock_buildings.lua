@@ -2,7 +2,9 @@
 -- fixture in tests/fixtures/buildings/ is placed on flat ground with this mod's
 -- furnishing applied, at every rotation and with its doors shut and open. Then
 -- villagers are sent to every bed, jobsite and the tavern's jukebox from outside,
--- and from the rooms inside to the outdoors.
+-- to each dinner chair and church pew (the cell seat.lua has a guest stand at) and
+-- the cleric's place at the pulpit, and from the rooms inside to the outdoors.
+-- Slopes outside the building are not covered: the stub world is flat ground.
 -- The routes come from navigation.lua's real gopath with the engine's own
 -- pathfinder stubbed out, so this exercises the planner and the passability
 -- checks it uses. Whatever route comes back is then checked here, by rules that
@@ -180,8 +182,12 @@ local function route(world, def, start, target, field, route_field, timeofday)
 			set_velocity = function() end,
 		},
 	}
-	entity[field] = target
-	world.claim(target, "v1")
+	-- A trip with no field of its own (a guest to its seat, a cleric to its place)
+	-- is the generic destination walk.
+	if field then
+		entity[field] = target
+		world.claim(target, "v1")
+	end
 	local started = def.gopath(entity, target, nil, true)
 	-- Planning runs from the route queue's globalstep (#162).
 	for _ = 1, 100000 do
@@ -226,6 +232,7 @@ local function test_building(name, rotation, doors_open, roads)
 
 	local def = {on_activate = function() end, do_custom = function() end, gopath = function() return false end}
 	dofile("navigation.lua")(def)
+	local seat_def = def
 
 	-- Outdoor beds, one beyond each side, for a route out to end at; a villager
 	-- stands two cells from each, as it would after walking up.
@@ -342,6 +349,88 @@ local function test_building(name, rotation, doors_open, roads)
 			record(id, check_route(world, cells, bed))
 		else
 			record(id, false, reason)
+		end
+	end
+
+	-- To the seats and the pulpit's place, as the modules that send villagers there
+	-- choose them (#159). seat.lua picks a reachable chair by what is beside it,
+	-- and the cell to stand at to sit down from; the cleric stands where
+	-- church.lua's cleric_stand puts it. Both are walks to a cell, not to a node.
+	do
+		local seat = dofile("seat.lua")
+		local church_module = dofile("church.lua")
+		local original_find = minetest.find_nodes_in_area
+		minetest.find_nodes_in_area = function(minp, maxp, names)
+			local found = {}
+			for x = minp.x, maxp.x do for y = minp.y, maxp.y do for z = minp.z, maxp.z do
+				local pos = {x = x, y = y, z = z}
+				for _, name in ipairs(names) do
+					local group_name = name:match("^group:(.*)$")
+					local node_name = world.get(pos).name
+					if (group_name and minetest.get_item_group(node_name, group_name) > 0) or node_name == name then
+						table.insert(found, pos)
+						break
+					end
+				end
+			end end end
+			return found
+		end
+		local seat_counts = {}
+		local centers = {}
+		for _, target in ipairs(targets) do
+			if target.kind == "jukebox" then table.insert(centers, {pos = target.pos, kind = "table"}) end
+			if target.kind == "jobsite pulpit" then table.insert(centers, {pos = target.pos, kind = "pulpit"}) end
+		end
+		local ok_centers, problem = pcall(function() for _, center in ipairs(centers) do
+			-- Reserve until the chairs run out: each guest holds its own.
+			local guests = {}
+			for n = 1, 100 do
+				local guest = {_id = "guest" .. n, object = {get_pos = function() return outdoors("north") end}}
+				if not seat.reserve(guest, center.pos, center.kind) then break end
+				table.insert(guests, guest._villages_seat)
+			end
+			seat_counts[center.kind] = #guests
+			for _, held in ipairs(guests) do
+				for _, direction in ipairs(DIRECTIONS) do
+					local id = ("%s %s seat %s from %s"):format(prefix, center.kind == "pulpit" and "pew" or "dinner",
+						cell_string(world.fixture_pos(held.chair)), direction)
+					local cells, reason = route(world, seat_def, outdoors(direction), held.approach, nil,
+						"_villages_goto_route", TAVERN)
+					if cells then
+						record(id, check_route(world, cells, held.approach))
+					else
+						record(id, false, reason)
+					end
+				end
+			end
+			for held_key in pairs(seat.reservations) do seat.reservations[held_key] = nil end
+			if center.kind == "pulpit" then
+				local stand = church_module.cleric_stand(center.pos, "cleric")
+				if not stand then
+					record(prefix .. " cleric place", false, "no place to stand beside the pulpit")
+				else
+					for _, direction in ipairs(DIRECTIONS) do
+						local id = ("%s cleric place %s from %s"):format(prefix, cell_string(world.fixture_pos(stand)), direction)
+						local cells, reason = route(world, seat_def, outdoors(direction), stand, nil,
+							"_villages_goto_route", TAVERN)
+						if cells then
+							record(id, check_route(world, cells, stand))
+						else
+							record(id, false, reason)
+						end
+					end
+				end
+			end
+		end end)
+		minetest.find_nodes_in_area = original_find
+		if not ok_centers then error(problem, 0) end
+		-- The stock tavern has 6 dinner seats, the stock church 12 pews: fewer
+		-- means seats went unfound, and their routes were not tried.
+		local wanted = {tavern = {table = 6}, church = {pulpit = 12}}
+		for kind, count in pairs(wanted[name] or {}) do
+			if seat_counts[kind] ~= count then
+				table.insert(unexpected, ("%s: %s seats found %s, wanted %d"):format(prefix, kind, tostring(seat_counts[kind]), count))
+			end
 		end
 	end
 
