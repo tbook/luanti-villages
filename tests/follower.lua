@@ -270,4 +270,55 @@ v = descent(1, -1.49)
 v.tick()
 assert(v.current_target.pos.z == 1, "moves on once down")
 
+-- A hop down carries the villager on past the lower waypoint (it leaves the
+-- ledge at walking or running speed and falls with that speed still on it), and
+-- one that lands more than REACH beyond the centre used to turn round and walk
+-- back to it before going on down the stair (#186). On a stair of one-block drops
+-- nothing shortcuts the next waypoint, so every hop could turn it round. Having
+-- landed on the lower level beyond the waypoint, along the leg, counts as there.
+reset()
+for x = -5, 10 do
+	for z = -5, 10 do
+		nodes[key({x = x, y = -1, z = z})] = x <= 0 and "mcl_core:stone" or nil
+		nodes[key({x = x, y = -2, z = z})] = x == 1 and "mcl_core:stone" or nil
+		nodes[key({x = x, y = -3, z = z})] = x >= 2 and "mcl_core:stone" or nil
+	end
+end
+local function stair(x, y)
+	local d = villager(0, 0, {{x = 1, y = -1, z = 0}, {x = 2, y = -2, z = 0}})
+	follower.begin(d)
+	d.object.get_pos = function() return {x = x, y = y, z = 0} end
+	d.set_velocity = function() end
+	return d
+end
+-- Landed 0.45 past the waypoint at (1,-1,0), the next one lower still beyond it.
+v = stair(1.45, -1.49)
+v.tick()
+assert(v.current_target.pos.x == 2, "past the lower waypoint it goes on to the next, not back (at " .. v.current_target.pos.x .. ")")
+v.tick()
+assert(v.object.get_yaw() < 0, "and faces on down the stair, not back")
+-- Not yet past it: still heading for its centre.
+v = stair(0.55, -1.49)
+v.tick()
+assert(v.current_target.pos.x == 1, "short of the waypoint it goes on to it")
+-- Past it but still falling: it does not turn back for it either.
+v = stair(1.45, -1.0)
+v.vy = -4
+v.tick()
+assert(v.current_target.pos.x == 1, "still falling: not reached yet")
+assert(v.object.get_yaw() == 0, "falling past the waypoint it does not swing round to it")
+assert(v.object_velocity and v.object_velocity.x == 0, "and it drops straight down")
+-- Past it but held up (on the sliver of a ledge): it faces on and walks off.
+v = stair(1.45, -1.0)
+v.tick()
+assert(v.object.get_yaw() < 0, "held up past the waypoint it faces on, not back")
+-- The final cell is arrived on, so a villager landing past it walks back.
+v = villager(0, 0, {{x = 1, y = -1, z = 0}})
+follower.begin(v)
+v.object.get_pos = function() return {x = 1.45, y = -1.49, z = 0} end
+v.set_velocity = function() end
+v.tick()
+assert(v.state == "gowp" and not v.arrived, "the final cell is not reached from beyond it")
+assert(v.object.get_yaw() > 0, "it turns back to the final cell")
+
 print("follower tests passed")

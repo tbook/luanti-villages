@@ -31,6 +31,19 @@ local flat_path = planner.find_path({x = 0, y = 1, z = 0}, flat_can_stand,
 	{range = 8, heuristic = function(pos) return planner.heuristic(pos, {x = 2, y = 1, z = 0}) end})
 assert(flat_path and flat_path[2].y == 1)
 
+-- A stair of one-block drops (#186) is walked straight down: every waypoint is
+-- one lower and one further on, never a step back towards the cell it left.
+local function down_can_stand(pos)
+	return pos.x >= 0 and pos.x <= 5 and pos.y == 5 - pos.x + 1 and pos.z == 0
+end
+local down = planner.find_path({x = 0, y = 6, z = 0}, down_can_stand,
+	function(pos) return pos.x == 5 end,
+	{range = 8, heuristic = function(pos) return planner.heuristic(pos, {x = 5, y = 1, z = 0}) end})
+assert(down and #down == 6)
+for i = 2, #down do
+	assert(down[i].x == down[i - 1].x + 1 and down[i].y == down[i - 1].y - 1, "each step goes on down the stair")
+end
+
 local none, _, none_status = planner.find_path({x = 0, y = 1, z = 0}, can_stand,
 	function(pos) return pos.x == 9 end, {range = 8})
 assert(none == nil)

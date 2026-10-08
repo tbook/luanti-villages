@@ -31,6 +31,9 @@ local STALL_RISE = 0.7
 -- A shortcut keeps this far from a villager the route was planned around: both
 -- half-widths and a margin.
 local AVOID_CLEARANCE = 1.0
+-- A hop down carries the villager on past the lower waypoint; having landed
+-- this near it and beyond it, along the leg, it is there (#186).
+local OVERSHOOT_REACH = 0.8
 -- Farther than this from the waypoint it is heading for, a villager has been
 -- pushed off its route (or loaded away from it).
 local OFF_ROUTE = 2.5
@@ -228,6 +231,11 @@ local function landed(pos, waypoint)
 	return pos.y <= waypoint.y - 1 + cells.collision_box_top(def) + 0.01 + LANDED
 end
 
+-- Whether (x, z) is beyond the waypoint along the leg that led to it.
+local function past_waypoint(f, pos, waypoint)
+	return (pos.x - waypoint.x) * (waypoint.x - f.leg_start.x) + (pos.z - waypoint.z) * (waypoint.z - f.leg_start.z) > 0
+end
+
 local function follow(self, dtime)
 	local f = self._villages_follow
 	local pos = self.object:get_pos()
@@ -261,7 +269,13 @@ local function follow(self, dtime)
 	-- than the waypoint until the villager is down the stair, and turning early
 	-- runs its head into the floor over the lower cells (#173).
 	local descending = f.from_y and current.pos.y < f.from_y
-	local reached = distance < REACH and feet == current.pos.y and (not descending or landed(pos, current.pos))
+	-- It leaves the ledge with its walking speed still on it and lands past the
+	-- waypoint; turning back for the centre, with the next drop ahead, was the
+	-- hop-turn-walk-back of #186. The final cell is still arrived on.
+	local after = self.waypoints and self.waypoints[1]
+	local overshot = descending and after and distance < OVERSHOOT_REACH and past_waypoint(f, pos, current.pos)
+	if overshot then dx, dz = after.pos.x - pos.x, after.pos.z - pos.z end
+	local reached = (distance < REACH or overshot) and feet == current.pos.y and (not descending or landed(pos, current.pos))
 	if reached then
 		if not self.waypoints or #self.waypoints == 0 then return arrive(self) end
 		-- A door is its own step: stop, work it, then cross.
@@ -289,6 +303,18 @@ local function follow(self, dtime)
 			elseif f.still > STALL_SECONDS then
 				return give_up(self, "no progress along the route")
 			end
+		end
+	end
+
+	if descending and distance < OVERSHOOT_REACH then
+		local v = self.object:get_velocity()
+		if v and v.y < -0.1 then
+			-- Falling into the waypoint's cell: drop straight down, facing on,
+			-- instead of carrying on past it with the walking speed still on, or
+			-- swinging round to its centre.
+			self:set_velocity(0)
+			self.object:set_velocity({x = 0, y = v.y, z = 0})
+			return
 		end
 	end
 
