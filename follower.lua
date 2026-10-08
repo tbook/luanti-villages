@@ -381,6 +381,17 @@ function follower.install(def)
 		if self._villages_follow then return follow(self, dtime) end
 		return original(self, dtime)
 	end
+	-- A followed walk jumps its own rises (rise_step). Vanilla's do_jump runs after
+	-- it on every step and hops straight up whenever a solid node is within about
+	-- 1.3 nodes ahead, from a standstill, that is while the villager stops to turn
+	-- at the foot of a rise or is held there. The hops carry it nowhere, and
+	-- rise_step's own jump starts only within RISE_REACH of the step, so a
+	-- villager just outside that hopped in place until the walk gave up (#194).
+	local original_jump = def.do_jump or mcl_mobs.mob_class.do_jump
+	def.do_jump = function(self, ...)
+		if self._villages_follow then return false end
+		if original_jump then return original_jump(self, ...) end
+	end
 end
 
 follower.follow = follow
