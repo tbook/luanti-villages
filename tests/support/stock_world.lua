@@ -127,10 +127,11 @@ function stock_world.new()
 	end
 
 	-- An outdoor bed on open ground, for a route out of a building to end at.
-	function world.add_bed(x, z)
-		world.set({x = x, y = GROUND_Y + 1, z = z}, "mcl_beds:bed_red_bottom")
-		world.set({x = x + 1, y = GROUND_Y + 1, z = z}, "mcl_beds:bed_red_top")
-		return {x = x, y = GROUND_Y + 1, z = z}
+	function world.add_bed(x, z, rise)
+		local y = GROUND_Y + 1 + (rise or 0)
+		world.set({x = x, y = y, z = z}, "mcl_beds:bed_red_bottom")
+		world.set({x = x + 1, y = y, z = z}, "mcl_beds:bed_red_top")
+		return {x = x, y = y, z = z}
 	end
 
 	-- Open floor in the engine's own terms: air at the feet and the head over a
