@@ -21,6 +21,10 @@ minetest = {
 	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
 	get_objects_inside_radius = function() return objects_near end,
 	get_us_time = function() return clock end,
+	log = function() end,
+	get_day_count = function() return 3 end,
+	get_timeofday = function() return 0.5 end,
+	pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 	after = function(_, callback, ...) table.insert(pending, {callback, ...}) end,
 }
 
@@ -156,6 +160,7 @@ follower.begin(v)
 v.set_velocity = function() end
 run(v, 6)
 assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "stall")
+assert(v._villages_last_walk_failure.reason == "no progress along the route" and v._villages_last_walk_failure.day == 3, "failure kept for the diagnostic")
 
 -- Another villager in the way is waited for, then planned around.
 v = villager(0, 0, {cell(0, 0), cell(4, 0)})
