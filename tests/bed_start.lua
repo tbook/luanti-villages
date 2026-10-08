@@ -11,9 +11,10 @@ local BED_TOP = 0.0625
 
 -- Plans a route to the outdoor bed from a villager standing on the bed at `bed`
 -- and returns the positions the villager was set at.
-local function leave(name, rotation, doors_open)
+local function leave(name, rotation, doors_open, offset, mutate)
 	local built = scene.build(name, rotation, doors_open)
 	local world, size = built.world, built.size
+	if mutate then mutate(built.world) end
 	local def = {on_activate = function() end, do_custom = function() end, gopath = function() return false end}
 	dofile("navigation.lua")(def)
 	local results = {}
@@ -23,7 +24,7 @@ local function leave(name, rotation, doors_open)
 				local pos = {x = x, y = y, z = z}
 				for _, half in ipairs({"bottom", "top"}) do
 					if world.get(pos).name == "mcl_beds:bed_red_" .. half then
-						local at = {x = x, y = y + BED_TOP + 0.01, z = z}
+						local at = {x = x + (offset or 0), y = y + BED_TOP + 0.01, z = z}
 						local placed = {}
 						local entity = {
 							_id = "v1", state = "stand",
@@ -81,5 +82,39 @@ for rotation = 0, 3 do
 		assert(#r.placed == 0, "a villager that fits on its bed is not moved")
 	end
 end
+
+-- At the edge of the bed top rather than its centre, shut doors included.
+for rotation = 0, 3 do
+	for _, offset in ipairs({-0.25, 0.25}) do
+		for _, r in ipairs(leave("large_house", rotation, false, offset)) do
+			if r.bed.y <= 3 then
+				assert(#r.placed == 1, ("large house r%d offset %.2f: villager at the bed's edge must be set down")
+					:format(rotation * 90, offset))
+			end
+		end
+	end
+end
+
+-- Only a diagonal cell is open, across a corner: the villager is not carried
+-- through the wall corner but left where it is.
+local function wall_in(world)
+	for x = 37, 38 do
+		for z = 37, 38 do
+			if not (x == 37 and z == 37) and world.get({x = x, y = 2, z = z}).name:find("carpet") then
+				world.set({x = x, y = 2, z = z}, "mcl_core:cobble")
+			end
+		end
+	end
+end
+local walled = leave("large_house", 0, true, 0, wall_in)
+local cramped = 0
+for _, r in ipairs(walled) do
+	if r.bed.y <= 3 and r.half == "bottom" then
+		cramped = cramped + 1
+		assert(#r.placed == 0, "a villager is not set down through a wall corner")
+		assert(r.entity.current_target, "a route from the diagonal cell exists, so the guard is what refused")
+	end
+end
+assert(cramped == 1, "the walled-in bed was tested")
 
 print("bed start tests passed")

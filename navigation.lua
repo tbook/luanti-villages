@@ -537,6 +537,19 @@ local function on_cramped_bed(pos)
 	return node ~= nil and core.get_item_group(node.name, "bed") > 0 and not cells.has_head_room(pos)
 end
 
+-- Whether a villager on the bed at `pos` may be set down on the walk cell
+-- `cell`: next to it, at most a step away, and not through a wall corner.
+local function can_set_down(pos, cell)
+	local bed = {x = math.floor(pos.x + 0.5), y = common.feet_node(pos), z = math.floor(pos.z + 0.5)}
+	local dx, dz = cell.x - bed.x, cell.z - bed.z
+	if math.abs(dx) > 1 or math.abs(dz) > 1 or math.abs(cell.y - bed.y) > 1 then return false end
+	if not cells.can_move(bed, cell) then return false end
+	if dx ~= 0 and dz ~= 0 then
+		return cells.can_stand({x = bed.x + dx, y = cell.y, z = bed.z}) and cells.can_stand({x = bed.x, y = cell.y, z = bed.z + dz})
+	end
+	return true
+end
+
 -- Sets the villager walking the planner's `path`: waypoints, door actions, and
 -- the follower (follower.lua) in state gowp.
 local function start_route(self, target, path, arrived, route_field, route_id)
@@ -568,10 +581,15 @@ local function start_route(self, target, path, arrived, route_field, route_id)
 	-- lay) cannot walk: its head is in the ceiling. Set it down on the cell the
 	-- planner started from, as waking does (#191).
 	if pos and self.object.set_pos and on_cramped_bed(pos) then
-		pos = cells.standing_position(path[1])
-		core.log("action", string.format("[living_villages] villager %s stood on a bed it cannot walk from; set down at %s",
-			tostring(self._id), core.pos_to_string(pos, 1)))
-		self.object:set_pos(pos)
+		if can_set_down(pos, path[1]) then
+			pos = cells.standing_position(path[1])
+			core.log("action", string.format("[living_villages] villager %s stood on a bed it cannot walk from; set down at %s",
+				tostring(self._id), core.pos_to_string(pos, 1)))
+			self.object:set_pos(pos)
+		else
+			core.log("action", string.format("[living_villages] villager %s stands on a bed it cannot walk from and has no safe cell beside it",
+				tostring(self._id)))
+		end
 	end
 	local current = table.remove(waypoints, 1)
 	while current and pos and vector.distance(pos, current.pos) < 0.5 do
