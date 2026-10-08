@@ -51,6 +51,7 @@ their jobsite lose it, so vanilla demotes them.
 | `docs/navigation-scenarios.md` | Manual in-game test scenarios |
 | `docs/village-test-seeds.md` | Test seeds for the village terrain work (#133): seed, chunk, what each exercises, and the vanilla baseline numbers |
 | `tools/extract_schematics/` | Regenerates `tests/fixtures/buildings/` (the stock schematics and the definitions of the nodes in them) from the installed VoxeLibre in a headless server. Rerun it when the supported VoxeLibre version changes. Not loaded by the mod |
+| `tools/lv_trips/` | Headless trip probe (#160): clones a real world and records whether villagers' trips arrive. `run.sh` measures the checkout it is in (or `--mod-dir`), so run it from a worktree for a PR's before/after numbers; `compare.sh` diffs two runs. `tools/probe_common.sh` (shared with `lv_probe`) finds the user directory, stages the mod, claims a free port. Not loaded by the mod. See its README |
 | `tools/lv_probe/` | Headless village probe: generates a seed's villages on a throwaway world and measures them. Not loaded by the mod. See its README |
 
 ## Testing

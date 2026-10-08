@@ -34,6 +34,8 @@ local placed_structures = {}
 local rejected_reason
 
 local function log(message) core.log("action", "[lv_probe] " .. message) end
+-- Which checkout of the mod this run measures (run.sh --mod-dir); nil without --with-mod.
+log("living_villages loaded from " .. tostring(core.get_modpath("living_villages")))
 
 -- Which nodes the ground scan skips or counts. Ids are cached on first sight.
 local kinds = {}

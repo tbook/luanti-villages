@@ -21,8 +21,11 @@ tools/lv_probe/report.sh                 # table of everything in results/
 tools/lv_probe/yield.sh results/*.jsonl  # what became of the sites that were tried
 ```
 
-`--with-mod` loads `living_villages` and the mods it depends on from the user mods directory, so
-it measures whatever branch is checked out. Without it the run is vanilla VoxeLibre.
+`--with-mod` loads `living_villages` from the checkout the script is in (copied into the throwaway
+world, so a worktree measures itself; `--mod-dir PATH` picks another and implies `--with-mod`) and
+the mods it depends on from the user mods directory. Without it the run is vanilla VoxeLibre. Each
+run claims a free port and uses a scratch directory per checkout, so runs from several worktrees
+and a running game do not collide.
 
 For a before-and-after, run `run_cases.sh` on `main` and on the branch (or without and with
 `--with-mod`) and compare the two tables. The cases are in `cases.txt`; add one there and in
