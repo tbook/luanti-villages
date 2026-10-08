@@ -31,10 +31,9 @@ local UNREACHABLE_SECONDS = 200
 -- The cleric's extra time for the dais: the walk to its edge, the step up, and
 -- along to the pulpit.
 local CLIMB_SECONDS = 30
--- Close enough to a standing place to be there. gopath counts carpet as solid,
--- so for a carpeted place it aims at the node above, and check_gowp ends the
--- walk anywhere within 1.8 nodes of that (mcl_mobs/pathfinding.lua): up to a
--- node short on the place's own level.
+-- Close enough to a standing place to be there. The follower arrives on the
+-- final cell, so this is only slack (a villager nudged off its place is still
+-- there); it dates from check_gowp's 1.8-node arrival.
 local AT_PLACE = 1.5
 local LEG_REACH = 1.1
 -- How far along the dais from the cleric's place to look for a way up.
@@ -172,8 +171,10 @@ local function stop_walking(self)
 		self._target, self.current_target, self.waypoints, self.callback_arrived = nil, nil, nil, nil
 		self.object:set_velocity(vector.zero())
 	end
-	-- A walk the follower was walking ends with it, or the next route is its too.
+	-- A walk the follower was walking ends with it, and so does its give-up
+	-- reason, which navigation.lua would take for one of its own routes'.
 	self._villages_follow = nil
+	self._villages_follow_failed = nil
 end
 
 local function skip(self, pulpit, why)
@@ -480,12 +481,10 @@ local function conduct(self, pulpit)
 	end
 	local pos = self.object:get_pos()
 	if not pos then return end
-	if standing_on_level(self, pos, cell) then
-		-- There: the follower arrives on the cell itself.
-		if near(pos, cell, 0.3) then
-			church.failures = nil
-			return hold_still(self, dir.x, dir.z)
-		end
+	-- There: the follower arrives on the cell itself.
+	if standing_on_level(self, pos, cell) and near(pos, cell, 0.3) then
+		church.failures = nil
+		return hold_still(self, dir.x, dir.z)
 	end
 	local walking = walk_inside(self, church, pos)
 	if walking == false then return leave(self) end

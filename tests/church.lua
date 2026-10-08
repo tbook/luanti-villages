@@ -457,6 +457,36 @@ assert(vector.equals(previous, behind_cell), "ends behind the pulpit")
 def.do_custom(walker, 0.1)
 assert(walker.order == "stand" and walker.object:get_pos().x == 9, "and holds there")
 
+-- A walk the follower gives up (no progress, a villager in the way) is built
+-- again on the next tick, and its reason does not outlive the walk: leaving the
+-- church clears it, so navigation.lua never reads it for another route.
+local function stalled(v)
+	for _ = 1, 5 do follower.follow(v, 1) end
+end
+local stuck = cleric_named("stuck", at(start))
+def.do_custom(stuck, 0.1)
+stalled(stuck)
+assert(stuck.state == "stand" and not stuck._villages_follow and stuck._villages_follow_failed
+	and stuck._villages_follow_failed.reason == "no progress along the route", "stall ends the walk")
+def.do_custom(stuck, 0.1)
+assert(stuck.state == "gowp" and stuck._villages_follow and not stuck._villages_follow_failed, "built again")
+local blocker = villager("blocker", at({x = 2, y = 2, z = 6}))
+blocker.is_mob = true
+local was_near = minetest.get_objects_inside_radius
+minetest.get_objects_inside_radius = function() return {blocker.object} end
+blocker.object.get_luaentity = function() return blocker end
+blocker.object.is_player = function() return false end
+stuck.object.get_yaw = function() return -math.pi / 2 end
+stalled(stuck)
+minetest.get_objects_inside_radius = was_near
+assert(stuck._villages_follow_failed and stuck._villages_follow_failed.reason == "blocked by another villager",
+	"a villager in the way ends the walk")
+time = 12000 / 24000
+def.do_custom(stuck, 0.1)
+assert(not stuck._villages_church and not stuck._villages_follow_failed and not stuck._villages_follow,
+	"leaving the church clears the follower's state")
+time = 8000 / 24000
+
 -- At the foot of the dais, the follower jumps the carpeted step itself (the step
 -- vanilla's do_jump refuses, #126) with forward speed.
 local jumper = cleric_named("jumper", at(floor_leg))
@@ -464,8 +494,12 @@ jumper.jump, jumper.jump_height = true, 6
 def.do_custom(jumper, 0.1)
 local jump_route = route(jumper)
 assert(vector.equals(jump_route[1], edge) or vector.equals(jump_route[1], floor_leg), "starts at the foot")
-if vector.equals(jumper.current_target.pos, floor_leg) then follower.follow(jumper, 0.1) end
 jumper.object.get_yaw = function() return -math.pi / 2 end
+for _ = 1, 3 do
+	if vector.equals(jumper.current_target.pos, edge) then break end
+	jumper.object:set_pos(at(jumper.current_target.pos))
+	follower.follow(jumper, 0.1)
+end
 jumper.object:set_pos(at(floor_leg))
 assert(vector.equals(jumper.current_target.pos, edge), "heading up the step")
 follower.follow(jumper, 0.1)
