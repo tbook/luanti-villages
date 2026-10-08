@@ -42,6 +42,7 @@ minetest = {
 		["mcl_decor:chair_wooden"] = {walkable = true, collision_box = {type = "fixed", fixed = {-0.25, -0.5, -0.25, 0.25, 0.5, 0.25}}},
 	},
 	log = function() end,
+	pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
 	get_us_time = function() return now * 1e6 end,
 	get_objects_inside_radius = function() return {} end,
 	after = function() end,
