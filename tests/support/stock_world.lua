@@ -176,6 +176,11 @@ function stock_world.install(world)
 		find_nodes_in_area = function() return {} end,
 		get_objects_inside_radius = function() return {} end,
 		hash_node_position = key,
+		-- The vector out of the back of a node: +z, +x, -z, -x for facedir 0..3.
+		facedir_to_dir = function(facedir)
+			local dirs = {{x = 0, y = 0, z = 1}, {x = 1, y = 0, z = 0}, {x = 0, y = 0, z = -1}, {x = -1, y = 0, z = 0}}
+			return dirs[facedir % 4 + 1]
+		end,
 		register_globalstep = function(step) table.insert(world.globalsteps, step) end,
 		log = function(_, message) table.insert(world.logged, message) end,
 		pos_to_string = function(pos) return "(" .. pos.x .. "," .. pos.y .. "," .. pos.z .. ")" end,
@@ -185,6 +190,7 @@ function stock_world.install(world)
 		new = function(pos) return {x = pos.x, y = pos.y, z = pos.z} end,
 		zero = function() return {x = 0, y = 0, z = 0} end,
 		round = function(pos) return {x = round(pos.x), y = round(pos.y), z = round(pos.z)} end,
+		equals = function(a, b) return a.x == b.x and a.y == b.y and a.z == b.z end,
 		distance = function(a, b)
 			local x, y, z = a.x - b.x, a.y - b.y, a.z - b.z
 			return math.sqrt(x * x + y * y + z * z)
