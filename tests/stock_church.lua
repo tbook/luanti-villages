@@ -242,4 +242,53 @@ for rotation = 0, 1 do
 	test_church(rotation, false, false, 1)
 	test_church(rotation, false, false, -1)
 end
+
+-- back_places must find the standing places inside whatever the roof's height, and
+-- never outdoors under foliage (#189). Built on the slope-up variant, where the
+-- ground outside the back wall is as high as the floor.
+local function test_roofs()
+	local function build()
+		local built = scene.build("church", 0, false, false, 1)
+		local world, size = built.world, built.size
+		local pulpit
+		for x = ORIGIN, ORIGIN + size.x - 1 do for y = 1, size.y - 1 do for z = ORIGIN, ORIGIN + size.z - 1 do
+			if world.get({x = x, y = y, z = z}).name == "living_villages:pulpit" then pulpit = {x = x, y = y, z = z} end
+		end end end
+		return world, size, pulpit, dofile("church.lua")
+	end
+	local function places(world, pulpit, church_module)
+		local found = church_module.back_places(pulpit, "anyone")
+		for _, place in ipairs(found) do
+			if not world.fixture_pos(place.cell) then
+				table.insert(unexpected, "roofs: standing place " .. cell_string(place.cell) .. " is outdoors")
+			end
+		end
+		return found
+	end
+	local world, size, pulpit, church_module = build()
+	local normal = #places(world, pulpit, church_module)
+	if normal == 0 then table.insert(unexpected, "roofs: the stock church has no standing place") end
+	-- A taller church: the whole roof one flat slab 18 above the pulpit.
+	world, size, pulpit, church_module = build()
+	for x = ORIGIN, ORIGIN + size.x - 1 do for z = ORIGIN, ORIGIN + size.z - 1 do
+		for y = pulpit.y + 3, pulpit.y + 30 do world.set({x = x, y = y, z = z}, "air") end
+		world.set({x = x, y = pulpit.y + 18, z = z}, "mcl_core:stone")
+	end end
+	local tall = #places(world, pulpit, church_module)
+	if tall ~= normal then
+		table.insert(unexpected, ("roofs: %d standing places under a tall roof, %d under the stock one"):format(tall, normal))
+	end
+	-- Leaves over the raised ground outside, within reach: not a roof.
+	world, size, pulpit, church_module = build()
+	minetest.registered_nodes["mcl_core:leaves"] = {groups = {leaves = 1}, walkable = true, drawtype = "allfaces_optional", liquidtype = "none"}
+	for x = ORIGIN - 12, ORIGIN + size.x + 12 do for z = ORIGIN - 12, ORIGIN + size.z + 12 do
+		local inside = x >= ORIGIN and x < ORIGIN + size.x and z >= ORIGIN and z < ORIGIN + size.z
+		if not inside then world.set({x = x, y = pulpit.y + 5, z = z}, "mcl_core:leaves") end
+	end end
+	local shaded = #places(world, pulpit, church_module)
+	if shaded ~= normal then
+		table.insert(unexpected, ("roofs: %d standing places with a canopy outside, %d without"):format(shaded, normal))
+	end
+end
+test_roofs()
 recorder.finish("stock church")

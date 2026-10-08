@@ -46,8 +46,9 @@ local INSIDE = 9
 local BACK_MIN = 3
 local BACK_MAX = 5
 local BACK_REACH = 8
--- How far above a standing place to look for the roof.
-local ROOF_REACH = 12
+-- How far above a standing place to look for the roof: well past the stock
+-- nave's 11, for a taller church. Open ground scans all of it, a read a node.
+local ROOF_REACH = 32
 local FIELDS = {"_villages_church", "_villages_church_skipped", "_villages_church_checked"}
 
 local standing = {}
@@ -110,13 +111,22 @@ local function beside_chair(cell)
 	return false
 end
 
--- Whether something is overhead within ROOF_REACH: inside a building, not in
+-- Whether a roof is overhead: a loaded, solid node within ROOF_REACH above the
+-- cell that is not foliage, a tree trunk or a door. Inside a building, not in
 -- the open, which ground raised to floor height outside the back wall would
--- otherwise pass for (#189). Any ceiling or roof counts, so this holds for a
--- church of any plan, unlike a flood of the floor, which leaks out of the door.
+-- otherwise pass for (#189). Any solid ceiling, stair, slab or glass counts, so
+-- a church of any plan whose roof is within ROOF_REACH of its floor qualifies;
+-- a flood of the floor would leak out of the doorway instead. An unloaded node
+-- is no roof. A balcony or a neighbouring building's overhang still counts.
 local function roofed(cell)
 	for h = 2, ROOF_REACH do
-		if not common.is_clear_node({x = cell.x, y = cell.y + h, z = cell.z}) then return true end
+		local above = {x = cell.x, y = cell.y + h, z = cell.z}
+		local node = core.get_node_or_nil(above)
+		local def = node and core.registered_nodes[node.name]
+		if def and def.walkable and core.get_item_group(node.name, "leaves") == 0
+			and core.get_item_group(node.name, "tree") == 0 and core.get_item_group(node.name, "door") == 0 then
+			return true
+		end
 	end
 	return false
 end
