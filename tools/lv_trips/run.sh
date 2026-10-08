@@ -5,7 +5,7 @@
 #
 #   tools/lv_trips/run.sh WORLD X,Y,Z LABEL [--mode trials|day] [--rounds N]
 #                         [--stages home,work,...] [--radius R] [--speed S]
-#                         [--mod-dir PATH]
+#                         [--mod-dir PATH] [--spot SX,SY,SZ:BX,BY,BZ]
 #
 # WORLD is a directory name under the user's worlds directory, X,Y,Z a point in
 # the village (a villager's position will do) and LABEL names the run and its
@@ -38,6 +38,7 @@ rounds=3
 stages=
 radius=64
 speed=72
+spot=
 mod_dir=$repo_root
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -46,6 +47,7 @@ while [ $# -gt 0 ]; do
 		--stages) stages=$2; shift 2 ;;
 		--radius) radius=$2; shift 2 ;;
 		--speed) speed=$2; shift 2 ;;
+		--spot) spot=$(printf %s "$2" | tr ':' ';'); mode=spot; shift 2 ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
@@ -96,6 +98,7 @@ lv_trips_rounds = $rounds
 lv_trips_stages = $stages
 lv_trips_speed = $speed
 lv_trips_label = $label
+lv_trips_spot = $spot
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
