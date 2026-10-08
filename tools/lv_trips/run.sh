@@ -44,6 +44,8 @@ goto=
 build=
 mode_given=
 mod_dir=$repo_root
+# A number: optional sign, digits, optional single decimal part.
+num='-?[0-9]+(\.[0-9]+)?'
 while [ $# -gt 0 ]; do
 	case $1 in
 		--mode) mode=$2; mode_given=1; shift 2 ;;
@@ -52,16 +54,13 @@ while [ $# -gt 0 ]; do
 		--radius) radius=$2; shift 2 ;;
 		--speed) speed=$2; shift 2 ;;
 		--spot)
-			case $2 in
-				*[!0-9.,:-]* | '') echo "--spot wants SX,SY,SZ:BX,BY,BZ (numbers), not '$2'" >&2; exit 2 ;;
-			esac
-			if ! printf %s "$2" | grep -Eq '^-?[0-9.]+(,-?[0-9.]+){2}:-?[0-9.]+(,-?[0-9.]+){2}$'; then
-				echo "--spot wants SX,SY,SZ:BX,BY,BZ, not '$2'" >&2; exit 2
+			if ! printf %s "$2" | grep -Eq "^$num(,$num){2}:$num(,$num){2}\$"; then
+				echo "--spot wants SX,SY,SZ:BX,BY,BZ (numbers), not '$2'" >&2; exit 2
 			fi
 			spot=$(printf %s "$2" | tr ':' ';'); shift 2 ;;
 		--goto)
-			if ! printf %s "$2" | grep -Eq '^-?[0-9.]+(,-?[0-9.]+){2}$'; then
-				echo "--goto wants GX,GY,GZ, not '$2'" >&2; exit 2
+			if ! printf %s "$2" | grep -Eq "^$num(,$num){2}\$"; then
+				echo "--goto wants GX,GY,GZ (numbers), not '$2'" >&2; exit 2
 			fi
 			goto=$(printf %s "$2" | tr ',' ';'); shift 2 ;;
 		--build) build=$2; shift 2 ;;
@@ -70,6 +69,10 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
+if [ -z "$spot" ]; then
+	if [ -n "$goto" ] || [ -n "$build" ]; then echo "--goto and --build need --spot" >&2; exit 2; fi
+fi
+if [ -n "$build" ] && [ ! -f "$build" ]; then echo "--build file '$build' does not exist" >&2; exit 2; fi
 if [ -n "$spot" ]; then
 	if [ -n "$mode_given" ]; then echo "--spot is its own mode; drop --mode" >&2; exit 2; fi
 	mode=spot

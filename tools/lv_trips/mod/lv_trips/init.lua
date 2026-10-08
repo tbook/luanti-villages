@@ -541,12 +541,8 @@ local function run_spot(list)
 	end
 	if not owner then error("no villager owns the bed at " .. core.pos_to_string(bed)) end
 	-- The stage is the first of lv_trips_stages that names one (home by default).
-	local stage = STAGES[1]
-	for name in setting("stages", ""):gmatch("[^,]+") do
-		for _, candidate in ipairs(STAGES) do
-			if candidate.name == name and stage == STAGES[1] then stage = candidate end
-		end
-	end
+	local stage, problem = dofile(modpath .. "/stages.lua")(setting("stages", ""), STAGES)
+	if not stage then error("lv_trips_stages: " .. problem) end
 	holiday = stage.holiday and true or false
 	silence_engine = false
 	round_info = {stage = stage, variant = "A", round = 1, village = LABEL}
@@ -566,7 +562,16 @@ local function run_spot(list)
 	local gx, gy, gz = setting("goto", ""):match("^(-?[%d.]+);(-?[%d.]+);(-?[%d.]+)$")
 	if gx then
 		wait(1)
-		owner:gopath({x = tonumber(gx), y = tonumber(gy), z = tonumber(gz)}, nil, true)
+		local goal = {x = tonumber(gx), y = tonumber(gy), z = tonumber(gz)}
+		local started = owner:gopath(goal, nil, true)
+		-- The schedule can have a trip of its own under way (a bed trip at the home hour):
+		-- say so when the walk is not to the goal.
+		wait(1)
+		local final = owner._villages_follow and owner._villages_follow.final
+		if not final or vector.distance(final, goal) > 3 then
+			core.log("warning", string.format("[lv_trips] --goto %s is not being walked (gopath returned %s, walking to %s)",
+				core.pos_to_string(goal), tostring(started), final and core.pos_to_string(final) or "nowhere"))
+		end
 	end
 	local began = elapsed_real
 	local last_logged = -1

@@ -1,4 +1,7 @@
--- Test staircases on a floating flat floor (ground node y=39, feet cell y=40).
+-- Test staircases on a floating flat floor (ground node y=39, feet cell y=40), for
+-- `run.sh ... --build tools/lv_trips/builds/stairs.lua --spot ... --goto ...` (#64).
+-- The coordinates are Testlandia's (origin X=-2630, Z=240; run with the village point
+-- -2625,30,250 so the area is loaded); change X and Z0 for another world.
 local core = minetest
 local X, Z0 = -2630, 240
 local function set(x, y, z, name, p2) core.set_node({x = x, y = y, z = z}, {name = name, param2 = p2 or 0}) end
