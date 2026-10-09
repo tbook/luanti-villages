@@ -183,6 +183,21 @@ local function test_building(name, rotation, doors_open, roads, slope)
 		end
 	end
 
+	-- The raised belltower (#150) has no bed or jobsite, so the exits from its
+	-- floor are its only routes: none means the furnisher (belltower_schematic.lua)
+	-- is gone and the interior is a pit with no floor to stand on at y 1.
+	if name == "belltower" then
+		if #starts == 0 then
+			table.insert(unexpected, prefix .. ": no floor to stand on inside the belltower")
+		end
+		for _, pos in ipairs(starts) do world.set({x = pos.x, y = pos.y - 1, z = pos.z}, "air") end
+		for _, pos in ipairs(starts) do
+			if world.is_plain_floor(pos) then
+				table.insert(unexpected, prefix .. ": floor turned to air still counts as floor at " .. cell_string(pos))
+			end
+		end
+	end
+
 	-- To the seats and the pulpit's place, as the modules that send villagers there
 	-- choose them (#159). seat.lua picks a reachable chair by what is beside it,
 	-- and the cell to stand at to sit down from; the cleric stands where

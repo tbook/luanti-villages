@@ -552,6 +552,7 @@ end)
 
 dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_schematic.lua")
+dofile(core.get_modpath("living_villages") .. "/belltower_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_site.lua")
 dofile(core.get_modpath("living_villages") .. "/library_schematic.lua")
 -- Load order: after every module that edits a building's schematic (the ones above
