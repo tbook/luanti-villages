@@ -187,6 +187,16 @@ function M.plan(maxp, minp, pr, env, config)
 				surface, material = {y = top_y}, top_name
 			end
 			s = surface and {y = surface.y, material = material} or {reason = "no_surface"}
+			-- A slab floating over air is no ground to build on: smoothing leaves it
+			-- (#209) and a building would stand on a 20-block column of fill.
+			if s.y and terrain.is_overhang(s.y, function(fy)
+				local name = env.get_node({x = x, y = fy, z = z}).name
+				local def = env.registered_nodes[name]
+				if name == "air" then return "air" end
+				if def and (def.walkable or (def.liquidtype or "none") ~= "none") then return "solid" end
+			end, s.y - config.water_scan) then
+				s = {reason = "overhang"}
+			end
 		end
 		samples[key] = s
 		return s

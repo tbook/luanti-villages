@@ -271,6 +271,30 @@ end
 failed, reason = plan(world(function() return nil end))
 assert(failed == false and reason:find("belltower", 1, true) and reason:find("no_surface", 1, true))
 
+-- A floating slab (30..31 over air over ground at 10) is no site (#209); with the slab
+-- only where x > 20 the village is planned on the real ground and avoids it.
+local slab = world(function(x, z) return (x > 20) and 31 or 10 end)
+local slab_get = slab.get_node
+slab.get_node = function(pos)
+	if pos.x > 20 and pos.y >= 12 and pos.y <= 29 then return {name = "air"} end
+	if pos.x > 20 and pos.y >= 30 and pos.y <= 31 then return {name = "mcl_core:dirt_with_grass"} end
+	if pos.x > 20 and pos.y <= 10 then return {name = "mcl_core:dirt_with_grass"} end
+	return slab_get(pos)
+end
+planned = assert(plan(slab, 3))
+for _, entry in ipairs(planned) do
+	local _, _, x1 = box(entry, slab)
+	assert(x1 <= 20 and entry.pos.y == 10, "no building on the slab: " .. entry.name)
+end
+local allslab = world(function() return 31 end)
+allslab.get_node = function(pos)
+	if pos.y >= 30 and pos.y <= 31 then return {name = "mcl_core:dirt_with_grass"} end
+	if pos.y <= 10 then return {name = "mcl_core:dirt_with_grass"} end
+	return {name = "air"}
+end
+failed, reason = plan(allslab)
+assert(failed == false and reason:find("overhang", 1, true), "slab everywhere: " .. tostring(reason))
+
 -- Too few buildings: a small island of ground.
 local island = world(function(x, z) return (x * x + z * z <= 20 * 20) and 10 or nil end)
 logs = {}

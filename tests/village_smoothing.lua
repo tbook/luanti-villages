@@ -70,6 +70,13 @@ end end
 -- nil heights (water) are left alone and ignored as neighbors.
 t = smoothing.targets(pads, function(x, z) if x == -4 then return nil end return 12 end, cfg)
 assert(t.at(-4, 1) == nil and t.was(-4, 1) == nil)
+-- An overhang (second return of height_at) in the skirt or the yard (x=-1) is not a column
+-- (#209): no target, no pad. In the footprint it is set like any other.
+t = smoothing.targets(pads, function(x, z) return 30, x == -6 or x == -1 or x == 1 end, cfg)
+assert(t.at(-6, 1) == nil and t.was(-6, 1) == nil and t.pad(-6, 1) == nil and t.kind(-6, 1) == nil, "skirt overhang left alone")
+assert(t.at(-5, 1) ~= nil and t.at(-7, 1) ~= nil, "its neighbours are still smoothed")
+assert(t.at(-1, 1) == nil and t.kind(-1, 1) == nil, "yard overhang left alone")
+assert(t.at(1, 1) == 10, "footprint overhang is set")
 -- Empty plan.
 assert(smoothing.targets({}, flat(1), cfg).at(0, 0) == nil)
 
@@ -77,9 +84,9 @@ assert(smoothing.targets({}, flat(1), cfg).at(0, 0) == nil)
 local swaps, map = {}, {}
 local function key(x, y, z) return x .. "," .. y .. "," .. z end
 local engine = {
-	registered_nodes = {air = {walkable = false}, ["mcl_core:dirt"] = {walkable = true}},
+	registered_nodes = {air = {walkable = false}, ["mcl_core:dirt"] = {walkable = true}, ["mcl_core:stone"] = {walkable = true}},
 	swap_node = function(p, n) map[key(p.x, p.y, p.z)] = n.name; swaps[#swaps + 1] = n.name end,
-	get_node = function(p) return {name = map[key(p.x, p.y, p.z)] or "air"} end,
+	get_node = function(p) return {name = map[key(p.x, p.y, p.z)] or (p.y <= 0 and "mcl_core:stone" or "air")} end, -- ground at y 0
 }
 local small = pads_of({0, 0, 10, "mcl_core:sand"})
 local tt = smoothing.targets(small, flat(14), cfg)
@@ -158,12 +165,26 @@ local env = {
 	scan = function(area) return fragments.scan_structures(area, test, fake) end,
 	clear_trees = function() end,
 }
+-- An overhang in the skirt (#209): a 2-thick slab (y 30..31) over 4 air (26..29) above
+-- the real ground at 14, at x=-6; a normal hill (top 18) at x=-6, z=2 is still cut.
+for y = 15, 40 do world["-6,"..y..",1"] = "air" end
+for y = 30, 31 do world["-6,"..y..",1"] = "mcl_core:dirt_with_grass" end
+for y = 15, 17 do world["-6,"..y..",2"] = "mcl_core:dirt" end
+world["-6,18,2"] = "mcl_core:dirt_with_grass"
 assert(smoothing.terraform(plan_of({0, 0, 10, "mcl_core:dirt_with_grass"}, {40, 0, 14, "mcl_core:dirt_with_grass"}), nil, env) == true and not fell,
 	"smooths without waiting")
 assert(loads > 0)
 assert(world["8,16,1"] == nil, "structure block not removed")
 assert(world["8,14,1"] == nil and world["8,15,1"] == nil, "ground beside the structure untouched")
 assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air", "footprint cut to the pad")
+-- The whole overhang column is as nature made it: slab at 30..31, air 15..29 and above 31,
+-- and the ground (14 and below) untouched.
+for y = 15, 40 do
+	local want = (y == 30 or y == 31) and "mcl_core:dirt_with_grass" or "air"
+	assert(world["-6," .. y .. ",1"] == want, "overhang column changed at y=" .. y .. ": " .. tostring(world["-6," .. y .. ",1"]))
+end
+for y = 0, 14 do assert(world["-6," .. y .. ",1"] == nil, "ground under the overhang written at y=" .. y) end
+assert(world["-6,18,2"] == "air", "a normal hill beside it is still cut")
 -- The ground beside it was smoothed to 13, so the shaft is filled from its floor to 13.
 assert(world["13,13,1"] == "mcl_core:dirt_with_grass" and world["13,12,1"] == "mcl_core:dirt"
 	and world["13,0,1"] == "mcl_core:dirt" and world["13,-7,1"] == "mcl_core:dirt", "shaft filled to the rim")

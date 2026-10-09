@@ -67,7 +67,12 @@ local function distance(x, z, x0, z0, x1, z1)
 end
 
 -- The pure planning half. `height_at(x, z)` gives a column's current terrain
--- height, or nil to leave it alone (water, or outside what was read). Returns
+-- height, or nil to leave it alone (water, or outside what was read), and as a
+-- second value whether that height is only an overhang's slab over air (#209):
+-- a column like that, outside every footprint, is left as nature made it, because
+-- cutting it by the cap and filling under it builds a dirt wall under the slab
+-- (in a yard too: the cap keeps the yard far above its pad). A footprint column
+-- is set as ever. Returns
 --   {x0, z0, x1, z1 = the box of columns considered,
 --    at(x, z) = target height or nil, was(x, z) = terrain height or nil,
 --    pad(x, z) = index of the pad it belongs to, kind(x, z) = "footprint",
@@ -94,7 +99,7 @@ function M.targets(pads, height_at, config)
 	local was, goal, low, high, free, owner, kind = {}, {}, {}, {}, {}, {}, {}
 	for z = bz0, bz1 do
 		for x = bx0, bx1 do
-			local t = height_at(x, z)
+			local t, overhang = height_at(x, z)
 			if t then
 				local i = index(x, z)
 				was[i] = t
@@ -119,6 +124,9 @@ function M.targets(pads, height_at, config)
 					local p = pads[near]
 					if near_d == 0 then
 						kind[i], goal[i], free[i] = "footprint", p.y, false
+					elseif overhang then
+						-- Not a column at all: no height, no pad, no change.
+						was[i], owner[i] = nil, nil
 					elseif yard_hit then
 						kind[i], free[i] = "yard", false
 						goal[i] = clamp(p.y, t - config.cap, t + config.cap)
@@ -304,7 +312,7 @@ function M.terraform(plan, pr, env, config)
 	local targets = M.targets(pads, function(x, z)
 		local column = lookup(x, z)
 		if not column or column.liquid or near_structure(x, z) then return nil end
-		return column.surface_y or column.y
+		return column.surface_y or column.y, column.overhang
 	end, config)
 	local stats = M.apply(pads, targets, lookup, config, engine)
 	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block, %d unloaded blocks skipped%s")

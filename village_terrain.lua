@@ -10,6 +10,17 @@ local core = minetest
 local SETTING = "living_villages_smooth_villages"
 local DEFAULT_BELOW = 20 -- foundations reach this far under a building, as settlements.ground does
 local DEFAULT_ABOVE_FACTOR = 3 -- terraform clears three building heights above the base
+-- An overhang (#209): a surface that is only a slab over open air, not ground. v7
+-- mountains leave edges like that: at the Testlandia village the slab was 2 thick
+-- (y 43..44) over 4 air with the real ground under it, and a neighbouring one 6
+-- thick over 15 air. Smoothing cuts a column by at most `cap` (5), so a slab of
+-- cap + 1 or thinner is cut through its bottom node and the fill under the
+-- new surface lands in the air below it: a dirt pillar. A thicker slab keeps a
+-- ceiling under the cut, so it stays "ground". The gap must be real air: the
+-- Testlandia pillars stood over gaps of 4 and 15, and a crust over a smaller pocket
+-- or cave is left to the smoothing (a gap of 3 also left village edges unsmoothed).
+local OVERHANG_MAX_THICKNESS = 6
+local OVERHANG_MIN_GAP = 4
 
 local M = {}
 
@@ -110,6 +121,8 @@ end
 -- - surface_y, material: the highest node in settlements.surface_mat that
 --   find_surface would accept: air, a plant, a trunk or snow above it, and no
 --   leaves below it. nil where the column has none (a shaft, a pond bed)
+-- - overhang: true when surface_y is only a thin slab over air (see OVERHANG_*), so
+--   it is not the column's ground (#209)
 -- Returns nil and a reason if any of the area is still unloaded, because the
 -- column tops would then be wrong; emerge first. With `partial` set, a column with
 -- an unloaded node is nil in the lookup instead, and the rest is returned.
@@ -179,6 +192,22 @@ function M.heights(area, surface_materials, engine, partial)
 					end
 				end
 			end
+			if column.surface_y then
+				-- Walk down the solid run under the surface, then count the air under it.
+				local y, thick = column.surface_y, 0
+				while y >= area.minp.y and thick <= OVERHANG_MAX_THICKNESS do
+					local t = trait(data[va:index(x, y, z)])
+					if not t.solid_or_liquid and data[va:index(x, y, z)] ~= ignore then break end
+					thick, y = thick + 1, y - 1
+				end
+				if thick <= OVERHANG_MAX_THICKNESS then
+					local gap = 0
+					while y >= area.minp.y and data[va:index(x, y, z)] == engine.CONTENT_AIR do
+						gap, y = gap + 1, y - 1
+					end
+					column.overhang = gap >= OVERHANG_MIN_GAP
+				end
+			end
 			columns[z][x] = column
 		end
 	end
@@ -202,17 +231,44 @@ function M.materials(surface)
 	return TOP[surface] or surface, FOUNDATION[surface] or "mcl_core:dirt"
 end
 
--- Fill `fill` (default dirt) under y, down until the first solid node, at most
--- as far as foundations go (20). Covers a hole under a building or a yard.
+-- Fill `fill` (default dirt) under y, down to the first solid node, so the fill
+-- always meets ground. Covers a hole under a building or a yard. Liquid is filled
+-- through (a pond under a raised column, lava, #142). It stops above an unloaded
+-- node (`ignore`: swapping it does nothing and the ground below is unknown). If no
+-- solid node lies within the foundation depth (20) it fills nothing: a dirt column
+-- hanging over a cave or void is worse than a grass block with air under it (#209).
 function M.fill_below(x, z, y, fill, engine)
 	engine = engine or core
 	fill = fill or "mcl_core:dirt"
+	local last
 	for fy = y - 1, y - DEFAULT_BELOW, -1 do
-		local pos = {x = x, y = fy, z = z}
-		local def = engine.registered_nodes[engine.get_node(pos).name]
-		if def and def.walkable and (def.liquidtype or "none") == "none" then break end
-		engine.swap_node(pos, {name = fill})
+		local name = engine.get_node({x = x, y = fy, z = z}).name
+		local def = engine.registered_nodes[name]
+		if name == "ignore" or (def and def.walkable and (def.liquidtype or "none") == "none") then
+			last = fy + 1
+			break
+		end
 	end
+	if not last then return end
+	for fy = y - 1, last, -1 do
+		engine.swap_node({x = x, y = fy, z = z}, {name = fill})
+	end
+end
+
+-- Whether the surface at y is an overhang (see OVERHANG_*), for callers that read
+-- nodes one at a time. `kind(fy)` returns "solid", "air" or other for the node at
+-- fy; `ymin` is the lowest y to look at.
+function M.is_overhang(y, kind, ymin)
+	local thick = 0
+	while y >= ymin and thick <= OVERHANG_MAX_THICKNESS and kind(y) == "solid" do
+		thick, y = thick + 1, y - 1
+	end
+	if thick > OVERHANG_MAX_THICKNESS then return false end
+	local gap = 0
+	while y >= ymin and gap < OVERHANG_MIN_GAP and kind(y) == "air" do
+		gap, y = gap + 1, y - 1
+	end
+	return gap >= OVERHANG_MIN_GAP
 end
 
 -- Set one column to `target_y` with `surface` on top, over a fill of `fill`
