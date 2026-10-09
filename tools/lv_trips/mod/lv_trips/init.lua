@@ -64,6 +64,7 @@ local STAGES = {
 }
 
 local round_info = {} -- the stage, variant and round being run
+local spot_owner -- the villager a spot run follows: its gopath calls are logged (#216)
 
 local function log(message) core.log("action", "[lv_trips] " .. message) end
 -- Which checkout of the mod this run measures (run.sh --mod-dir).
@@ -304,6 +305,17 @@ core.register_on_mods_loaded(function()
 	local original = def.gopath
 	def.gopath = function(self, target, callback, prioritised)
 		if not self.object:get_pos() then return original(self, target, callback, prioritised) end
+		if self == spot_owner then
+			local pos, bed, site = self.object:get_pos(), self._bed, self._jobsite
+			local what = "elsewhere"
+			if bed and vector.equals(vector.round(target), vector.round(bed)) then what = "BED"
+			elseif site and vector.equals(vector.round(target), vector.round(site)) then what = "JOBSITE" end
+			core.log("action", string.format(
+				"[lv_trips] gopath t=%.2f target=%s (%s) from=%s bed_dist=%.1f order=%s state=%s caller=%s",
+				wall(), core.pos_to_string(vector.round(target)), what, core.pos_to_string(vector.round(pos)),
+				bed and vector.distance(pos, bed) or -1, tostring(self.order), tostring(self.state),
+				(debug.traceback("", 2):gsub("%s+", " "):sub(1, 260))))
+		end
 		local trip = trips[villager_id(self)]
 		if trip and not (trip.target.x == target.x and trip.target.y == target.y and trip.target.z == target.z) then
 			close_trip(trip, "superseded")
@@ -555,6 +567,7 @@ local function run_spot(list)
 	silence_engine = false
 	round_info = {stage = stage, variant = "A", round = 1, village = LABEL}
 	trips = {}
+	spot_owner = owner
 	release_seat(owner)
 	reset_villager(owner)
 	-- A sleeper wakes on its next step and is put back at the bed exit; let it, so
@@ -584,13 +597,19 @@ local function run_spot(list)
 	local began = elapsed_real
 	if FAR.secs > 0 then FAR.until_us = core.get_us_time() + FAR.secs * 1e6 end
 	local last_logged = -1
+	local idle_since
 	local function snapshot()
 		local pos, v = owner.object:get_pos(), owner.object:get_velocity() or {x = 0, y = 0, z = 0}
 		local follow = owner._villages_follow
 		local route = route_snapshot(owner)
 		core.log("action", string.format(
-			"[lv_trips] spot t=%.2f pos=(%.2f,%.2f,%.2f) v=(%.2f,%.2f,%.2f) state=%s order=%s route=%s target=%s wp_left=%d follow=%s final=%s",
-			elapsed_real - began, pos.x, pos.y, pos.z, v.x, v.y, v.z, tostring(owner.state), tostring(owner.order),
+			"[lv_trips] spot t=%.2f pos=(%.2f,%.2f,%.2f) bed_dist=%.1f job_dist=%.1f prof=%s child=%s tod=%.3f weather=%s v=(%.2f,%.2f,%.2f) state=%s order=%s route=%s target=%s wp_left=%d follow=%s final=%s",
+			elapsed_real - began, pos.x, pos.y, pos.z,
+			owner._bed and vector.distance(pos, owner._bed) or -1,
+			owner._jobsite and vector.distance(pos, owner._jobsite) or -1,
+			tostring(owner._profession), tostring(owner.child), core.get_timeofday(),
+			tostring(mcl_weather and mcl_weather.get_weather and mcl_weather.get_weather()),
+			v.x, v.y, v.z, tostring(owner.state), tostring(owner.order),
 			route and (route.status .. "/" .. tostring(route.reason)) or "-",
 			owner.current_target and owner.current_target.pos and core.pos_to_string(owner.current_target.pos, 1) or "-",
 			owner.waypoints and #owner.waypoints or 0, tostring(follow ~= nil),
@@ -599,7 +618,13 @@ local function run_spot(list)
 	while elapsed_real - began < ROUND_LIMIT do
 		coroutine.yield()
 		if elapsed_real - last_logged >= 0.25 then last_logged = elapsed_real; snapshot() end
-		if elapsed_real - began > 5 and next(trips) == nil then break end
+		-- Keep watching 20 s after the last trip ends: a villager that arrives and is
+		-- then sent away again (#216) shows up as a new trip.
+		if next(trips) ~= nil then idle_since = nil
+		elseif elapsed_real - began > 5 then
+			idle_since = idle_since or elapsed_real
+			if elapsed_real - idle_since > 20 then break end
+		end
 	end
 	for _, trip in pairs(trips) do close_trip(trip, "round_end") end
 	snapshot()

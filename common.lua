@@ -199,6 +199,17 @@ return {
 	is_workstation_node = function(name)
 		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
 	end,
+	-- Whether the villager's _jobsite is a workstation (or a pulpit, cleric.lua)
+	-- that carries its id.
+	has_claimed_jobsite = function(self)
+		if not self._jobsite or not self._id then return false end
+		local node = core.get_node_or_nil(self._jobsite)
+		if not node or not (workstation_nodes[node.name] or core.get_item_group(node.name, "cauldron") > 0
+			or node.name == "living_villages:pulpit") then
+			return false
+		end
+		return core.get_meta(self._jobsite):get_string("villager") == self._id
+	end,
 	farm_replant_node = function(name) return farm_replant_nodes[name] end,
 	-- Whether a villager's full standing box fits at pos, clear of obstructions
 	-- and hazards, over a solid floor. Checked before returning a villager to a

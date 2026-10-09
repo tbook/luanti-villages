@@ -183,12 +183,7 @@ local function has_claimed_bed(self)
 	return core.get_meta(top):get_string("player") == ""
 end
 
-local function has_claimed_jobsite(self)
-	if not self._jobsite or not self._id then return false end
-	local node = core.get_node_or_nil(self._jobsite)
-	if not node or not (is_workstation_node(node.name) or node.name == PULPIT) then return false end
-	return core.get_meta(self._jobsite):get_string("villager") == self._id
-end
+local has_claimed_jobsite = common.has_claimed_jobsite
 
 local function has_farm_target(self)
 	local node = self._villages_farm_target and core.get_node_or_nil(self._villages_farm_target)
