@@ -93,8 +93,13 @@ end
 -- decayed self.base_size straight into visual_size, rendering the villager
 -- invisible. Not something this mod can fix upstream, so re-assert the
 -- correct scale here the same way mesh/texture drift is already corrected.
+local child_growth = dofile(core.get_modpath("living_villages") .. "/child_growth.lua")
+
 local function expected_visual_size(self)
-	if self.child then return {x = 0.5, y = 0.5} end
+	if self.child then
+		local scale = child_growth.scale(self)
+		return {x = scale, y = scale}
+	end
 	return {x = 1, y = 1}
 end
 
@@ -531,6 +536,7 @@ core.register_on_mods_loaded(function()
 	end
 
 	dofile(core.get_modpath("living_villages") .. "/births.lua")(def)
+	child_growth.install(def)
 	dofile(core.get_modpath("living_villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
