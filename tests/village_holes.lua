@@ -253,6 +253,16 @@ small.budget, small.max_columns = 1e9, 10
 plan = holes.plan(spec_of(g, none), small)
 assert(#plan.cells == 4 and plan.dropped == 36, "wide piece left as landscape")
 
+-- A groove whose low end lies in the ring (ceiling 5) must not be walled in: the column
+-- outside the ring is not filled to the spill level of 7 while the ring stays at 5.
+g = grid(function(g)
+	box(g, 0, 0, W - 1, W - 1, function(c) c.y = 7 end)
+	box(g, 4, 4, 6, 4, function(c) c.y = 5 end)
+	g[7][4].y = 6
+end)
+plan = holes.plan(spec_of(g, none, function(x) if x <= 6 then return 5 end end), cfg)
+assert(plan.at(7, 4) - plan.at(6, 4) <= 1, "no wall round a pit the ring leaves low")
+
 -- Ground far from every building is landscape. A basin 40 deep and far from the pad is
 -- left alone; the same one beside the pad disappears, with no depth limit.
 local function near_pad(x, z) return x <= 13 and z <= 13 end
@@ -294,7 +304,11 @@ for round = 1, 40 do
 		end end
 	end)
 	local protect = function(x, z) return x > 14 and z > 14 and x < 18 and z < 18 end
-	local first = holes.plan(spec_of(g, protect), cfg)
+	-- A ring ceiling round the pad at the origin (in the corner, so edges stay exits).
+	local ring_ceiling = function(x, z) if x <= 7 and z <= 7 then return 8 end end
+	local first = holes.plan(spec_of(g, protect, ring_ceiling), cfg)
+	local walls = {at = function(x, z) return g[x][z].y end}
+	assert(trapped_columns(first, g) <= trapped_columns(walls, g), "filling never leaves a new trap (round " .. round .. ")")
 	for x = 0, W - 1 do for z = 0, W - 1 do
 		local y = first.at(x, z)
 		assert(y >= g[x][z].y, "never lowered")

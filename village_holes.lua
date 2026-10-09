@@ -92,11 +92,11 @@ local function heap()
 	end
 	function H.pop()
 		if n == 0 then return nil end
-		local top = items[1]
+		local top, topp = items[1], prio[1]
 		local item, p = items[n], prio[n]
 		items[n], prio[n] = nil, nil
 		n = n - 1
-		if n == 0 then return top end
+		if n == 0 then return top, topp end
 		local i = 1
 		while true do
 			local c = i * 2
@@ -107,7 +107,7 @@ local function heap()
 			i = c
 		end
 		items[i], prio[i] = item, p
-		return top
+		return top, topp
 	end
 	return H
 end
@@ -183,13 +183,22 @@ function M.plan(spec, config)
 	for i in pairs(h) do
 		if fixed[i] then level[i] = h[i]; queue.push(i, h[i]) end
 	end
+	-- A column in the ring has a ceiling: it is a way out at that height, so what fills
+	-- beyond the ring stops short of it instead of walling in a pit the ring leaves
+	-- low. That lowers a level after the fact, so an entry may be revisited.
 	while true do
-		local i = queue.pop()
+		local i, p = queue.pop()
 		if not i then break end
-		for _, n in ipairs(nbr[i]) do
-			if not level[n] then
-				level[n] = math.max(h[n], level[i])
-				queue.push(n, level[n])
+		if p == level[i] then
+			for _, n in ipairs(nbr[i]) do
+				if not fixed[n] then
+					local candidate = math.max(h[n], level[i])
+					if ceil[n] then candidate = math.min(candidate, math.max(h[n], ceil[n])) end
+					if not level[n] or candidate < level[n] then
+						level[n] = candidate
+						queue.push(n, candidate)
+					end
+				end
 			end
 		end
 	end
@@ -197,7 +206,6 @@ function M.plan(spec, config)
 	for i in pairs(h) do
 		if not fixed[i] then
 			local to = level[i] or h[i]
-			if ceil[i] then to = math.min(to, ceil[i]) end
 			if kind[i] == "lava" then to = math.max(to, h[i]) end
 			if to > h[i] or kind[i] == "lava" then
 				h[i] = to
