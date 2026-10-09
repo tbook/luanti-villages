@@ -93,8 +93,13 @@ end
 -- decayed self.base_size straight into visual_size, rendering the villager
 -- invisible. Not something this mod can fix upstream, so re-assert the
 -- correct scale here the same way mesh/texture drift is already corrected.
+local child_growth = dofile(core.get_modpath("living_villages") .. "/child_growth.lua")
+
 local function expected_visual_size(self)
-	if self.child then return {x = 0.5, y = 0.5} end
+	if self.child then
+		local scale = child_growth.scale(self)
+		return {x = scale, y = scale}
+	end
 	return {x = 1, y = 1}
 end
 
@@ -104,7 +109,11 @@ local function refresh_visual(self)
 	if not props then return end
 	local size = expected_visual_size(self)
 	local current = props.visual_size
-	local size_ok = current and current.x == size.x and current.y == size.y
+	-- The engine stores visual_size as float32, so a scale such as 0.57 reads
+	-- back as 0.56999999; compare with a tolerance or a growing child is
+	-- re-sent its properties on every step (#177).
+	local size_ok = current and math.abs(current.x - size.x) < 1e-4
+		and math.abs(current.y - size.y) < 1e-4
 	if props.mesh ~= MODEL or not props.textures or props.textures[1] ~= texture or not size_ok then
 		self.object:set_properties({mesh = MODEL, textures = {texture}, visual_size = size})
 	end
@@ -531,6 +540,7 @@ core.register_on_mods_loaded(function()
 	end
 
 	dofile(core.get_modpath("living_villages") .. "/births.lua")(def)
+	child_growth.install(def)
 	dofile(core.get_modpath("living_villages") .. "/navigation.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
