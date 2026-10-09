@@ -21,6 +21,13 @@
 --    hole, and a ramp up it would be a mound. A column within `ring` of a yard
 --    never rises above that building's floor.
 --
+-- Only ground within `reach` of a yard is touched: farther out it is landscape and
+-- counts as a way out, so a natural basin away from the buildings stays. A column
+-- is the ground under a tree or cactus, not the plant (village_terrain.heights
+-- base_y), and ice over water is water. In the ring, the ceiling clamps a column
+-- below its spill level, so a hole whose mouth lies in the ring can be left as a
+-- partly filled bowl with a step out of the ring; that is the price of no mound
+-- against a wall.
 -- Both phases only raise a column, never past the highest column there was, so they
 -- stop. A change in one piece wider than `max_columns` columns, or past `budget`
 -- nodes for the village (smallest pieces first), is dropped.
@@ -37,6 +44,8 @@ M.config = {
 	below = 40, above = 24, -- under the lowest pad, over the highest
 	cliff_rise = 4, -- phase 2 closes a cliff only if no column rises more than this; 0 turns it off
 	ring = 2, -- columns around a yard that fill never raises above the building's floor
+	reach = 12, -- ground farther than this from every yard is landscape: left as it is, a way out
+	rounds = 50, -- limit on undo rounds of phase 2
 	passes = 200, -- limit on phase 2 sweeps
 	max_columns = 1500, -- a change wider than this is a landscape basin, left alone
 	budget = 60000, -- nodes written for one village at most
@@ -109,6 +118,8 @@ end
 --                   nil if unknown
 --   protected(x, z) true for columns that must not change (pads, structures)
 --   ceiling(x, z)   optional: the height a column may not be raised above
+--   near(x, z)      optional: false for columns that must not change and are ways out
+--                   (ground far from every building)
 -- Returns {cells = {{x, z, from, to, lava, name}...} (columns to raise from `from`
 -- to `to`), nodes (to write), filled and ramped (columns by phase), dropped (columns
 -- left because of a limit), passes (phase 2 sweeps), cliffs_before and cliffs_after
@@ -131,6 +142,7 @@ function M.plan(spec, config)
 				names[i] = c.name
 				ceil[i] = spec.ceiling and spec.ceiling(x, z) or nil
 				fixed[i] = spec.protected and spec.protected(x, z) or false
+				if spec.near and not spec.near(x, z) then fixed[i] = true end
 			end
 		end
 	end
@@ -319,17 +331,29 @@ function M.plan(spec, config)
 	return result
 end
 
--- Decorations stand on the ground and are not ground: plants, flowers, snow layers.
-local DECOR_WORDS = {"grass", "flower", "fern", "bush", "sapling", "mushroom", "snow", "dead", "double", "vine", "lily", "tulip", "orchid", "allium", "poppy", "dandelion", "azure", "peony", "rose", "lilac"}
+-- Decorations stand on the ground and are not ground: plants, flowers, a layer of
+-- snow. Groups first, then a few name words for plants that lack them.
+local DECOR_WORDS = {"grass", "fern", "flower", "bush", "sapling", "mushroom"}
 local function is_decor(name, engine)
 	if name == "air" or name == "ignore" then return false end
 	local def = engine.registered_nodes[name]
 	if not def or def.walkable or (def.liquidtype or "none") ~= "none" then return false end
-	if def.groups and (def.groups.plant or def.groups.flora) then return true end
+	if name == "mcl_core:snow" then return true end
+	if def.groups and (def.groups.plant or def.groups.flower or def.groups.flora) then return true end
 	for _, word in ipairs(DECOR_WORDS) do
 		if name:find(word, 1, true) then return true end
 	end
 	return false
+end
+
+-- A two-high plant is a bottom node `name` with a `name_top` above it (VoxeLibre's
+-- add_large_plant: tall grass, large fern, peony, rose bush, lilac, sunflower).
+local function top_name(name, engine)
+	local top = name .. "_top"
+	if engine.registered_nodes[top] then return top end
+end
+local function is_top_half(name, engine)
+	return name:sub(-4) == "_top" and engine.registered_nodes[name:sub(1, -5)] ~= nil
 end
 
 -- A walkable node that is not a full block, such as a layer of snow or a path: it
@@ -342,21 +366,25 @@ end
 
 -- Writes the cells of a plan. `material(x, z)` gives the surface node and the fill
 -- under it. A fill goes all the way down to the old ground. What stood on the old
--- ground (grass, a flower, a layer of snow) is put back on the new surface if it was
--- one node, and cleared from above it if it was taller. A sliver of ground, such as
+-- ground (grass, a flower, a layer of snow, a two-high plant with both halves) is put
+-- back on the new surface, and whatever is left over it is cleared. A sliver of ground, such as
 -- a layer of snow, is replaced by the fill. A lava column also has the lava under
 -- it replaced.
 function M.apply(plan, material, config, engine)
 	engine = engine or core
 	for _, cell in ipairs(plan.cells) do
 		local surface, fill = material(cell.x, cell.z)
-		local decor
+		local decor, decor_top
 		if not cell.lava then
 			local above = engine.get_node({x = cell.x, y = cell.from + 1, z = cell.z})
-			local name = above.name
-			if is_decor(name, engine) and not name:find("double", 1, true)
-					and not name:find("_top", 1, true) and not name:find("_bottom", 1, true) then
-				decor = above
+			if is_decor(above.name, engine) and not is_top_half(above.name, engine) then
+				local top = top_name(above.name, engine)
+				if not top then
+					decor = above
+				else
+					local up = engine.get_node({x = cell.x, y = cell.from + 2, z = cell.z})
+					if up.name == top then decor, decor_top = above, up end
+				end
 			end
 		end
 		local bottom = cell.lava and cell.from or cell.from + 1
@@ -373,6 +401,7 @@ function M.apply(plan, material, config, engine)
 		end
 		if decor then
 			engine.swap_node({x = cell.x, y = cell.to + 1, z = cell.z}, decor)
+			if decor_top then engine.swap_node({x = cell.x, y = cell.to + 2, z = cell.z}, decor_top) end
 		end
 	end
 end
@@ -399,6 +428,11 @@ function M.area(pads, config)
 	return area
 end
 
+local function is_ice(name)
+	return name:find(":ice$") ~= nil or name:find("_ice$") ~= nil or name:find("frosted_ice", 1, true) ~= nil
+end
+M.is_ice = is_ice
+
 -- Fills the holes in the area (from M.area) of a village whose pads (see
 -- village_smoothing.pads) are placed. The blocks must be loaded; columns in an
 -- unloaded one are skipped. `env` has settlements.surface_mat, engine and, optionally,
@@ -420,13 +454,22 @@ function M.run(pads, area, env, config)
 			-- Blocks unloaded under the ground don't matter, only ground we can't see.
 			local c = lookup(x, z, true)
 			if not c or c.ground_unknown or (c.unloaded and not c.ground_y) then return nil end
+			-- The ground, not what grows out of it: a trunk or a cactus is no peak.
 			-- A shaft deeper than the area has no ground in it: treat the bottom as the floor.
+			local name = c.base_name
 			return {
-				y = c.ground_y or area.minp.y - 1,
-				liquid = c.ground_liquid or false,
-				lava = c.ground_liquid and c.ground_name:find("lava", 1, true) ~= nil or false,
-				name = c.ground_name,
+				y = c.base_y or area.minp.y - 1,
+				-- Ice over a pond is water to us.
+				liquid = c.base_liquid or (name ~= nil and is_ice(name)) or false,
+				lava = c.base_liquid and name:find("lava", 1, true) ~= nil or false,
+				name = name,
 			}
+		end,
+		near = function(x, z)
+			for _, p in ipairs(pads) do
+				if in_yard(x, z, p, config.reach) then return true end
+			end
+			return false
 		end,
 		protected = function(x, z)
 			for _, p in ipairs(pads) do

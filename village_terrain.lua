@@ -105,6 +105,8 @@ end
 -- - liquid: whether that top node is liquid
 -- - ground_y, ground_name, ground_liquid: the same, but skipping leaves, which
 --   nobody stands on (#142 measures holes by it)
+-- - base_y, base_name, base_liquid: the same again, but skipping what grows out of
+--   the ground too (a trunk, a cactus, bamboo), so a tree is not a peak (#155)
 -- - surface_y, material: the highest node in settlements.surface_mat that
 --   find_surface would accept: air, a plant, a trunk or snow above it, and no
 --   leaves below it. nil where the column has none (a shaft, a pond bed)
@@ -132,6 +134,8 @@ function M.heights(area, surface_materials, engine, partial)
 				liquid = liquid,
 				open = open_above(name),
 				leaves = name:find("leaves", 1, true) ~= nil,
+				growth = (def and def.groups and def.groups.tree ~= nil) or name:find("tree", 1, true) ~= nil
+					or name:find("cactus", 1, true) ~= nil or name:find("bamboo", 1, true) ~= nil,
 			}
 			traits[id] = t
 		end
@@ -160,6 +164,9 @@ function M.heights(area, surface_materials, engine, partial)
 				end
 				if not column.ground_y and t.solid_or_liquid and not t.leaves then
 					column.ground_y, column.ground_name, column.ground_liquid = y, t.name, t.liquid
+				end
+				if not column.base_y and t.solid_or_liquid and not t.leaves and not t.growth then
+					column.base_y, column.base_name, column.base_liquid = y, t.name, t.liquid
 				end
 				if not column.surface_y and surface_materials[t.name] then
 					local above = y < area.maxp.y and trait(data[va:index(x, y + 1, z)]) or nil

@@ -96,8 +96,9 @@ assert(stats.filled > 0 and map[key(1, 10, 1)] == "mcl_core:sand" and map[key(1,
 
 -- terraform on a fake map: flat ground at 14 and a structure block at (8,16,1).
 -- The structure and its neighbors are kept.
-local ids = {air = 1, ["mcl_core:dirt_with_grass"] = 2, struct = 3, ["mcl_core:dirt"] = 4}
-local names = {"air", "mcl_core:dirt_with_grass", "struct", "mcl_core:dirt"}
+local ids = {air = 1, ["mcl_core:dirt_with_grass"] = 2, struct = 3, ["mcl_core:dirt"] = 4,
+	["mcl_core:tree"] = 5, ["mcl_core:cactus"] = 6}
+local names = {"air", "mcl_core:dirt_with_grass", "struct", "mcl_core:dirt", "mcl_core:tree", "mcl_core:cactus"}
 local IGNORE = 99
 local world = {}
 local function at(x, y, z)
@@ -105,6 +106,9 @@ local function at(x, y, z)
 	local k = world[x .. "," .. y .. "," .. z]
 	if k then return k end
 	if x == 8 and y == 16 and z == 1 then return "struct" end
+	-- A 5-high trunk and a 3-high cactus on the flat ground in the holes' reach.
+	if x == 26 and z == 5 and y >= 15 and y <= 19 then return "mcl_core:tree" end
+	if x == 26 and z == 9 and y >= 15 and y <= 17 then return "mcl_core:cactus" end
 	-- Blocks under the shaft floor are not generated yet.
 	if x >= 13 and x <= 14 and z >= 0 and z <= 2 and y < -20 then return "ignore" end
 	-- A shaft in the gap beyond the smoothing, down to a floor at -8.
@@ -122,6 +126,7 @@ local fake = {
 	registered_nodes = {
 		air = {walkable = false}, ["mcl_core:dirt_with_grass"] = {walkable = true},
 		struct = {walkable = true, is_ground_content = false, groups = {}},
+		["mcl_core:tree"] = {walkable = true, groups = {tree = 1}}, ["mcl_core:cactus"] = {walkable = true},
 	},
 	get_name_from_content_id = function(id) return names[id] or "ignore" end,
 	pos_to_string = function(p) return ("(%d,%d,%d)"):format(p.x, p.y, p.z) end,
@@ -153,7 +158,7 @@ local env = {
 	scan = function(area) return fragments.scan_structures(area, test, fake) end,
 	clear_trees = function() end,
 }
-assert(smoothing.terraform(plan_of({0, 0, 10, "mcl_core:dirt_with_grass"}), nil, env) == true and not fell,
+assert(smoothing.terraform(plan_of({0, 0, 10, "mcl_core:dirt_with_grass"}, {40, 0, 14, "mcl_core:dirt_with_grass"}), nil, env) == true and not fell,
 	"smooths without waiting")
 assert(loads > 0)
 assert(world["8,16,1"] == nil, "structure block not removed")
@@ -163,6 +168,12 @@ assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air
 assert(world["13,13,1"] == "mcl_core:dirt_with_grass" and world["13,12,1"] == "mcl_core:dirt"
 	and world["13,0,1"] == "mcl_core:dirt" and world["13,-7,1"] == "mcl_core:dirt", "shaft filled to the rim")
 assert(world["13,14,1"] == nil, "nothing above the rim")
+-- A tree or a cactus is not a peak: no ramp is built round it.
+for key in pairs(world) do
+	local x, z = key:match("^(-?%d+),%-?%d+,(-?%d+)$")
+	x, z = tonumber(x), tonumber(z)
+	assert(not (x >= 23 and x <= 29 and z >= 2 and z <= 12), "nothing built round a trunk or a cactus: " .. key)
+end
 local joined = table.concat(logs, "\n")
 assert(joined:find("holes: ", 1, true), "reports the fill")
 assert(joined:find("unloaded blocks skipped", 1, true), "reports skipped blocks")

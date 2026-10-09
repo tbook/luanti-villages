@@ -160,7 +160,7 @@ g = grid(function(g)
 	g[9][9].y, g[8][9].y, g[10][9].y, g[9][8].y, g[9][10].y = 8, 9, 9, 9, 9
 end)
 plan = holes.plan(spec_of(g), cfg)
-assert(steepest(plan) <= 1 and plan.at(9, 9) == 9 or plan.at(9, 9) == 10)
+assert(steepest(plan) <= 1 and (plan.at(9, 9) == 9 or plan.at(9, 9) == 10))
 
 -- A pond: water stays, and so do the columns beside it.
 g = grid(function(g) box(g, 8, 8, 11, 11, function(c) c.y, c.liquid = 9, true end) end)
@@ -205,7 +205,7 @@ end), cfg)
 for x = 0, W - 1 do for z = 0, W - 1 do
 	if (x <= 4 and z <= 4) then assert(plan.at(x, z) <= 10 or g[x][z].y > 10, "ring never above the floor") end
 end end
-assert(plan.at(0, 0) == 14 or true)
+assert(plan.at(0, 0) == 14, "the pad itself is not touched")
 -- The ring ceiling also holds against phase 2.
 g = grid(function(g) box(g, 0, 0, W - 1, W - 1, function(c, x) c.y = x < 6 and 10 or 20 end) end)
 plan = holes.plan(spec_of(g, none, function(x) if x <= 8 then return 12 end end), cfg)
@@ -253,6 +253,36 @@ small.budget, small.max_columns = 1e9, 10
 plan = holes.plan(spec_of(g, none), small)
 assert(#plan.cells == 4 and plan.dropped == 36, "wide piece left as landscape")
 
+-- Ground far from every building is landscape. A basin 40 deep and far from the pad is
+-- left alone; the same one beside the pad disappears, with no depth limit.
+local function near_pad(x, z) return x <= 13 and z <= 13 end
+g = grid(function(g)
+	box(g, 18, 18, 22, 22, function(c) c.y = -30 end)
+	box(g, 5, 5, 8, 8, function(c) c.y = -30 end)
+end)
+local sp = spec_of(g)
+sp.near = near_pad
+plan = holes.plan(sp, cfg)
+assert(plan.at(20, 20) == -30 and plan.at(18, 18) == -30, "a far basin is left as it is")
+assert(plan.at(6, 6) == 10 and plan.cliffs_after < plan.cliffs_before, "a near hole is filled whatever its depth")
+for _, c in ipairs(plan.cells) do assert(near_pad(c.x, c.z), "nothing changed beyond the reach") end
+-- A near hole is not joined to a huge far basin: the far part is fixed, not part of the piece.
+local small = {}
+for k, v in pairs(cfg) do small[k] = v end
+small.max_columns = 40
+g = grid(function(g)
+	box(g, 14, 2, 24, 22, function(c) c.y = 0 end)
+	box(g, 5, 5, 6, 6, function(c) c.y = 2 end)
+end)
+sp = spec_of(g)
+sp.near = near_pad
+plan = holes.plan(sp, small)
+assert(plan.at(5, 5) == 10 and plan.dropped == 0, "the near pit is filled, the far basin does not take it down")
+
+-- Ice over water is water.
+assert(holes.is_ice("mcl_core:ice") and holes.is_ice("mcl_core:packed_ice") and holes.is_ice("mcl_ocean:blue_ice")
+	and holes.is_ice("mcl_core:frosted_ice_0") and not holes.is_ice("mcl_core:sandstone") and not holes.is_ice("mcl_core:dirt"))
+
 -- Invariants on random terrain: heights never fall, protected and water columns hold,
 -- the result is stable (a second plan changes nothing), and no step grows.
 math.randomseed(155)
@@ -292,8 +322,8 @@ local fake = {
 		["mcl_core:snow"] = {walkable = false, drawtype = "nodebox"},
 		["mcl_core:snow_2"] = {walkable = true, drawtype = "nodebox"},
 		["mcl_flowers:tallgrass"] = {walkable = false, drawtype = "plantlike", groups = {plant = 1}},
-		["mcl_flowers:double_grass"] = {walkable = false, drawtype = "plantlike"},
-		["mcl_flowers:double_grass_top"] = {walkable = false, drawtype = "plantlike"},
+		["mcl_core:deadbush"] = {walkable = false, drawtype = "plantlike"},
+		["mcl_core:stone"] = {walkable = true, drawtype = "normal"},
 		["mcl_flowers:poppy"] = {walkable = false, drawtype = "plantlike", groups = {flower = 1}},
 	},
 	get_node = function(p) return world[p.x .. "," .. p.y .. "," .. p.z] or {name = "air"} end,
@@ -313,10 +343,32 @@ assert(name_at(1, 9, 0) == "mcl_flowers:tallgrass" and world["1,9,0"].param2 == 
 put(2, 5, 0, "mcl_core:dirt_with_grass"); put(2, 6, 0, "mcl_flowers:poppy")
 holes.apply(cell(2, 5, 6, "mcl_core:dirt_with_grass"), material, cfg, fake)
 assert(name_at(2, 6, 0) == "mcl_core:dirt_with_grass" and name_at(2, 7, 0) == "mcl_flowers:poppy")
--- A tall plant is not floating on the new surface: its top half is cleared and it is not copied.
-put(3, 5, 0, "mcl_core:dirt_with_grass"); put(3, 6, 0, "mcl_flowers:double_grass"); put(3, 7, 0, "mcl_flowers:double_grass_top")
+-- Every two-high plant VoxeLibre registers (add_large_plant) keeps both halves, whether
+-- the raise is 1 or 3 blocks: bottom and top land on the new surface.
+for n, plant in ipairs({"double_grass", "double_fern", "peony", "rose_bush", "lilac", "sunflower"}) do
+	local bottom, top = "mcl_flowers:" .. plant, "mcl_flowers:" .. plant .. "_top"
+	fake.registered_nodes[bottom] = {walkable = false, drawtype = "plantlike", groups = {plant = 1}}
+	fake.registered_nodes[top] = {walkable = false, drawtype = "plantlike"}
+	for _, to in ipairs({6, 8}) do
+		local x = 100 + n * 10 + to
+		put(x, 5, 0, "mcl_core:dirt_with_grass"); put(x, 6, 0, bottom); put(x, 7, 0, top)
+		holes.apply(cell(x, 5, to, "mcl_core:dirt_with_grass"), material, cfg, fake)
+		assert(name_at(x, to, 0) == "mcl_core:dirt_with_grass", plant .. " surface")
+		assert(name_at(x, to + 1, 0) == bottom and name_at(x, to + 2, 0) == top, plant .. " keeps both halves, raise to " .. to)
+		assert(name_at(x, to + 3, 0) == "air")
+	end
+end
+-- A bottom half with no top above it (or a stray top) is dropped, not left as half a plant.
+put(3, 5, 0, "mcl_core:dirt_with_grass"); put(3, 6, 0, "mcl_flowers:peony")
 holes.apply(cell(3, 5, 6, "mcl_core:dirt_with_grass"), material, cfg, fake)
-assert(name_at(3, 7, 0) == "air" and name_at(3, 8, 0) == "air", "no half of a tall plant left")
+assert(name_at(3, 7, 0) == "air", "lone bottom half dropped")
+put(3, 5, 0, "mcl_core:dirt_with_grass"); put(3, 6, 0, "mcl_flowers:peony_top")
+holes.apply(cell(3, 5, 6, "mcl_core:dirt_with_grass"), material, cfg, fake)
+assert(name_at(3, 7, 0) == "air" and name_at(3, 8, 0) == "air", "stray top half dropped")
+-- Not every non-walkable node is a decoration: dead bushes count, stone does not.
+put(7, 5, 0, "mcl_core:dirt_with_grass"); put(7, 6, 0, "mcl_core:deadbush")
+holes.apply(cell(7, 5, 6, "mcl_core:dirt_with_grass"), material, cfg, fake)
+assert(name_at(7, 7, 0) == "mcl_core:deadbush", "dead bush moved up")
 -- A layer of snow that is ground (two or more layers) is replaced, not embedded in the fill.
 put(4, 5, 0, "mcl_core:snow_2")
 holes.apply(cell(4, 5, 8, "mcl_core:snow_2"), material, cfg, fake)
