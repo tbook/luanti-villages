@@ -55,6 +55,18 @@ assert(growth.grow_days() == 12)
 cfg.living_villages_child_grow_days = "-3"
 assert(growth.grow_days() == 12)
 
+-- Non-finite values fall back to the defaults.
+cfg.living_villages_child_grow_days = "inf"
+assert(growth.grow_days() == 12)
+cfg.living_villages_child_grow_days = "nan"
+assert(growth.grow_days() == 12)
+cfg.living_villages_child_grow_days = "1"
+cfg.time_speed = "inf"
+assert(growth.day_seconds() == 1200)
+cfg.time_speed = "nan"
+assert(growth.day_seconds() == 1200)
+cfg.time_speed = nil
+
 -- Rates above one tick per second still grow up (never stall).
 cfg.living_villages_child_grow_days = "0.01"
 n = ticks_to_grow(new_child())

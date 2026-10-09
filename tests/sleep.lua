@@ -276,6 +276,39 @@ entity_def.do_custom(child, 1)
 assert(not child._villages_sleeping, "removing the bed must wake its occupant")
 assert(child_props.collisionbox[5] == 0.97)
 
+-- A growing child (#177): the engine keeps visual_size as float32, so a scale
+-- like 0.64 reads back as 0.63999999. refresh_visual must not resend
+-- properties for that, only for a real change.
+local function f32(x)
+	if x == 0 then return 0 end
+	local m, e = math.frexp(x)
+	return math.ldexp(math.floor(m * 2^24 + 0.5) / 2^24, e)
+end
+local grower, grower_props = make_villager("gina", true)
+grower.order = "stand"
+objects = {grower.object}
+entity_def.on_activate(grower, "", 0)
+grower.hornytimer = 15.5 -- scale 0.62, not exact in float32
+local sets = 0
+grower.object.set_properties = function(_, values)
+	if values.visual_size then
+		sets = sets + 1
+		grower_props.visual_size = {x = f32(values.visual_size.x), y = f32(values.visual_size.y)}
+	end
+	for k, v in pairs(values) do if k ~= "visual_size" then grower_props[k] = v end end
+end
+grower_props.visual_size = {x = 0.5, y = 0.5}
+entity_def.do_custom(grower, 0.1)
+assert(sets == 1 and math.abs(grower_props.visual_size.x - 0.62) < 1e-4, "scale applied once")
+for _ = 1, 5 do entity_def.do_custom(grower, 0.1) end
+assert(sets == 1, "an unchanged float32 scale must not be resent, sent " .. sets)
+grower.hornytimer = 30
+entity_def.do_custom(grower, 0.1)
+assert(sets == 2 and grower_props.visual_size.x == 0.75, "a real scale change must be sent")
+grower.child = nil
+entity_def.do_custom(grower, 0.1)
+assert(grower_props.visual_size.x == 1, "an adult goes to full scale")
+
 -- Regression test: Luanti can duplicate an entity across a mapblock
 -- save/reload race (see villages/init.lua for the mechanism), leaving two
 -- live villagers sharing the same _id. Both copies must independently agree

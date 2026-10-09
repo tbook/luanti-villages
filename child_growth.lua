@@ -28,19 +28,22 @@ M.ADULT_SCALE = 1
 -- once every few minutes of growth rather than every second.
 local SCALE_STEP = 0.01
 
+-- A usable setting is a positive, finite number: tonumber accepts "inf" and
+-- "nan", which would freeze a child or grow it up in one tick.
 local function setting(name)
-	return core.settings and tonumber(core.settings:get(name))
+	local value = core.settings and tonumber(core.settings:get(name))
+	if value and value > 0 and value < math.huge then return value end
 end
 
 function M.grow_days()
 	local days = setting("living_villages_child_grow_days")
-	if not days or days <= 0 then return M.DEFAULT_DAYS end
+	if not days then return M.DEFAULT_DAYS end
 	return days
 end
 
 function M.day_seconds()
 	local speed = setting("time_speed")
-	if not speed or speed <= 0 then speed = DEFAULT_TIME_SPEED end
+	if not speed then speed = DEFAULT_TIME_SPEED end
 	return 86400 / speed
 end
 

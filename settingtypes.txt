@@ -31,5 +31,7 @@ living_villages_route_max_nodes (Route planner node cap) int 4096 256 32768
 # Game days a villager child takes to grow up (#177). VoxeLibre's own is
 # about a minute. Counted in time the child is loaded and active, so it
 # pauses while no player is near. Feeding a child its food still
-# shortens it. The child also grows in size as it ages.
+# shortens it. The child also grows in size as it ages. A game day lasts
+# 86400 / time_speed seconds; with time_speed 0 (frozen clock) the default
+# of 72 (1200 s) is used, so children still age.
 living_villages_child_grow_days (Child growth time, game days) float 12 0.1 100
