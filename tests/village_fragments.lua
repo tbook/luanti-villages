@@ -4,7 +4,8 @@ minetest = {get_modpath = function() return "." end}
 
 local names = {"air", "mcl_core:stone", "mcl_core:tree", "mcl_core:leaves", "mcl_core:water_source",
 	"mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:cobble", "mcl_nether:obsidian_x",
-	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence"}
+	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence",
+	"mcl_core:snow", "mcl_core:snow_3", "mcl_core:snowblock"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local registered = {
@@ -21,6 +22,9 @@ local registered = {
 	["mcl_chests:chest"] = {is_ground_content = false, groups = {deco_block = 1, container = 2}},
 	["mcl_fences:fence"] = {is_ground_content = false, groups = {deco_block = 1, fence = 1}},
 	["mcl_core:vine_x"] = {is_ground_content = false},
+	["mcl_core:snow"] = {is_ground_content = false},
+	["mcl_core:snow_3"] = {is_ground_content = false},
+	["mcl_core:snowblock"] = {is_ground_content = false},
 }
 
 VoxelArea = {new = function(_, e)
@@ -155,6 +159,19 @@ assert(stats.seeds == 1 and stats.clipped == 0, "one fill, " .. stats.seeds)
 assert(stats.removed == total, "all " .. total .. " nodes removed, got " .. stats.removed)
 assert(count("mcl_core:tree") == 0 and count("mcl_core:leaves") == 0, "no stub or floating leaf")
 assert(writes == 1)
+
+-- Snow lying on the canopy goes with it (#210); a snow block elsewhere stays.
+map = {}
+tree(0, 0)
+put(0, 7, 0, "mcl_core:snow")
+put(1, 7, 1, "mcl_core:snow_3")
+put(9, 7, 9, "mcl_core:snow")
+put(9, 6, 9, "mcl_core:snowblock")
+put(0, 0, 0, "mcl_core:snowblock")
+fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
+assert(at(0, 7, 0) == nil and at(1, 7, 1) == nil, "snow that lay on the leaves is removed")
+assert(at(9, 7, 9) == "mcl_core:snow" and at(9, 6, 9) == "mcl_core:snowblock" and at(0, 0, 0) == "mcl_core:snowblock",
+	"snow not resting on the tree stays")
 
 -- Only a leaf of the tree inside the zone still removes the whole tree.
 map = {}

@@ -174,6 +174,16 @@ function M.clear_trees(zone, config, engine)
 		end
 		return known
 	end
+	-- A layer of snow that lay on a removed leaf would be left floating (#210).
+	local snow_of = {}
+	local function is_snow_layer(id)
+		local known = snow_of[id]
+		if known == nil then
+			known = engine.get_name_from_content_id(id):find("^mcl_core:snow_?%d*$") ~= nil
+			snow_of[id] = known
+		end
+		return known
+	end
 	local function in_zone(x, y, z)
 		for _, box in ipairs(zone) do
 			if x >= box.minp.x and x <= box.maxp.x and y >= box.minp.y and y <= box.maxp.y
@@ -213,6 +223,7 @@ function M.clear_trees(zone, config, engine)
 		return nodes, capped
 	end
 
+	local cleared = {}
 	for z = lo.z, hi.z do
 		for y = lo.y, hi.y do
 			for x = lo.x, hi.x do
@@ -224,11 +235,20 @@ function M.clear_trees(zone, config, engine)
 					for _, n in ipairs(nodes) do
 						if not capped or in_zone(n[1], n[2], n[3]) then
 							data[va:index(n[1], n[2], n[3])] = air
+							cleared[#cleared + 1] = n
 							stats.removed = stats.removed + 1
 						end
 					end
 				end
 			end
+		end
+	end
+
+	for _, n in ipairs(cleared) do
+		local x, y, z = n[1], n[2] + 1, n[3]
+		if y <= emax.y then
+			local above = va:index(x, y, z)
+			if is_snow_layer(data[above]) then data[above] = air end
 		end
 	end
 
