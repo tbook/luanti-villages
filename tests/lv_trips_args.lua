@@ -31,10 +31,12 @@ rejected("goto double decimal", good .. " --goto 1.2.3,1,1", "--goto wants")
 rejected("goto trailing dot", good .. " --goto 1.,1,1", "--goto wants")
 rejected("goto without spot", "--goto 1,2,3", "need --spot")
 rejected("build without spot", "--build tests/lv_trips_args.lua", "need --spot")
+rejected("far without spot", "--far 20", "--far needs --spot")
+rejected("far letters", good .. " --far soon", "--far wants")
 rejected("missing build file", good .. " --build no/such/file.lua", "does not exist")
 
 -- Accepted numbers get past argument checks, to the missing world.
-local ok = run(good .. " --goto -1.5,2,3.25 --build tests/lv_trips_args.lua")
+local ok = run(good .. " --goto -1.5,2,3.25 --far 20 --build tests/lv_trips_args.lua")
 check("good arguments reach the world lookup", ok:find("no world NoSuchWorld", 1, true))
 
 local choose = dofile("tools/lv_trips/mod/lv_trips/stages.lua")
