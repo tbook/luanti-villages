@@ -99,6 +99,13 @@ tools/lv_trips/run.sh Testlandia -2625,30,250 A1 --stages work --build tools/lv_
     --spot -2629,40,236:-2648,10,249 --goto -2625,42,240
 ```
 
+The probe treats every villager as having a player near (a headless server has none, and
+mcl_mobs would freeze them all). `--far SECONDS` (needs `--spot`) keeps vanilla's rule instead, so
+villagers stand still as they do when the player is more than 48 nodes away, until SECONDS after the
+spot run starts, when a player "arrives" (a negative number: never). This is how #201 was
+reproduced: `--far 20` with `--spot -1731.3,19.5,994.0:-1772,16,962 --goto -1720,22,994 --stages work` in
+Testlandia (village point `-1731,20,994`).
+
 Known limit: `--goto` starts a trip with `gopath`, which does nothing if the villager is already
 walking, and a bed trip at the home hour can win; the log says `--goto ... is not being walked` then
 (use `--stages work` for a quiet hour). Every quarter second the

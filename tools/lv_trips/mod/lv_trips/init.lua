@@ -20,6 +20,8 @@
 --   lv_trips_spot    "sx,sy,sz;bx,by,bz": mode "spot" teleports the villager that owns the bed at
 --                    b to the start s at the `home` hour and logs it every step (see README)
 --   lv_trips_goto    "gx;gy;gz": spot mode sends that villager to g instead of letting it choose
+--   lv_trips_far     SECONDS villagers stay suspended (vanilla's player-in-range test, no player near)
+--                    after the spot run starts; negative: always (see README)
 local core = minetest
 local modpath = core.get_modpath("lv_trips")
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
@@ -92,11 +94,17 @@ if mcl_moon and mcl_moon.get_moon_phase then
 end
 
 -- No player is near the headless server, so vanilla would freeze the villagers.
+-- `lv_trips_far` SECONDS leaves that as it is until SECONDS after the spot run starts (a
+-- negative number: for good): villagers more than mcl_mob_active_range (48) nodes from every
+-- player, as most of a village is for a player at one end of it (#201), then a player arrives.
+local FAR = {secs = tonumber(core.settings:get("lv_trips_far")) or 0}
 core.register_on_mods_loaded(function()
 	local class = mcl_mobs.mob_class
 	local original = class.player_in_active_range
 	class.player_in_active_range = function(self, ...)
-		if self.name == VILLAGER then return true end
+		if self.name == VILLAGER and (FAR.secs == 0 or (FAR.until_us and core.get_us_time() >= FAR.until_us)) then
+			return true
+		end
 		return original(self, ...)
 	end
 	-- A villager that dies mid-run is not a trip result; say why it died.
@@ -574,6 +582,7 @@ local function run_spot(list)
 		end
 	end
 	local began = elapsed_real
+	if FAR.secs > 0 then FAR.until_us = core.get_us_time() + FAR.secs * 1e6 end
 	local last_logged = -1
 	local function snapshot()
 		local pos, v = owner.object:get_pos(), owner.object:get_velocity() or {x = 0, y = 0, z = 0}

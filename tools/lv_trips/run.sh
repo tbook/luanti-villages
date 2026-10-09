@@ -6,7 +6,7 @@
 #   tools/lv_trips/run.sh WORLD X,Y,Z LABEL [--mode trials|day] [--rounds N]
 #                         [--stages home,work,...] [--radius R] [--speed S]
 #                         [--mod-dir PATH] [--spot SX,SY,SZ:BX,BY,BZ]
-#                         [--goto GX,GY,GZ] [--build FILE.lua]
+#                         [--goto GX,GY,GZ] [--build FILE.lua] [--far SECONDS]
 #
 # WORLD is a directory name under the user's worlds directory, X,Y,Z a point in
 # the village (a villager's position will do) and LABEL names the run and its
@@ -42,6 +42,7 @@ speed=72
 spot=
 goto=
 build=
+far=0
 mode_given=
 mod_dir=$repo_root
 # A number: optional sign, digits, optional single decimal part.
@@ -64,6 +65,11 @@ while [ $# -gt 0 ]; do
 			fi
 			goto=$(printf %s "$2" | tr ',' ';'); shift 2 ;;
 		--build) build=$2; shift 2 ;;
+		--far)
+			if ! printf %s "$2" | grep -Eq "^$num\$"; then
+				echo "--far wants SECONDS (a number), not '$2'" >&2; exit 2
+			fi
+			far=$2; shift 2 ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
@@ -71,6 +77,7 @@ done
 
 if [ -z "$spot" ]; then
 	if [ -n "$goto" ] || [ -n "$build" ]; then echo "--goto and --build need --spot" >&2; exit 2; fi
+	if [ "$far" != 0 ]; then echo "--far needs --spot" >&2; exit 2; fi
 fi
 if [ -n "$build" ] && [ ! -f "$build" ]; then echo "--build file '$build' does not exist" >&2; exit 2; fi
 if [ -n "$spot" ]; then
@@ -125,6 +132,7 @@ lv_trips_speed = $speed
 lv_trips_label = $label
 lv_trips_spot = $spot
 lv_trips_goto = $goto
+lv_trips_far = $far
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports

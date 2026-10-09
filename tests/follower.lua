@@ -179,6 +179,21 @@ run(v, 6)
 assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route", "stall")
 assert(v._villages_last_walk_failure.reason == "no progress along the route" and v._villages_last_walk_failure.day == 3, "failure kept for the diagnostic")
 
+-- A villager no player is near is suspended by mcl_mobs and cannot move: that is
+-- not a stall (#201). The walk waits, and the clock starts when a player comes.
+reset()
+v = villager(0, 0, {cell(0, 0), cell(4, 0)})
+follower.begin(v)
+v.set_velocity = function() end
+local player_near = false
+v.player_in_active_range = function() return player_near or nil end
+run(v, 10)
+assert(v.state == "gowp" and not v._villages_follow_failed, "a suspended villager's walk is not ended")
+player_near = true
+run(v, 6)
+assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route",
+	"a stall with a player near still ends the walk")
+
 -- Another villager in the way is waited for, then planned around.
 v = villager(0, 0, {cell(0, 0), cell(4, 0)})
 follower.begin(v)
