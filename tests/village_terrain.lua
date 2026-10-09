@@ -178,6 +178,34 @@ local partial, partial_why = terrain.heights({minp = vec(0, 0, 0), maxp = vec(1,
 assert(partial == nil and partial_why:find("(0,0,0)", 1, true), "ignore under a valid surface is caught")
 node = saved
 
+-- Overhangs (#209): a thin slab over air is not ground; a thick ledge and a hill are.
+local function put(x, y0, y1, name) for y = y0, y1 do map[x .. "," .. y .. ",0"] = name end end
+put(14, 11, 20, "air"); put(14, 15, 16, "mcl_core:dirt_with_grass") -- 2-thick slab over 4 air, ground at 10
+put(15, 8, 20, "air"); put(15, 12, 18, "mcl_core:stone"); put(15, 18, 18, "mcl_core:dirt_with_grass") -- 7-thick ledge over 4 air
+put(16, 11, 20, "air"); put(16, 14, 14, "mcl_core:dirt_with_grass") -- 1-thick slab over only 3 air
+put(17, 11, 20, "air"); put(17, 15, 16, "mcl_core:dirt_with_grass"); put(17, 0, 14, "air") -- slab over a drop to the area floor
+put(18, 4, 20, "air"); put(18, 10, 15, "mcl_core:stone"); put(18, 15, 15, "mcl_core:dirt_with_grass") -- 6-thick slab over 6 air
+local over = assert(terrain.heights({minp = vec(14, 0, 0), maxp = vec(19, 20, 1)}, surface))
+assert(over(14, 0).surface_y == 16 and over(14, 0).overhang, "2 thick over 4 air is an overhang")
+assert(over(15, 0).surface_y == 18 and not over(15, 0).overhang, "a 7-thick ledge is ground: a cut by 5 leaves a ceiling")
+assert(over(18, 0).surface_y == 15 and over(18, 0).overhang, "6 thick (cap + 1) is still cut through")
+assert(over(16, 0).surface_y == 14 and not over(16, 0).overhang, "a gap of 3 is not enough")
+assert(over(17, 0).overhang, "air to the bottom of the area counts")
+assert(not over(19, 0).overhang, "ordinary ground")
+assert(not over(14, 1).overhang, "the neighbouring row is ordinary ground")
+for x = 14, 18 do put(x, 0, 20, nil) end
+
+-- fill_below does not stop over air above ground lower than 20 (#209), and a
+-- column over a void gets only the foundation depth.
+put(18, 3, 9, "air")
+terrain.fill_below(18, 0, 10, nil, engine)
+assert(node(18, 9, 0) == "mcl_core:dirt" and node(18, 3, 0) == "mcl_core:dirt" and node(18, 2, 0) == "mcl_core:stone",
+	"fill reaches ground 8 down")
+put(19, -60, 9, "air")
+terrain.fill_below(19, 0, 10, nil, engine)
+assert(node(19, -10, 0) == "mcl_core:dirt" and node(19, -11, 0) == "air", "a void is filled 20 deep, no further")
+put(18, 0, 20, nil); put(19, -60, 20, nil)
+
 -- Emerge first.
 local result
 emerge_calls, emerge_action = 3, "generated"
