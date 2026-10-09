@@ -31,13 +31,27 @@ core.register_on_mods_loaded(function()
 	end
 end)
 
--- Writes one record through emit after the census seconds, then calls done().
+local cells
+local function load_cells()
+	if not cells and core.get_modpath("living_villages") then
+		cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
+	end
+	return cells
+end
+
+-- Whether a position lies inside the village's area (the query below is a sphere).
+local function inside(p, minp, maxp)
+	return p.x >= minp.x and p.x <= maxp.x and p.y >= minp.y and p.y <= maxp.y and p.z >= minp.z and p.z <= maxp.z
+end
+
+-- Steps every 10 s (so a timeline time is a multiple of 10). Writes one record through emit after the census seconds, then calls done().
 function census.run(area, emit, done)
 	local seconds = tonumber(core.settings:get("lv_probe_census")) or 0
 	local minp = {x = area.x1, y = area.y1, z = area.z1}
 	local maxp = {x = area.x2, y = area.y2, z = area.z2}
 	local center = {x = (minp.x + maxp.x) / 2, y = (minp.y + maxp.y) / 2, z = (minp.z + maxp.z) / 2}
 	local radius = math.max(maxp.x - minp.x, maxp.z - minp.z, maxp.y - minp.y)
+	load_cells()
 	local waited = 0
 	local timeline, last = {}, {}
 	local function tick()
@@ -46,7 +60,7 @@ function census.run(area, emit, done)
 		-- What each villager held at each step, so a change shows when it happened.
 		for _, object in ipairs(core.get_objects_inside_radius(center, radius)) do
 			local e = object:get_luaentity()
-			if e and e.name == "mobs_mc:villager" and e._id then
+			if e and e.name == "mobs_mc:villager" and e._id and inside(object:get_pos(), minp, maxp) then
 				local key = tostring(e._profession) .. "@" .. (e._jobsite and core.pos_to_string(e._jobsite) or "-")
 				if last[e._id] ~= key then
 					last[e._id] = key
@@ -60,7 +74,7 @@ function census.run(area, emit, done)
 		local villagers, by_id = {}, {}
 		for _, object in ipairs(core.get_objects_inside_radius(center, radius)) do
 			local e = object:get_luaentity()
-			if e and e.name == "mobs_mc:villager" then
+			if e and e.name == "mobs_mc:villager" and e._id and inside(object:get_pos(), minp, maxp) then
 				local route = e._villages_job_search_route
 				local v = {
 					id = e._id, profession = e._profession, child = e.child or nil,
@@ -69,7 +83,7 @@ function census.run(area, emit, done)
 					job_route = route and (tostring(route.status) .. "/" .. tostring(route.reason)) or nil,
 				}
 				villagers[#villagers + 1] = v
-				if e._id then by_id[e._id] = v end
+				by_id[e._id] = v
 			end
 		end
 		local stations = {}
@@ -77,11 +91,6 @@ function census.run(area, emit, done)
 			local claim = core.get_meta(p):get_string("villager")
 			-- navigation.lua's cardinal approach cells (approaches(site, true)).
 			local approach, standable = 0, 0
-			local cells = rawget(_G, "living_villages_cells_probe")
-			if not cells and core.get_modpath("living_villages") then
-				cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
-				rawset(_G, "living_villages_cells_probe", cells)
-			end
 			if cells then
 				for _, o in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
 					local c = {x = p.x + o[1], y = p.y, z = p.z + o[2]}

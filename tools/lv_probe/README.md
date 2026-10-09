@@ -62,13 +62,24 @@ refused and the second to succeed.
 
 ## Jobsite census (#217)
 
-`LV_PROBE_CENSUS=SECONDS tools/lv_probe/run.sh SEED --with-mod ...` keeps each built village alive for
-SECONDS (villagers treated as having a player near, time held at a working morning), then writes a
-`"type":"census"` line after the village's result line: every villager (`profession`, `jobsite`, `bed`,
-`pos`, `job_route`), every workstation node (`name`, `pos`, `claim`, `claimant` profession, `approach`
-and `standable` counts of the cardinal approach cells `navigation.lua` would use) and a `timeline` of
-each change of profession or jobsite with the time (seconds) it happened. Needs `--with-mod`; 300 s is
-enough for most villagers to settle. It does not change how villagers choose.
+```sh
+LV_PROBE_CENSUS=300 tools/lv_probe/run.sh 2002 --chunk -832,128 --with-mod
+```
+
+`LV_PROBE_CENSUS=SECONDS` (a whole number; needs `--with-mod`, else exit 2) keeps each built village
+alive for SECONDS, with villagers treated as having a player near and the time held at a working
+morning, then appends a `"type":"census"` line after that village's result line in
+`tools/lv_probe/results/<label>.jsonl` (e.g. `2002@-832_128-mod.jsonl`). 300 s lets most villagers
+settle. It does not change how villagers choose. `run.sh` raises its give-up limit to
+sites x (SECONDS + 120) + 600 when that exceeds 3600 (`LV_PROBE_LIMIT` overrides).
+
+Fields of the line: `seed`, `chunk`, `seconds`; `villagers[]` (villagers with an `_id` inside the
+village area: `id`, `profession`, `child`, `jobsite`, `bed`, `pos`, `state`, `order`, `job_route`);
+`stations[]` (every workstation node in the area: `name`, `pos`, `claim` and `claimant` (the
+claimant's profession), `approach` and `standable`: counts of the cardinal approach cells
+`navigation.lua` would use and how many of them a villager can stand in); `timeline[]` (each change of
+a villager's profession or jobsite: `t`, `id` (first 6 characters), `what`, `pos`, `bed`). The census
+steps every 10 s, so `t` is a multiple of 10.
 
 ## What it reports
 
