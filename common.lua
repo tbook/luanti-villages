@@ -166,6 +166,12 @@ local vanilla_activity = {
 	bell = "bell",
 }
 
+local PULPIT = "living_villages:pulpit"
+
+local function is_workstation_node(name)
+	return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
+end
+
 -- Vanilla calls get_activity() with no villager at all, so init.lua names
 -- the villager whose do_activity is running around that call.
 local current_villager
@@ -196,16 +202,13 @@ return {
 		local stage = stage_at(nil, villager)
 		return stage == "work" or stage == "staff"
 	end,
-	is_workstation_node = function(name)
-		return workstation_nodes[name] or core.get_item_group(name, "cauldron") > 0
-	end,
+	is_workstation_node = is_workstation_node,
 	-- Whether the villager's _jobsite is a workstation (or a pulpit, cleric.lua)
 	-- that carries its id.
 	has_claimed_jobsite = function(self)
 		if not self._jobsite or not self._id then return false end
 		local node = core.get_node_or_nil(self._jobsite)
-		if not node or not (workstation_nodes[node.name] or core.get_item_group(node.name, "cauldron") > 0
-			or node.name == "living_villages:pulpit") then
+		if not node or not (is_workstation_node(node.name) or node.name == PULPIT) then
 			return false
 		end
 		return core.get_meta(self._jobsite):get_string("villager") == self._id

@@ -111,8 +111,8 @@ walking, and a bed trip at the home hour can win; the log says `--goto ... is no
 (use `--stages work` for a quiet hour). Every quarter second the
 server log gets a line `[lv_trips] spot t=... pos=(...) v=(...) state=... order=... route=status/reason
 target=... wp_left=N follow=bool final=...`: the villager's position and velocity, its mover state, the
-bed route's status, the follower's current waypoint, the waypoints left and the planned final cell. The
-trip is also written as a normal `trip` line. It runs until the trip ends or for 150 s, and the
+bed route's status, the follower's current waypoint, the waypoints left and the planned final cell, plus `bed_dist` and `job_dist` (distances to the villager's bed and jobsite), `prof`, `child`, `tod` and `weather`. Each `gopath` call the villager receives is logged as `[lv_trips] gopath t=... target=... (BED|JOBSITE|elsewhere) from=... bed_dist=... order=... state=... caller=<traceback>`, which tells what asked for a trip. The
+trip is also written as a normal `trip` line. It runs until 20 s after the last trip ends (so a villager sent away again after arriving shows, #216) or for 150 s, and the
 other villagers carry on as they like, so a run can start with a route cancelled by something else
 (look at the `route=` column). The log path is printed when the run starts.
 
