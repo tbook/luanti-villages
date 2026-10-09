@@ -60,6 +60,16 @@ repeatability limits in the catalog. The probe sets
 world it reads an ungenerated area before and after `village_terrain.emerge`, and expects the first to be
 refused and the second to succeed.
 
+## Jobsite census (#217)
+
+`LV_PROBE_CENSUS=SECONDS tools/lv_probe/run.sh SEED --with-mod ...` keeps each built village alive for
+SECONDS (villagers treated as having a player near, time held at a working morning), then writes a
+`"type":"census"` line after the village's result line: every villager (`profession`, `jobsite`, `bed`,
+`pos`, `job_route`), every workstation node (`name`, `pos`, `claim`, `claimant` profession, `approach`
+and `standable` counts of the cardinal approach cells `navigation.lua` would use) and a `timeline` of
+each change of profession or jobsite with the time (seconds) it happened. Needs `--with-mod`; 300 s is
+enough for most villagers to settle. It does not change how villagers choose.
+
 ## What it reports
 
 One JSON line per site, and `report.sh` prints the main columns.

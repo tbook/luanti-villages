@@ -101,6 +101,7 @@ enable_damage = false
 lv_probe_sites = $sites
 lv_probe_radius = $radius
 lv_probe_chunk = $chunk
+lv_probe_census = ${LV_PROBE_CENSUS:-0}
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
