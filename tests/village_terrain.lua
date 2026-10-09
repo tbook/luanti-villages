@@ -152,6 +152,14 @@ local canopy = lookup(5, 0)
 assert(canopy.y == 10 and canopy.surface_y == nil, "grass with leaves below it is no surface")
 assert(lookup(50, 50) == nil and lookup(0, 5) == nil, "outside the area")
 
+-- Snow is a surface when it lies on something, not when it floats (#211).
+map["7,16,0"] = "mcl_core:snow"
+local snowy = {["mcl_core:dirt_with_grass"] = true, ["mcl_core:snow"] = true}
+local snow_lookup = assert(terrain.heights({minp = vec(0, 0, 0), maxp = vec(11, 20, 1)}, snowy))
+assert(snow_lookup(2, 0).surface_y == 11, "snow lying on grass is still a surface")
+assert(snow_lookup(7, 0).surface_y == 10, "a floating snow layer is not, the grass under it is")
+map["7,16,0"] = nil
+
 local failed, why = terrain.heights({minp = vec(10, 0, 0), maxp = vec(13, 20, 1)}, surface)
 assert(failed == nil and why:find("unloaded"), "unloaded area refuses to read")
 

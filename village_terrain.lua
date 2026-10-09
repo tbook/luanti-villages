@@ -163,8 +163,11 @@ function M.heights(area, surface_materials, engine, partial)
 				end
 				if not column.surface_y and surface_materials[t.name] then
 					local above = y < area.maxp.y and trait(data[va:index(x, y + 1, z)]) or nil
-					local below = y > area.minp.y and trait(data[va:index(x, y - 1, z)]) or nil
-					if (not above or above.open) and not (below and below.leaves) then
+					local below_id = y > area.minp.y and data[va:index(x, y - 1, z)] or nil
+					local below = below_id and trait(below_id) or nil
+					-- A snow layer with air under it floats (its tree is gone): not ground.
+					local floating = t.name == "mcl_core:snow" and below_id == engine.CONTENT_AIR
+					if (not above or above.open) and not (below and below.leaves) and not floating then
 						column.surface_y, column.material = y, t.name
 					end
 				end
