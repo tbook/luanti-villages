@@ -278,7 +278,8 @@ local function follow(self, dtime)
 	-- acceleration added while a player is in range): it stands wherever it is
 	-- however the walk goes. That is not a stall, and ending the walk, planning
 	-- again and trying the other end of the trip only churned (#201, #202).
-	-- Wait for a player; the walk goes on from here.
+	-- Wait for a player; the walk goes on from here. That includes the last
+	-- waypoint: a villager waiting on it only arrives once a player is near.
 	if self.player_in_active_range and not self:player_in_active_range() then
 		f.progress_pos, f.still, f.blocked = vector.new(pos), 0, 0
 		return

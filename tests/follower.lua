@@ -185,12 +185,17 @@ reset()
 v = villager(0, 0, {cell(0, 0), cell(4, 0)})
 follower.begin(v)
 v.set_velocity = function() end
-local player_near = false
+local player_near = true
 v.player_in_active_range = function() return player_near or nil end
+run(v, 2.5) -- 2.5 s of no progress with a player near, short of ending the walk
+assert(v.state == "gowp", "not yet a stall")
+player_near = false
 run(v, 10)
 assert(v.state == "gowp" and not v._villages_follow_failed, "a suspended villager's walk is not ended")
 player_near = true
-run(v, 6)
+run(v, 2)
+assert(v.state == "gowp" and not v._villages_follow_failed, "the stall clock restarts when the player comes")
+run(v, 3)
 assert(v._villages_follow_failed and v._villages_follow_failed.reason == "no progress along the route",
 	"a stall with a player near still ends the walk")
 
