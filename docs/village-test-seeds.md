@@ -84,6 +84,33 @@ Orphans are leaves with no trunk within 6 nodes, counted only after the build, s
 that generation left unsupported. Compare the count before and after a change, not against zero.
 Traps count columns.
 
+### With living_villages (#155)
+
+The same cases with `run_cases.sh --with-mod`, before and after the hole and cliff filling of #155
+(`origin/main` at 62ec0be against that branch). Step, Steps>1 and Traps after the build, as above.
+Terrain, Pit and the rest do not change. The probe is not exactly repeatable: Traps moved by a few
+columns between identical runs of the tree-heavy and snow cases (snow-flat 2 to 4 on main, 0 to 6 with
+the change), and Orphans and Steps>1 by about 10%.
+
+| Case | Step | Steps>1 | Traps |
+|------|------|---------|-------|
+| cliff | 84 / 84 | 2463 / 2451 | 5 / 5 |
+| hillside | 82 / 79 | 2044 / 2005 | 0 / 0 |
+| tower | 23 / 23 | 1770 / 1764 | 72 / 72 |
+| mountain-edge | 83 / 83 | 259 / 250 | 2 / 2 |
+| pit | 9 / 9 | 78 / 60 | 0 / 0 |
+| forest | 23 / 23 | 647 / 637 | 61 / 61 |
+| jungle | 20 / 20 | 637 / 564 | 0 / 0 |
+| portal | 14 / 22 | 335 / 332 | 0 / 0 |
+| portal-outpost | 36 / 35 | 464 / 467 | 9 / 9 |
+| outpost | 20 / 20 | 460 / 455 | 27 / 27 |
+| flat | 9 / 9 | 138 / 138 | 7 / 7 |
+| flat-small | 12 / 12 | 122 / 122 | 0 / 0 |
+| snow-flat | 17 / 18 | 1054 / 750 | 2 / 0 |
+| snow-steep | 80 / 80 | 1361 / 1078 | 72 / 72 |
+| desert | 8 / 8 | 325 / 315 | 38 / 38 |
+| mesa | 12 / 12 | 107 / 97 | 0 / 0 |
+
 ### Village yield
 
 The sites VoxeLibre tried on seeds 2001 to 2030, 14 per seed, nearest the origin within 2400

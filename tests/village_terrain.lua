@@ -4,7 +4,7 @@ local function vec(x, y, z) return {x = x, y = y, z = z} end
 
 -- Node ids for a few materials.
 local names = {"air", "mcl_core:stone", "mcl_core:dirt", "mcl_core:dirt_with_grass", "mcl_core:water_source",
-	"mcl_core:tree", "mcl_core:leaves", "mcl_core:sand", "mcl_flowers:tallgrass", "mcl_core:snow"}
+	"mcl_core:tree", "mcl_core:leaves", "mcl_core:sand", "mcl_flowers:tallgrass", "mcl_core:snow", "mcl_core:cactus"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local ignore_id = 99
@@ -15,6 +15,7 @@ local registered = {
 	["mcl_core:tree"] = {walkable = true}, ["mcl_core:leaves"] = {walkable = true},
 	["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
 	["mcl_flowers:tallgrass"] = {walkable = false}, ["mcl_core:snow"] = {walkable = true},
+	["mcl_core:cactus"] = {walkable = true},
 }
 
 -- A fake map: flat grass at y=10, a hill (top 14) at x=3..4, a shaft down to a
@@ -43,6 +44,7 @@ local function node(x, y, z)
 		if y == 14 then return "mcl_core:leaves" end
 		if y > 14 then return "air" end
 	end
+	if x == 9 and y >= 11 and y <= 13 then return "mcl_core:cactus" end
 	if x == 1 and y == 11 then return "mcl_flowers:tallgrass" end
 	if x == 2 and y == 11 then return "mcl_core:snow" end
 	if x == 5 then
@@ -143,6 +145,9 @@ assert(tree.y == 14 and tree.name == "mcl_core:leaves" and not tree.liquid, "tre
 assert(tree.surface_y == 10 and tree.material == "mcl_core:dirt_with_grass",
 	"grass under a trunk is a surface, as find_surface accepts a tree above it")
 assert(tree.ground_y == 13 and tree.ground_name == "mcl_core:tree" and not tree.ground_liquid, "ground skips leaves")
+assert(tree.base_y == 10 and tree.base_name == "mcl_core:dirt_with_grass", "base skips the trunk as well")
+local cactus = lookup(9, 0)
+assert(cactus.ground_y == 13 and cactus.base_y == 10 and not cactus.base_liquid, "base skips a cactus")
 assert(pond.ground_y == 10 and pond.ground_liquid, "ground of a pond is its water")
 local tuft = lookup(1, 0)
 assert(tuft.y == 10 and tuft.surface_y == 10, "a plant is not solid and is open space above the surface")

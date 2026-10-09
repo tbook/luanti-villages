@@ -3,7 +3,7 @@
 -- each footprint and clears straight up, which leaves dirt towers and deep
 -- shafts. This replaces it, and runs the terraform steps in order: load the
 -- area, clear whole trees (village_fragments.clear_trees, #141), smooth, then fill
--- the holes the smoothing leaves (village_holes.lua, #142).
+-- the holes and cliffs the smoothing leaves (village_holes.lua, #142, #155).
 --
 -- Each building gets a pad, its footprint plus a flat yard at the site's height.
 -- Every column within `radius` of a pad is pulled toward an inverse-distance
@@ -317,8 +317,8 @@ function M.terraform(plan, pr, env, config)
 	local hole_started = engine.get_us_time and engine.get_us_time()
 	local plan, hole_reason = holes.run(pads, hole_area, env)
 	if plan then
-		engine.log("action", ("[living_villages] holes: %d capped, %d filled, %d with water left alone, %d columns still trapped, %d unloaded blocks skipped%s")
-			:format(plan.capped, plan.filled, plan.skipped, plan.left, hole_missing,
+		engine.log("action", ("[living_villages] holes: %d columns filled, %d ramped (%d nodes), %d dropped over a limit, steps over 1 block %d -> %d, %d unloaded blocks skipped%s")
+			:format(#plan.cells - plan.ramped, plan.ramped, plan.nodes, plan.dropped, plan.cliffs_before, plan.cliffs_after, hole_missing,
 				hole_started and (", " .. math.floor((engine.get_us_time() - hole_started) / 1000) .. " ms") or ""))
 	else
 		engine.log("warning", "[living_villages] holes not filled: " .. tostring(hole_reason))
