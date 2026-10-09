@@ -4,7 +4,7 @@ minetest = {get_modpath = function() return "." end}
 
 local names = {"air", "mcl_core:stone", "mcl_core:tree", "mcl_core:leaves", "mcl_core:water_source",
 	"mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:cobble", "mcl_nether:obsidian_x",
-	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence"}
+	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence", "mcl_core:snow", "mcl_core:snow_3", "mcl_core:snowblock"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local registered = {
@@ -21,6 +21,7 @@ local registered = {
 	["mcl_chests:chest"] = {is_ground_content = false, groups = {deco_block = 1, container = 2}},
 	["mcl_fences:fence"] = {is_ground_content = false, groups = {deco_block = 1, fence = 1}},
 	["mcl_core:vine_x"] = {is_ground_content = false},
+	["mcl_core:snow"] = {}, ["mcl_core:snow_3"] = {}, ["mcl_core:snowblock"] = {},
 }
 
 VoxelArea = {new = function(_, e)
@@ -217,6 +218,22 @@ for i = 0, 20 do put(i, 3, 0, "mcl_core:tree") end -- one trunk line 20 long
 stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
 assert(stats.clipped == 1 and at(0, 3, 0) == nil and at(1, 3, 0) == nil
 	and at(2, 3, 0) == "mcl_core:tree" and at(20, 3, 0) == "mcl_core:tree", "only the zone part of a runaway tree goes")
+
+-- Snow layers resting on a removed leaf go too (they would float, #211); snow on
+-- the ground, snow blocks and snow on a tree outside the zone stay.
+map = {}
+tree(0, 0)
+put(0, 7, 0, "mcl_core:snow")
+put(1, 7, 1, "mcl_core:snow_3")
+put(2, 7, 2, "mcl_core:snowblock")
+put(0, 1, 5, "mcl_core:snow")
+tree(30, 0)
+put(30, 7, 0, "mcl_core:snow")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
+assert(at(0, 7, 0) == nil and at(1, 7, 1) == nil and stats.snow == 2, "snow on the leaves goes, got " .. stats.snow)
+assert(at(2, 7, 2) == "mcl_core:snowblock", "a snow block is not a layer")
+assert(at(0, 1, 5) == "mcl_core:snow", "snow on the ground stays")
+assert(at(30, 7, 0) == "mcl_core:snow", "snow on a tree that stands stays")
 
 -- Empty zone.
 assert(fragments.clear_trees({}, nil, engine()).removed == 0)

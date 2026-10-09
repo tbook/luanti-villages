@@ -139,8 +139,9 @@ end
 -- outside the zone. A fill that reaches the cap clips to the zone instead, so a
 -- dense canopy linking many trees isn't eaten. Reads and writes the area with a
 -- single VoxelManip, so it needs the blocks loaded; see village_terrain.emerge.
--- Returns {seeds, removed, clipped}: fills started, nodes removed, and fills
--- that hit the cap.
+-- Snow layers resting on a removed node go with it. Returns {seeds, removed,
+-- clipped, snow}: fills started, nodes removed, fills that hit the cap, and
+-- snow layers removed.
 function M.clear_trees(zone, config, engine)
 	engine = engine or core
 	config = config or M.config
@@ -152,7 +153,7 @@ function M.clear_trees(zone, config, engine)
 		lo.x, lo.y, lo.z = math.min(lo.x, box.minp.x), math.min(lo.y, box.minp.y), math.min(lo.z, box.minp.z)
 		hi.x, hi.y, hi.z = math.max(hi.x, box.maxp.x), math.max(hi.y, box.maxp.y), math.max(hi.z, box.maxp.z)
 	end
-	local stats = {seeds = 0, removed = 0, clipped = 0}
+	local stats = {seeds = 0, removed = 0, clipped = 0, snow = 0}
 	if not lo then return stats end
 	local region_min = {x = lo.x - radius, y = lo.y - height, z = lo.z - radius}
 	local region_max = {x = hi.x + radius, y = hi.y + height, z = hi.z + radius}
@@ -171,6 +172,19 @@ function M.clear_trees(zone, config, engine)
 			local def = engine.registered_nodes[name]
 			known = is_trunk(name, def) or is_leaves(name, def)
 			tree_of[id] = known
+		end
+		return known
+	end
+	-- Snow layers rest on leaves and trunks in cold biomes. They are not part of the
+	-- tree, so once it is gone they would float, and village_terrain.heights reads a
+	-- floating layer (mcl_core:snow is a village surface) as the ground (#211).
+	local snow_of = {}
+	local function is_snow_layer(id)
+		local known = snow_of[id]
+		if known == nil then
+			local name = engine.get_name_from_content_id(id)
+			known = name:find("^mcl_core:snow") ~= nil and name ~= "mcl_core:snowblock"
+			snow_of[id] = known
 		end
 		return known
 	end
@@ -225,6 +239,13 @@ function M.clear_trees(zone, config, engine)
 						if not capped or in_zone(n[1], n[2], n[3]) then
 							data[va:index(n[1], n[2], n[3])] = air
 							stats.removed = stats.removed + 1
+							if n[2] + 1 <= emax.y then
+								local above = va:index(n[1], n[2] + 1, n[3])
+								if is_snow_layer(data[above]) then
+									data[above] = air
+									stats.snow = stats.snow + 1
+								end
+							end
 						end
 					end
 				end
