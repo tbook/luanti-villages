@@ -31,6 +31,7 @@ local function box(g, x0, z0, x1, z1, f)
 	for x = x0, x1 do for z = z0, z1 do f(g[x][z], x, z) end end
 end
 local none = function() return false end
+local function low(g) box(g, 0, 0, W - 1, W - 1, function(c) c.y = 0 end) end
 
 -- Independent check: the largest difference between adjacent dry columns of a plan.
 local function steepest(plan, skip)
@@ -107,19 +108,33 @@ plan = holes.plan(spec_of(g), cfg)
 assert(steepest(plan) <= 1, "stair and sheer side both resolved: " .. steepest(plan))
 assert(plan.at(9, 9) >= 9, "the shaft is filled up to the ground")
 
--- Cascade: a slow step up that ends in a cliff becomes a ramp to the top. Flat 0,
--- then 1, 2, then a wall to 5 across the whole width.
+-- Cascade: a slow step up that ends in a cliff becomes a ramp to the top. A block
+-- of ground at 5 with a step of 1 and one of 2 before its west face; the ramp also
+-- tapers off round the block, so no cliff is left anywhere.
 g = grid(function(g)
-	for x = 0, W - 1 do for z = 0, W - 1 do
-		g[x][z].y = x < 10 and 0 or x == 10 and 1 or x == 11 and 2 or 5
-	end end
+	low(g)
+	box(g, 12, 8, 16, 16, function(c) c.y = 5 end)
+	box(g, 10, 8, 10, 16, function(c) c.y = 1 end)
+	box(g, 11, 8, 11, 16, function(c) c.y = 2 end)
 end)
 plan = holes.plan(spec_of(g, none), cfg)
-assert(plan.cliffs_before == W and plan.cliffs_after < plan.cliffs_before, "the cliff is closed")
-for z = 3, W - 4 do assert(math.abs(plan.at(11, z) - plan.at(12, z)) <= 1, "no cliff in the middle") end
+assert(plan.cliffs_before > 0 and plan.cliffs_after == 0 and steepest(plan) <= 1, "ramp, no cliff")
 assert(plan.at(11, 12) == 4 and plan.at(10, 12) == 3 and plan.at(9, 12) == 2 and plan.at(8, 12) == 1 and plan.at(7, 12) == 0,
 	"cascades back along the slope")
 assert(plan.ramped > 0, "counted as ramped")
+-- A ramp that cannot taper off, because a protected column stops it, is not half built:
+-- the ledge beside a pad stays as it was.
+g = grid(function(g) low(g); box(g, 12, 8, 16, 16, function(c) c.y = 5 end) end)
+plan = holes.plan(spec_of(g, function(x, z) return x == 8 and z == 12 end), cfg)
+assert(plan.at(11, 12) == 0 and plan.at(11, 11) == 0, "a ramp that would end in a new cliff is not built")
+-- A ledge raised against a wall with a deep pit beside it that cannot follow is undone.
+g = grid(function(g)
+	low(g)
+	box(g, 12, 8, 16, 16, function(c) c.y = 5 end)
+	box(g, 8, 8, 11, 8, function(c) c.y = -30 end)
+end)
+plan = holes.plan(spec_of(g, none), cfg)
+assert(plan.cliffs_after <= plan.cliffs_before)
 -- A wall taller than cliff_rise is landscape: left as it is, and not half-built.
 g = grid(function(g)
 	for x = 0, W - 1 do for z = 0, W - 1 do g[x][z].y = x < 12 and 0 or 30 end end

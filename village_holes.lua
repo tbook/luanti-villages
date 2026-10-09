@@ -195,36 +195,58 @@ function M.plan(spec, config)
 	end
 
 	-- Phase 2: close cliffs by raising toward the higher neighbor, within `cliff_rise`.
+	-- A raise that deepens a drop on its other side (a ledge raised against a wall, with
+	-- a pit beyond that cannot follow) is undone, and the column held at its phase 1
+	-- height; the rest then settle again. Held columns only grow in number, so this stops.
 	local rise, passes = config.cliff_rise or 0, 0
 	if rise > 0 then
-		local order = {}
+		local order, base, held = {}, {}, {}
 		for i in pairs(h) do
+			base[i] = h[i]
 			if not fixed[i] then order[#order + 1] = i end
 		end
 		table.sort(order)
-		for _ = 1, config.passes do
-			local changed = false
+		for _ = 1, config.rounds or 50 do
+			for _ = 1, config.passes do
+				local changed = false
+				for _, i in ipairs(order) do
+					if not held[i] then
+						local top = -math.huge
+						for _, n in ipairs(nbr[i]) do
+							if h[n] > top then top = h[n] end
+						end
+						local to = top - 1
+						-- Only the whole way: a limit that stops the column short of closing
+						-- the cliff leaves it alone, since a bump would be no use. Limits are
+						-- the ring ceiling and, beside a protected column, one above it.
+						local limit = ceil[i] or math.huge
+						for _, n in ipairs(nbr[i]) do
+							if fixed[n] then limit = math.min(limit, h[n] + 1) end
+						end
+						if to > h[i] and to <= limit and to - orig[i] <= rise then
+							h[i] = to
+							phase[i] = phase[i] or 2
+							changed = true
+						end
+					end
+				end
+				passes = passes + 1
+				if not changed then break end
+			end
+			local bad = {}
 			for _, i in ipairs(order) do
-				local top = -math.huge
-				for _, n in ipairs(nbr[i]) do
-					if h[n] > top then top = h[n] end
-				end
-				local to = top - 1
-				-- Only the whole way: a limit that stops the column short of closing the
-				-- cliff leaves it alone, since a bump would be no use. Limits are the ring
-				-- ceiling and, beside a protected column, one above it: no new cliff at a pad.
-				local limit = ceil[i] or math.huge
-				for _, n in ipairs(nbr[i]) do
-					if fixed[n] then limit = math.min(limit, h[n] + 1) end
-				end
-				if to > h[i] and to <= limit and to - orig[i] <= rise then
-					h[i] = to
-					phase[i] = phase[i] or 2
-					changed = true
+				if h[i] > base[i] then
+					for _, n in ipairs(nbr[i]) do
+						local drop = h[i] - h[n]
+						if drop >= 2 and drop > base[i] - base[n] then bad[#bad + 1] = i break end
+					end
 				end
 			end
-			passes = passes + 1
-			if not changed then break end
+			if #bad == 0 then break end
+			for _, i in ipairs(bad) do
+				h[i], held[i] = base[i], true
+				if phase[i] == 2 then phase[i] = nil end
+			end
 		end
 	end
 
