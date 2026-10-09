@@ -6,6 +6,7 @@
 #   tools/lv_trips/run.sh WORLD X,Y,Z LABEL [--mode trials|day] [--rounds N]
 #                         [--stages home,work,...] [--radius R] [--speed S]
 #                         [--mod-dir PATH] [--spot SX,SY,SZ:BX,BY,BZ]
+#                         [--goto GX,GY,GZ] [--build FILE.lua]
 #
 # WORLD is a directory name under the user's worlds directory, X,Y,Z a point in
 # the village (a villager's position will do) and LABEL names the run and its
@@ -39,8 +40,12 @@ stages=
 radius=64
 speed=72
 spot=
+goto=
+build=
 mode_given=
 mod_dir=$repo_root
+# A number: optional sign, digits, optional single decimal part.
+num='-?[0-9]+(\.[0-9]+)?'
 while [ $# -gt 0 ]; do
 	case $1 in
 		--mode) mode=$2; mode_given=1; shift 2 ;;
@@ -49,18 +54,25 @@ while [ $# -gt 0 ]; do
 		--radius) radius=$2; shift 2 ;;
 		--speed) speed=$2; shift 2 ;;
 		--spot)
-			case $2 in
-				*[!0-9.,:-]* | '') echo "--spot wants SX,SY,SZ:BX,BY,BZ (numbers), not '$2'" >&2; exit 2 ;;
-			esac
-			if ! printf %s "$2" | grep -Eq '^-?[0-9.]+(,-?[0-9.]+){2}:-?[0-9.]+(,-?[0-9.]+){2}$'; then
-				echo "--spot wants SX,SY,SZ:BX,BY,BZ, not '$2'" >&2; exit 2
+			if ! printf %s "$2" | grep -Eq "^$num(,$num){2}:$num(,$num){2}\$"; then
+				echo "--spot wants SX,SY,SZ:BX,BY,BZ (numbers), not '$2'" >&2; exit 2
 			fi
 			spot=$(printf %s "$2" | tr ':' ';'); shift 2 ;;
+		--goto)
+			if ! printf %s "$2" | grep -Eq "^$num(,$num){2}\$"; then
+				echo "--goto wants GX,GY,GZ (numbers), not '$2'" >&2; exit 2
+			fi
+			goto=$(printf %s "$2" | tr ',' ';'); shift 2 ;;
+		--build) build=$2; shift 2 ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
 
+if [ -z "$spot" ]; then
+	if [ -n "$goto" ] || [ -n "$build" ]; then echo "--goto and --build need --spot" >&2; exit 2; fi
+fi
+if [ -n "$build" ] && [ ! -f "$build" ]; then echo "--build file '$build' does not exist" >&2; exit 2; fi
 if [ -n "$spot" ]; then
 	if [ -n "$mode_given" ]; then echo "--spot is its own mode; drop --mode" >&2; exit 2; fi
 	mode=spot
@@ -84,6 +96,7 @@ mkdir -p "$work" "$results"
 cp -cR "$worlds/$source_world" "$world" 2> /dev/null || cp -R "$worlds/$source_world" "$world"
 mkdir -p "$world/worldmods"
 cp -R "$here/mod/lv_trips" "$world/worldmods/lv_trips"
+if [ -n "$build" ]; then cp "$build" "$world/worldmods/lv_trips/build.lua"; fi
 lv_stage_mod "$mod_dir" "$world/worldmods/living_villages"
 rm -f "$world/lv_trips.jsonl" "$world/lv_trips.done"
 # Mods named by a path (mods/x) load by name; the bare name is what the game needs.
@@ -111,6 +124,7 @@ lv_trips_stages = $stages
 lv_trips_speed = $speed
 lv_trips_label = $label
 lv_trips_spot = $spot
+lv_trips_goto = $goto
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports

@@ -83,8 +83,25 @@ To watch a single trip that went wrong, teleport the owner of a bed to a start a
 tools/lv_trips/run.sh Testlandia 570,17,-2145 spot --spot 599,17.5,-2137:590,20,-2177
 ```
 
-`--spot SX,SY,SZ:BX,BY,BZ` (mode `spot`; `--rounds` and `--stages` are ignored) wakes the villager that
-owns the bed at B, puts it at S at the `home` hour and leaves it to walk home. Every quarter second the
+`--spot SX,SY,SZ:BX,BY,BZ` (mode `spot`; `--rounds` is ignored) wakes the villager that
+owns the bed at B, puts it at S at the `home` hour and leaves it to walk home. `--stages NAME` picks
+another hour for the spot (the first name listed; an unknown name is an error): `night` (late evening, when every schedule says
+home), `church` (a holiday service), `work`. The villagers' beds are logged as
+`[lv_trips] villager ID bed=... jobsite=...` to choose B from. `--goto GX,GY,GZ` sends the villager
+to G instead, and `--build FILE.lua` runs a Lua script on the clone first (it can place nodes, e.g. a
+test staircase on a floating floor; keep the area within `--radius` and 40 nodes of the village
+point's height). `--goto` and `--build` need `--spot`, and a bad number or a missing file is refused
+before anything starts. `builds/stairs.lua` is the #64 staircase lanes, with Testlandia coordinates
+(X=-2630, Z=240; village point `-2625,30,250`):
+
+```sh
+tools/lv_trips/run.sh Testlandia -2625,30,250 A1 --stages work --build tools/lv_trips/builds/stairs.lua \
+    --spot -2629,40,236:-2648,10,249 --goto -2625,42,240
+```
+
+Known limit: `--goto` starts a trip with `gopath`, which does nothing if the villager is already
+walking, and a bed trip at the home hour can win; the log says `--goto ... is not being walked` then
+(use `--stages work` for a quiet hour). Every quarter second the
 server log gets a line `[lv_trips] spot t=... pos=(...) v=(...) state=... order=... route=status/reason
 target=... wp_left=N follow=bool final=...`: the villager's position and velocity, its mover state, the
 bed route's status, the follower's current waypoint, the waypoints left and the planned final cell. The
