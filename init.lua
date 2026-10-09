@@ -5,6 +5,7 @@ local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local is_sleep_time = common.is_sleep_time
 local is_standing_space = common.is_standing_space
 local is_suffocating = common.is_suffocating
+local far_trips = dofile(core.get_modpath("living_villages") .. "/far_trips.lua")
 -- core.register_entity requires the loading mod's own name-prefix context
 -- (register.lua's check_modname_prefix reads core.get_current_modname()),
 -- which is only valid during a mod's own normal load -- not from inside the
@@ -515,7 +516,7 @@ core.register_on_mods_loaded(function()
 
 		-- Vanilla's get_activity() takes no villager, so name this one for it:
 		-- a keeper keeps different hours from everyone else (#22).
-		local result = common.as_villager(self, original_custom, self, dtime)
+		local result = far_trips.call(self, common.as_villager, self, original_custom, self, dtime)
 		if result == false then return false end
 		tick_visual(self)
 

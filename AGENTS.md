@@ -27,6 +27,7 @@ their jobsite lose it, so vanilla demotes them.
 | `keeper.lua` | Tavern keeper role, which is a butcher underneath and claims a jukebox, plus its menu and hours |
 | `music.lua` | On holidays the keeper on duty plays the jukebox's disc from dinner to close |
 | `tavern.lua` | The evening tavern visit and keeper takeover |
+| `far_trips.lua` | Hides the bed from vanilla's `wandered_too_far` test (#216) while a villager has an errand (claimed jobsite at work, tavern, church, bell) more than 50 nodes from home; `init.lua` runs vanilla's `do_custom` through it |
 | `wander.lua` | Replaces vanilla's aimless walk with short, checked straight legs that stop short of walls |
 | `seat.lua` | Chair reservation and the sitting pose, for dinner tables and church pews |
 | `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
