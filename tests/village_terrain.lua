@@ -201,9 +201,37 @@ put(18, 3, 9, "air")
 terrain.fill_below(18, 0, 10, nil, engine)
 assert(node(18, 9, 0) == "mcl_core:dirt" and node(18, 3, 0) == "mcl_core:dirt" and node(18, 2, 0) == "mcl_core:stone",
 	"fill reaches ground 8 down")
+-- No solid node within 20 (a void, or a cave floor 30 down): nothing is filled, so no dirt
+-- column hangs in the cave.
 put(19, -60, 9, "air")
 terrain.fill_below(19, 0, 10, nil, engine)
-assert(node(19, -10, 0) == "mcl_core:dirt" and node(19, -11, 0) == "air", "a void is filled 20 deep, no further")
+assert(node(19, 9, 0) == "air" and node(19, -10, 0) == "air", "a void is not filled")
+put(19, -60, 9, "air"); put(19, -20, -20, "mcl_core:stone")
+terrain.fill_below(19, 0, 10, nil, engine)
+assert(node(19, 9, 0) == "air" and node(19, -19, 0) == "air", "a cave floor 30 down is not reached")
+-- Ground exactly 20 down is reached.
+put(19, 9, 9, "air"); put(19, -10, -10, "mcl_core:stone")
+terrain.fill_below(19, 0, 10, nil, engine)
+assert(node(19, 9, 0) == "mcl_core:dirt" and node(19, -9, 0) == "mcl_core:dirt" and node(19, -10, 0) == "mcl_core:stone", "ground 20 down")
+-- Unloaded nodes are not swapped; the fill stops above them.
+put(19, -60, 9, "air"); put(19, 5, 5, "ignore")
+terrain.fill_below(19, 0, 10, nil, engine)
+assert(node(19, 9, 0) == "mcl_core:dirt" and node(19, 6, 0) == "mcl_core:dirt" and node(19, 5, 0) == "ignore"
+	and node(19, 4, 0) == "air", "stops at ignore")
+-- Water is filled through, down to the ground (a raised pond column).
+put(19, -60, 9, "air"); put(19, 6, 9, "mcl_core:water_source"); put(19, 5, 5, "mcl_core:sand")
+terrain.fill_below(19, 0, 10, nil, engine)
+assert(node(19, 9, 0) == "mcl_core:dirt" and node(19, 6, 0) == "mcl_core:dirt" and node(19, 5, 0) == "mcl_core:sand", "through water")
+
+-- is_overhang for callers that read one node at a time.
+local function kinds(spec) return function(fy) return spec[fy] or "solid" end end
+local air = {}
+for fy = 4, 9 do air[fy] = "air" end
+assert(terrain.is_overhang(11, kinds(air), 0), "2 thick over 6 air")
+assert(not terrain.is_overhang(11, kinds({[8] = "air", [9] = "air", [10] = "air"}), 0), "3 air is a pocket")
+assert(not terrain.is_overhang(30, kinds({}), 0), "solid to the bottom")
+assert(terrain.is_overhang(11, kinds({[9] = "air", [8] = "air", [7] = "air", [6] = "air"}), 0), "exactly the minimum gap")
+assert(not terrain.is_overhang(20, kinds({[12] = "air", [11] = "air", [10] = "air", [9] = "air"}), 0), "8 thick is ground")
 put(18, 0, 20, nil); put(19, -60, 20, nil)
 
 -- Emerge first.

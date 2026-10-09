@@ -84,9 +84,9 @@ assert(smoothing.targets({}, flat(1), cfg).at(0, 0) == nil)
 local swaps, map = {}, {}
 local function key(x, y, z) return x .. "," .. y .. "," .. z end
 local engine = {
-	registered_nodes = {air = {walkable = false}, ["mcl_core:dirt"] = {walkable = true}},
+	registered_nodes = {air = {walkable = false}, ["mcl_core:dirt"] = {walkable = true}, ["mcl_core:stone"] = {walkable = true}},
 	swap_node = function(p, n) map[key(p.x, p.y, p.z)] = n.name; swaps[#swaps + 1] = n.name end,
-	get_node = function(p) return {name = map[key(p.x, p.y, p.z)] or "air"} end,
+	get_node = function(p) return {name = map[key(p.x, p.y, p.z)] or (p.y <= 0 and "mcl_core:stone" or "air")} end, -- ground at y 0
 }
 local small = pads_of({0, 0, 10, "mcl_core:sand"})
 local tt = smoothing.targets(small, flat(14), cfg)
@@ -177,9 +177,13 @@ assert(loads > 0)
 assert(world["8,16,1"] == nil, "structure block not removed")
 assert(world["8,14,1"] == nil and world["8,15,1"] == nil, "ground beside the structure untouched")
 assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air", "footprint cut to the pad")
-assert(world["-6,31,1"] == "mcl_core:dirt_with_grass" and world["-6,30,1"] == "mcl_core:dirt_with_grass",
-	"the overhang slab is left as it was")
-for y = 15, 29 do assert(world["-6," .. y .. ",1"] ~= "mcl_core:dirt", "no pillar of fill under the slab at " .. y) end
+-- The whole overhang column is as nature made it: slab at 30..31, air 15..29 and above 31,
+-- and the ground (14 and below) untouched.
+for y = 15, 40 do
+	local want = (y == 30 or y == 31) and "mcl_core:dirt_with_grass" or "air"
+	assert(world["-6," .. y .. ",1"] == want, "overhang column changed at y=" .. y .. ": " .. tostring(world["-6," .. y .. ",1"]))
+end
+for y = 0, 14 do assert(world["-6," .. y .. ",1"] == nil, "ground under the overhang written at y=" .. y) end
 assert(world["-6,18,2"] == "air", "a normal hill beside it is still cut")
 -- The ground beside it was smoothed to 13, so the shaft is filled from its floor to 13.
 assert(world["13,13,1"] == "mcl_core:dirt_with_grass" and world["13,12,1"] == "mcl_core:dirt"
