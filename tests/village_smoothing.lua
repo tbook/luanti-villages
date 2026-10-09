@@ -159,12 +159,12 @@ assert(loads > 0)
 assert(world["8,16,1"] == nil, "structure block not removed")
 assert(world["8,14,1"] == nil and world["8,15,1"] == nil, "ground beside the structure untouched")
 assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air", "footprint cut to the pad")
--- The ground beside it was smoothed to 12, so the lid is 10..12 with grass on top.
-assert(world["13,12,1"] == "mcl_core:dirt_with_grass" and world["13,11,1"] == "mcl_core:dirt"
-	and world["13,10,1"] == "mcl_core:dirt", "shaft capped at the rim")
-assert(world["13,9,1"] == nil and world["13,13,1"] == nil, "cavity left open under the lid")
+-- The ground beside it was smoothed to 13, so the shaft is filled from its floor to 13.
+assert(world["13,13,1"] == "mcl_core:dirt_with_grass" and world["13,12,1"] == "mcl_core:dirt"
+	and world["13,0,1"] == "mcl_core:dirt" and world["13,-7,1"] == "mcl_core:dirt", "shaft filled to the rim")
+assert(world["13,14,1"] == nil, "nothing above the rim")
 local joined = table.concat(logs, "\n")
-assert(joined:find("holes: 1 capped", 1, true), "reports the cap")
+assert(joined:find("holes: ", 1, true), "reports the fill")
 assert(joined:find("unloaded blocks skipped", 1, true), "reports skipped blocks")
 
 -- An empty plan falls back to the original.

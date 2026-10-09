@@ -1,6 +1,14 @@
 # Generate villages on smoothed, planned terrain. Turn off to fall back to
 # VoxeLibre's own village generation if something goes wrong.
 living_villages_smooth_villages (Smooth villages) bool true
+# Village holes and cliffs (#155), when smoothing is on. Holes and shafts of any
+# depth are filled to the surrounding ground. A cliff between a column and a
+# higher neighbor is turned into a ramp if the column has to rise no more than
+# this; a taller wall is left. 0 leaves cliffs alone and fills holes only.
+living_villages_cliff_rise (Largest cliff to ramp) int 4 0 32
+# The most nodes one village's hole and cliff filling may write. Smaller pieces
+# are done first; what does not fit is left as it was.
+living_villages_hole_budget (Hole filling node budget) int 60000 0 1000000
 
 # Villagers wear grass they keep walking over into paths (#12).
 living_villages_natural_paths (Natural paths) bool true
