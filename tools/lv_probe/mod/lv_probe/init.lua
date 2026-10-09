@@ -16,6 +16,7 @@ local core = minetest
 local modpath = core.get_modpath("lv_probe")
 local metrics = dofile(modpath .. "/metrics.lua")
 local index = dofile(modpath .. "/village_index.lua")
+local census = dofile(modpath .. "/census.lua")
 
 local MARGIN = 8 -- columns mapped beyond the outermost building
 local BELOW, ABOVE = 64, 96 -- vertical reach around the buildings' floors
@@ -266,8 +267,18 @@ local function finish_site(site, outcome)
 		log(string.format("RESULT chunk %s: %s%s", core.pos_to_string(site.minp), outcome,
 			rejected_reason and (" (" .. rejected_reason .. ")") or ""))
 	end
-	for _, block in ipairs(site.blocks or {}) do core.forceload_free_block(block, true) end
-	site.on_done()
+	local function finish()
+		for _, block in ipairs(site.blocks or {}) do core.forceload_free_block(block, true) end
+		site.on_done()
+	end
+	if outcome == "built" and site.info and census.enabled() then
+		return census.run(site.area, function(record)
+			record.seed, record.chunk = seed, result.chunk
+			local f = io.open(RESULT_FILE, "a")
+			if f then f:write(core.write_json(record), "\n") f:close() end
+		end, finish)
+	end
+	finish()
 end
 
 -- Times a step and adds the milliseconds to the current site's record.

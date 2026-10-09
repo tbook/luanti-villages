@@ -16,7 +16,9 @@
 # found through git by default), LV_PROBE_WORK (scratch directory, default
 # $TMPDIR/lv_probe/<checkout>), LV_PROBE_RESULTS (where the jsonl is copied,
 # default tools/lv_probe/results/), LV_PROBE_PORT (first port to try; a free one
-# is used, never one a running game holds), LV_PROBE_LIMIT (seconds before giving up).
+# is used, never one a running game holds), LV_PROBE_LIMIT (seconds before giving up;
+# default 3600, or with a census sites x (census seconds + 120) + 600 if larger),
+# LV_PROBE_CENSUS (whole seconds of jobsite census per village, #217; needs --with-mod).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -43,6 +45,15 @@ while [ $# -gt 0 ]; do
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
+
+census=${LV_PROBE_CENSUS:-0}
+case $census in
+	''|*[!0-9]*) echo "LV_PROBE_CENSUS wants a whole number of seconds, not '$census'" >&2; exit 2 ;;
+esac
+if [ "$census" -gt 0 ] && [ "$with_mod" != 1 ]; then
+	echo "LV_PROBE_CENSUS needs --with-mod: vanilla villagers have no approach cells to count" >&2
+	exit 2
+fi
 
 label=$seed
 if [ -n "$chunk" ]; then label=$seed@$(echo "$chunk" | tr ',' '_'); fi
@@ -101,10 +112,15 @@ enable_damage = false
 lv_probe_sites = $sites
 lv_probe_radius = $radius
 lv_probe_chunk = $chunk
+lv_probe_census = $census
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
 port=$(lv_claim_port "${LV_PROBE_PORT:-30123}" "$ports")
+visits=$sites
+if [ -n "$chunk" ]; then visits=1; fi
+limit=${LV_PROBE_LIMIT:-$((visits * (census + 120) + 600))}
+if [ -z "${LV_PROBE_LIMIT:-}" ] && [ "$limit" -lt 3600 ]; then limit=3600; fi
 server=
 # On exit or Ctrl-C stop the server too, so it does not keep the port and the scratch world.
 trap 'if [ -n "$server" ]; then kill "$server" 2> /dev/null || true; fi; lv_release_port "$port" "$ports"' EXIT
@@ -120,7 +136,7 @@ waited=0
 while kill -0 "$server" 2> /dev/null; do
 	sleep 5
 	waited=$((waited + 5))
-	if [ "$waited" -gt "${LV_PROBE_LIMIT:-3600}" ]; then
+	if [ "$waited" -gt "$limit" ]; then
 		echo "gave up after ${waited}s" >&2
 		kill -INT "$server" 2> /dev/null || true
 		break
