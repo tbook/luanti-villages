@@ -235,6 +235,25 @@ assert(at(2, 7, 2) == "mcl_core:snowblock", "a snow block is not a layer")
 assert(at(0, 1, 5) == "mcl_core:snow", "snow on the ground stays")
 assert(at(30, 7, 0) == "mcl_core:snow", "snow on a tree that stands stays")
 
+-- Snow on a bare trunk node, and on a leaf in the middle of the canopy.
+map = {}
+for y = 1, 8 do put(10, y, 0, "mcl_core:tree") end
+put(10, 9, 0, "mcl_core:snow")
+put(20, 1, 0, "mcl_core:tree"); put(20, 2, 0, "mcl_core:tree"); put(20, 3, 0, "mcl_core:tree")
+put(21, 2, 0, "mcl_core:leaves")
+put(21, 3, 0, "mcl_core:snow_3")
+stats = fragments.clear_trees({box(9, 0, -1, 11, 10, 1), box(19, 0, -1, 21, 4, 1)}, nil, engine())
+assert(at(10, 9, 0) == nil and at(21, 3, 0) == nil and stats.snow == 2, "snow on a trunk and on a side leaf goes, got " .. stats.snow)
+
+-- A capped fill leaves the leaves outside the zone, and the snow on them.
+map = {}
+for i = 0, 11 do tree(i * 3, 0) end
+put(15, 7, 0, "mcl_core:snow") -- on the canopy of a tree outside the zone
+put(0, 7, 0, "mcl_core:snow") -- on the canopy of the tree in the zone
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, {cap_nodes = 60, cap_radius = 10, cap_height = 40}, engine())
+assert(stats.clipped == 1 and at(0, 7, 0) == nil, "snow goes with the leaves that were removed")
+assert(at(15, 7, 0) == "mcl_core:snow" and at(15, 6, 0) == "mcl_core:leaves", "leaves left by the cap keep their snow")
+
 -- Empty zone.
 assert(fragments.clear_trees({}, nil, engine()).removed == 0)
 

@@ -141,7 +141,8 @@ end
 -- single VoxelManip, so it needs the blocks loaded; see village_terrain.emerge.
 -- Snow layers resting on a removed node go with it. Returns {seeds, removed,
 -- clipped, snow}: fills started, nodes removed, fills that hit the cap, and
--- snow layers removed.
+-- snow layers removed. A layer above the VoxelManip
+-- region (the top of the zone plus the cap height) is not seen.
 function M.clear_trees(zone, config, engine)
 	engine = engine or core
 	config = config or M.config
