@@ -554,6 +554,13 @@ dofile(core.get_modpath("living_villages") .. "/tavern_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_schematic.lua")
 dofile(core.get_modpath("living_villages") .. "/church_site.lua")
 dofile(core.get_modpath("living_villages") .. "/library_schematic.lua")
+-- Load order: after every module that edits a building's schematic (the ones above
+-- and belltower_schematic.lua, once it exists): ground_layer builds its variants
+-- from whatever mts holds when the first sandy building is placed.
+if not dofile(core.get_modpath("living_villages") .. "/ground_layer.lua").install(rawget(_G, "settlements")) then
+	core.log("warning", "[living_villages] ground layer not installed: settlements.place_schematics "
+		.. "or settlements.schematic_table is missing; sand villages keep dirt under buildings")
+end
 dofile(core.get_modpath("living_villages") .. "/village_index.lua")
 
 -- After church_site.lua: the planner reserves the church itself and replaces its wrapper.

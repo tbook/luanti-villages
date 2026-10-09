@@ -74,6 +74,7 @@ One JSON line per site, and `report.sh` prints the main columns.
 | `step`, `steps>1` | after the build: largest height difference between adjacent columns outside building footprints, and how many adjacent pairs differ by more than one block |
 | `traps` | after the build: columns in a basin a villager cannot climb out of (walk up at most 1 block, down any distance, to the belltower). Water columns are skipped |
 | `orphans` | leaf nodes with no trunk within 6 nodes, such as a crown left when a trunk was cleared |
+| `census`, `census_dirt`, `dirt_tops`, `surfaces` | (#151) node names in the top 6 nodes of every ground column, before and after; where the dirt sits by depth below the column top, and up to 400 exposed dirt columns; the surface material of each building's pad |
 | `structures` | ruined portals, outposts and so on placed within 15 nodes of the village area |
 | `ms` | milliseconds in `create_site_plan`, `terraform`, `paths`, and until the last schematic was placed. The surroundings are generated beforehand, so this is the generator's own work |
 

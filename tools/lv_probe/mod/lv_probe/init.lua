@@ -72,6 +72,7 @@ end
 
 -- Reads the map once and returns the ground map, the columns with water over
 -- them, tree counts, and the data needed to find leaves without a trunk.
+local CENSUS_DEPTH = 6
 local function scan_terrain(area)
 	local vm = core.get_voxel_manip()
 	local emin, emax = vm:read_from_map({x = area.x1, y = area.y1, z = area.z1},
@@ -81,6 +82,10 @@ local function scan_terrain(area)
 	local ground, wet = {}, {}
 	local leaves, trunks, canopy_columns, unknown = {}, {}, 0, 0
 	local columns, clipped = 0, 0
+	-- What the ground is made of (#151): node names in the top CENSUS_DEPTH
+	-- nodes of every ground column.
+	local census, census_dirt = {}, {} -- dirt by depth below the ground top
+	local dirt_tops = {}
 	for x = area.x1, area.x2 do
 		ground[x] = {}
 		for z = area.z1, area.z2 do
@@ -97,6 +102,15 @@ local function scan_terrain(area)
 				elseif kind == "water" then sees_water = true end
 			end
 			if found then
+				for y = found, math.max(found - CENSUS_DEPTH + 1, area.y1), -1 do
+					local name = core.get_name_from_content_id(data[va:index(x, y, z)])
+					census[name] = (census[name] or 0) + 1
+					if name == "mcl_core:dirt" then
+						local d = tostring(found - y)
+						census_dirt[d] = (census_dirt[d] or 0) + 1
+						if d == "0" and #dirt_tops < 400 then dirt_tops[#dirt_tops + 1] = x .. "," .. found .. "," .. z end
+					end
+				end
 				ground[x][z] = found
 				if sees_water then wet[x .. "," .. z] = true end
 			else
@@ -105,7 +119,7 @@ local function scan_terrain(area)
 			if covered then canopy_columns = canopy_columns + 1 end
 		end
 	end
-	return {ground = ground, wet = wet, leaves = leaves, trunks = trunks,
+	return {dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, wet = wet, leaves = leaves, trunks = trunks,
 		columns = columns, unknown = unknown, canopy_columns = canopy_columns, clipped = clipped}
 end
 
@@ -170,6 +184,7 @@ local function terrain_report(terrain, info, footprints)
 	local report = {
 		heights = metrics.height_range(terrain.ground),
 		steps = metrics.steps(terrain.ground, footprints),
+		dirt_tops = terrain.dirt_tops, census = terrain.census, census_dirt = terrain.census_dirt,
 		unknown_columns = terrain.unknown,
 		clipped_columns = terrain.clipped,
 		canopy_cover = terrain.columns > 0 and math.floor(100 * terrain.canopy_columns / terrain.columns) / 100 or 0,
@@ -219,6 +234,11 @@ local function finish_site(site, outcome)
 		result.center = {x = info[1].pos.x, y = info[1].pos.y, z = info[1].pos.z}
 		result.biome = core.get_biome_name(core.get_biome_data(info[1].pos).biome)
 		result.surface = info[1].surface_mat
+		result.surfaces = {}
+		for _, b in ipairs(info) do
+			local m = tostring(b.surface_mat)
+			result.surfaces[m] = (result.surfaces[m] or 0) + 1
+		end
 		result.buildings = metrics.building_counts(info)
 		result.total_buildings = #info
 		result.church = (result.buildings.church or 0) > 0
