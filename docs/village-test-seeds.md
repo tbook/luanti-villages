@@ -111,6 +111,23 @@ the change), and Orphans and Steps>1 by about 10%.
 | desert | 8 / 8 | 325 / 315 | 38 / 38 |
 | mesa | 12 / 12 | 107 / 97 | 0 / 0 |
 
+### Walls beside pads (#220)
+
+The smoothing log line reports `N walls of 6+, tallest M`: adjacent target heights, after smoothing
+and before the hole filling, that differ by 6 or more with a footprint or yard column on at least one
+side (`config.wall`). Probe runs with `--with-mod`, walls (tallest):
+
+| Case | Seed | Walls |
+|------|------|-------|
+| tower | 2002 | 6 (11) |
+| snow-steep | 2006 | 2 (6) |
+| mountain-edge | 2007 | 4 (20) |
+| hillside | 2014 | 35 (21) |
+| cliff | 2026 | 4 (42) |
+
+Only 6 of the 2014 walls are cap-limited yards; the rest are natural cliffs between two pads or the
+sweep of #235. The probe's `Step` column is not a measure of these (#219).
+
 ### Village yield
 
 The sites VoxeLibre tried on seeds 2001 to 2030, 14 per seed, nearest the origin within 2400

@@ -49,21 +49,42 @@ t = smoothing.targets(pads, flat(0), cfg)
 assert(t.at(-2, 1) == 5, "yard capped")
 assert(t.at(1, 1) == 10, "footprint is never capped")
 
--- A hillside rising far above the pad (#220): the cap alone left the yard 7 above
--- the footprint. The yard is cut down to the pad, and farther out the cut trims
--- ground steeper than 1:1 from the yard back to that slope.
+-- Walls (#220): adjacent goals 6 or more apart with a footprint or yard on a side,
+-- each pair once. Flat ground has none; a hillside 22 above the pad leaves the yard
+-- at the cap, 7 above the footprint, along the pad's edge.
+t = smoothing.targets(pads, flat(10), cfg)
+assert(t.walls == 0 and t.wall_max == 0, "flat ground has no wall")
 t = smoothing.targets(pads, flat(22), cfg)
-assert(t.at(-2, 1) == 10 and t.at(5, 1) == 10, "steep hillside: yard cut to the pad")
-assert(t.at(-3, 1) == 11 and t.at(-4, 1) == 12, "steep hillside: 1:1 slope from the yard")
-assert(t.walls == 0 or t.wall_max < cfg.wall, "no wall beside the pad, got " .. t.wall_max)
--- Rises beyond cut_max are cut by cut_max, and cut_max <= cap turns this off.
-t = smoothing.targets(pads, flat(40), cfg)
-assert(t.at(-2, 1) == 28 and t.walls > 0, "mountain: cut by cut_max, the rest is landscape")
-local old = {}
-for k, v in pairs(cfg) do old[k] = v end
-old.cut_max = old.cap
-t = smoothing.targets(pads, flat(22), old)
-assert(t.at(-2, 1) == 17, "cut_max = cap is the old behaviour")
+assert(t.at(-2, 1) == 17 and t.at(1, 1) == 10, "yard is cap-limited")
+assert(t.wall_max == 7, "tallest wall, got " .. t.wall_max)
+local yard_footprint = 0
+for z = t.z0, t.z1 do for x = t.x0, t.x1 do
+	if t.kind(x, z) == "footprint" then
+		for _, d in ipairs({{1, 0}, {0, 1}, {-1, 0}, {0, -1}}) do
+			if t.kind(x + d[1], z + d[2]) == "yard" and math.abs(t.at(x, z) - t.at(x + d[1], z + d[2])) >= cfg.wall then
+				yard_footprint = yard_footprint + 1
+			end
+		end
+	end
+end end
+assert(yard_footprint > 0 and t.walls >= yard_footprint, "the yard and footprint sides are counted")
+local expect = 0
+for z = t.z0, t.z1 do for x = t.x0, t.x1 do
+	for _, d in ipairs({{1, 0}, {0, 1}}) do
+		local a, b = t.at(x, z), t.at(x + d[1], z + d[2])
+		local ka, kb = t.kind(x, z), t.kind(x + d[1], z + d[2])
+		if a and b and math.abs(a - b) >= cfg.wall and ((ka and ka ~= "skirt") or (kb and kb ~= "skirt"))
+				and (a ~= t.was(x, z) or b ~= t.was(x + d[1], z + d[2])) then
+			expect = expect + 1
+		end
+	end
+end end
+assert(t.walls == expect, "each pair once: " .. t.walls .. " vs " .. expect)
+-- A lower wall setting counts more.
+local low_wall = {}
+for k, v in pairs(cfg) do low_wall[k] = v end
+low_wall.wall = 3
+assert(smoothing.targets(pads, flat(22), low_wall).walls >= t.walls)
 
 -- Two pads at different heights: the ground between lies between them, and the
 -- steps stay walkable.

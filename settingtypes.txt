@@ -1,11 +1,6 @@
 # Generate villages on smoothed, planned terrain. Turn off to fall back to
 # VoxeLibre's own village generation if something goes wrong.
 living_villages_smooth_villages (Smooth villages) bool true
-# Village smoothing (#220), when smoothing is on. Ground may be cut this deep
-# beside a building where it rises steeper than 1:1 from the yard, to trim it
-# back to a 1:1 slope instead of leaving a wall at the building. 5 (the usual
-# cap on any change) turns it off; a larger value digs the hillside deeper.
-living_villages_cut_max (Deepest cut into a hillside) int 12 5 32
 # Village holes and cliffs (#155), when smoothing is on. Holes and shafts of any
 # depth are filled to the surrounding ground. A cliff between a column and a
 # higher neighbor is turned into a ramp if the column has to rise no more than

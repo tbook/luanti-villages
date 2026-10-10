@@ -23,8 +23,7 @@ local M = {}
 M.config = {
 	margin = 2, -- the flat yard around a footprint
 	radius = 8, -- how far from a pad the ground is changed
-	cap = 5, -- no column moves more than this, except to cut back a steep rise (cut_max)
-	cut_max = 12, -- a cut that trims ground steeper than 1:1 back to a 1:1 slope from the yard goes up to this deep
+	cap = 5, -- no column moves more than this
 	wall = 6, -- a step this tall beside a footprint or yard counts as a wall in the log
 	relax_passes = 100, -- limit on slope-limiting sweeps
 	below = 20, above = 24, -- the area reaches this far under the lowest pad and over the highest
@@ -32,16 +31,6 @@ M.config = {
 	structure_margin = 1, -- ground this close to a structure is left alone
 	block = 16,
 }
-
--- A copy of M.config with the settings applied.
-function M.configured(engine)
-	engine = engine or core
-	local config = {}
-	for k, v in pairs(M.config) do config[k] = v end
-	local v = engine.settings and tonumber(engine.settings:get("living_villages_cut_max"))
-	if v then config.cut_max = v end
-	return config
-end
 
 local function round(v) return math.floor(v + 0.5) end
 
@@ -89,7 +78,9 @@ end
 --    at(x, z) = target height or nil, was(x, z) = terrain height or nil,
 --    pad(x, z) = index of the pad it belongs to, kind(x, z) = "footprint",
 --    "yard", "skirt" or nil, violations = adjacent pairs, at least one of them
---    changed, that still differ by more than 1}
+--    changed, that still differ by more than 1, walls = those pairs that differ
+--    by `config.wall` or more with a footprint or yard column on at least one
+--    side (each pair once), wall_max = the tallest (#220)}
 function M.targets(pads, height_at, config)
 	config = config or M.config
 	local radius, reach = config.radius, config.radius + config.margin
@@ -134,11 +125,6 @@ function M.targets(pads, height_at, config)
 				if near then
 					owner[i] = near
 					local p = pads[near]
-					-- How deep this column may be cut (#220): the cap, or more where the
-					-- ground rises steeper than 1:1 from the pad's yard, to trim it back to
-					-- that slope instead of leaving a wall at the building.
-					local ramp = math.max(0, math.ceil(near_d - config.margin))
-					local cut = clamp(t - (p.y + ramp), config.cap, math.max(config.cap, config.cut_max))
 					if near_d == 0 then
 						kind[i], goal[i], free[i] = "footprint", p.y, false
 					elseif overhang then
@@ -146,13 +132,13 @@ function M.targets(pads, height_at, config)
 						was[i], owner[i] = nil, nil
 					elseif yard_hit then
 						kind[i], free[i] = "yard", false
-						goal[i] = clamp(p.y, t - cut, t + config.cap)
+						goal[i] = clamp(p.y, t - config.cap, t + config.cap)
 					else
 						kind[i], free[i] = "skirt", true
 						local blend = sum / weights
-						goal[i] = clamp(round(t + fade(dmin, radius) * (blend - t)), t - cut, t + config.cap)
+						goal[i] = clamp(round(t + fade(dmin, radius) * (blend - t)), t - config.cap, t + config.cap)
 					end
-					low[i], high[i] = t - cut, t + config.cap
+					low[i], high[i] = t - config.cap, t + config.cap
 				else
 					goal[i], free[i] = t, false
 				end
@@ -293,8 +279,8 @@ end
 -- load_node, scan (optional, village_fragments.scan_structures), clear_trees, engine, and `original` to fall back on when the area
 -- can't be loaded. Returns true if the ground was smoothed.
 function M.terraform(plan, pr, env, config)
+	config = config or M.config
 	local engine = env.engine
-	config = config or M.configured(engine)
 	local pads, why = M.pads(plan, env.settlements.schematic_table, config)
 	local function fall_back(reason)
 		engine.log("warning", "[living_villages] ground not smoothed, using VoxeLibre's terraform: " .. reason)
