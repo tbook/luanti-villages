@@ -99,10 +99,15 @@ end
 -- (columns with one level, within RESOLVE_RADII in turn, at least 3 of them),
 -- else nearest `ref`, the village's floor height; a tie keeps the higher.
 -- `levels` is {[x] = {[z] = list from M.levels}}. Returns the ground map and the
--- number of columns that took a level other than the top.
+-- number of columns that took a level other than the top, and a table of how the
+-- ambiguous columns (several levels) were decided: `by_radius[r]` decided by the
+-- ground within r, `by_ref` by `ref` because fewer than 3 columns without a slab
+-- lay within the widest radius, `undecided` with no ref either (the top is kept).
 M.RESOLVE_RADII = {2, 4, 6, 10}
 function M.resolve(levels, ref)
 	local ground, lowered = {}, 0
+	local how = {by_radius = {}, by_ref = 0, undecided = 0}
+	for _, r in ipairs(M.RESOLVE_RADII) do how.by_radius["r" .. r] = 0 end
 	local function certain(x, z)
 		local column = levels[x] and levels[x][z]
 		return column and #column == 1 and column[1] or nil
@@ -113,6 +118,7 @@ function M.resolve(levels, ref)
 			local choice = list[1]
 			if #list > 1 then
 				local target = ref
+				local radius
 				for _, r in ipairs(M.RESOLVE_RADII) do
 					local around = {}
 					for dx = -r, r do
@@ -123,10 +129,13 @@ function M.resolve(levels, ref)
 					end
 					if #around >= 3 then
 						table.sort(around)
-						target = around[math.ceil(#around / 2)]
+						target, radius = around[math.ceil(#around / 2)], r
 						break
 					end
 				end
+				if radius then how.by_radius["r" .. radius] = how.by_radius["r" .. radius] + 1
+				elseif target then how.by_ref = how.by_ref + 1
+				else how.undecided = how.undecided + 1 end
 				if target then
 					for _, y in ipairs(list) do
 						if math.abs(y - target) < math.abs(choice - target) then choice = y end
@@ -137,7 +146,19 @@ function M.resolve(levels, ref)
 			if choice and choice ~= list[1] then lowered = lowered + 1 end
 		end
 	end
-	return ground, lowered
+	return ground, lowered, how
+end
+
+-- The mod's rule applied alone: every column takes its lowest level. Kept as
+-- `*_literal` fields to show how much of a correction is the rule and how much
+-- is `resolve`'s choice.
+function M.lowest(levels)
+	local ground = {}
+	for x, column in pairs(levels) do
+		ground[x] = {}
+		for z, list in pairs(column) do ground[x][z] = list[#list] end
+	end
+	return ground
 end
 
 -- The village's reference floor: the median building floor height.

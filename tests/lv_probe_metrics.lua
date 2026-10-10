@@ -132,6 +132,20 @@ check("cave roof at the surrounding level stays", ground[4][4] == 10 and lowered
 local only = {[0] = {[0] = {17, 10}}}
 check("floor decides: village under the slab", M.resolve(only, 11)[0][0] == 10)
 check("floor decides: village on the slab", M.resolve(only, 17)[0][0] == 17)
+-- A tie between two levels keeps the higher one.
+local ties = {[0] = {[0] = {12, 8}, [1] = {10}, [2] = {10}, [-1] = {10}}}
+check("tie keeps the higher level", M.resolve(ties, nil)[0][0] == 12)
+-- The radius widens until 3 columns without a slab are in reach, and the decisions are counted.
+local wide = {[0] = {[0] = {17, 10}}, [3] = {[0] = {10}, [1] = {10}, [-1] = {10}}}
+ground, lowered, how = M.resolve(wide, 17)
+check("radius widening decides at 4", ground[0][0] == 10 and how.by_radius.r4 == 1 and how.by_radius.r2 == 0 and how.by_ref == 0)
+-- Two neighbours are too few: the floor decides.
+ground, lowered, how = M.resolve({[0] = {[0] = {17, 10}, [1] = {10}, [2] = {10}}}, 17)
+check("fewer than 3 neighbours fall back to the floor", ground[0][0] == 17 and how.by_ref == 1)
+-- No neighbours and no floor: the top is kept, and counted as undecided.
+ground, lowered, how = M.resolve(only, nil)
+check("no ref keeps the top", ground[0][0] == 17 and lowered == 0 and how.undecided == 1)
+check("lowest level", M.lowest({[0] = {[0] = {17, 10}, [1] = {5}}})[0][0] == 10)
 -- A column that is only a slab over the void has no ground.
 check("slab over the void is unknown", M.resolve({[0] = {[0] = {}}}, 10)[0][0] == nil)
 check("median floor", M.median_floor({{pos = {y = 5}}, {pos = {y = 9}}, {pos = {y = 7}}}) == 7)

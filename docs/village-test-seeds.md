@@ -140,12 +140,58 @@ tables above by a house, and the mod-run column differs from the #155 table for 
 | mesa | 9 / 10 | 20 / 22 | 9 / 10 | 12 / 14 | 99 / 103 | 0 / 0 |
 | Testlandia (seed 18442661806533097198, chunk -912, 2448) | | | | 56 / 53 | 1239 / 1201 | 2 / 4 |
 
-The correction is small almost everywhere and not always downward: a column is lowered only when
-the ground under its slab is nearer the surrounding ground than the slab top is, so a cave roof
-at village level stays ground, and a bed under water is never ground. The remaining odd cells are
-single columns, for example `flat` with mod, where one lowered column turns a step of 10 into 17.
-The jungle case moved most (steps>1 478 to 137): its canopy-height ledges. `overhang_columns`,
-`overhang_lowered` and `overhang_unknown` in `natural` and `after` count the slab columns.
+How much of the correction is the rule and how much is the choice, with the mod, from a second
+run (raw / literal / corrected: `literal` takes the mod's rule alone, always the ground under the
+slab; `corrected` is what the probe reports). `Slab` columns are those in the natural terrain
+that match the rule, `Lowered` those that took the ground under the slab. The median-floor
+fallback (fewer than 3 slab-free columns within 10 blocks) was used for 0 columns in every case,
+in the natural terrain and after the build, so nothing here depends on it.
+
+| Case | Slab | Lowered | Steps>1 raw / literal / corrected | Traps raw / literal / corrected |
+|------|------|---------|-----------------------------------|---------------------------------|
+| cliff | 574 | 338 | 2406 / 2237 / 2268 | 5 / 5 / 5 |
+| hillside | 289 | 119 | 1886 / 2028 / 1908 | 0 / 3 / 0 |
+| tower | 31 | 3 | 1769 / 1789 / 1769 | 72 / 96 / 72 |
+| mountain-edge | 268 | 76 | 272 / 383 / 238 | 17 / 63 / 17 |
+| pit | 5 | 0 | 18 / 26 / 18 | 5 / 9 / 5 |
+| forest | 267 | 69 | 437 / 623 / 454 | 5 / 138 / 8 |
+| jungle | 304 | 131 | 478 / 305 / 137 | 0 / 46 / 0 |
+| portal | 158 | 64 | 352 / 433 / 349 | 0 / 28 / 0 |
+| portal-outpost | 82 | 35 | 467 / 522 / 470 | 9 / 35 / 9 |
+| outpost | 111 | 50 | 489 / 535 / 504 | 1 / 0 / 5 |
+| flat | 18 | 1 | 140 / 157 / 142 | 7 / 7 / 7 |
+| flat-small | 9 | 4 | 122 / 128 / 124 | 0 / 0 / 0 |
+| snow-flat | 7 | 2 | 90 / 103 / 90 | 0 / 0 / 0 |
+| snow-steep | 283 | 139 | 1078 / 1069 / 997 | 72 / 89 / 72 |
+| desert | 8 | 4 | 315 / 318 / 316 | 38 / 38 / 38 |
+| mesa | 45 | 10 | 99 / 146 / 103 | 0 / 15 / 0 |
+| Testlandia | 409 | 179 | 1238 / 1371 / 1200 | 2 / 13 / 4 |
+
+What to make of it, honestly:
+
+- Apart from jungle, the corrected numbers stay within about 10% of the raw ones (the first table
+  of this section is an earlier run, so cells differ by the layout noise). The rule alone makes
+  steps and traps worse (forest traps 5 to 138): it also matches ledges and cave roofs that
+  villagers walk on, and the ground under them is a hollow. The choice (take the level nearest the
+  surrounding ground) mostly keeps those roofs, so corrected is close to raw by construction
+  wherever the slab top continues the terrain; it differs only where the slab top is far from its
+  neighbours.
+- Jungle (steps>1 478 to 137) is a different effect: the "ground" there is often a cocoa pod
+  (walkable) hanging in the canopy, 4 air over the real ground, or a vine-hung leaf crust. Those
+  are not ground at all, so much of that drop is a true correction (the rule alone gives 305; the
+  choice then also lowers real ledges to their neighbours' level, which is where the rest comes
+  from and is partly circular).
+- Lowered columns at cliff, snow-steep and Testlandia are mostly thin ledges and outpost slabs far
+  above the village floor, with the real ground 30 or more blocks lower. `natural.overhang_samples`
+  and `after.overhang_samples` list some with the node names down the column.
+- `flat` with the mod (step 10 raw, 17 corrected): one column at (-771, -1880) is a single stone
+  node over 16 air in a natural cave, and its neighbours are the cave floor, so it takes -7 and
+  steps 17 against the ledge at 10. That is the rule working on an odd natural spot, not a resolve
+  error, and the village is not near it.
+
+These numbers cannot be rebuilt from the tracked `tools/lv_probe/results/*.jsonl` (they have no
+`_raw`, `_literal` or overhang fields). Regenerate with `tools/lv_probe/run_cases.sh` and
+`run_cases.sh --with-mod`, and read the fields with `report.sh` or `jq`.
 
 ### Village yield
 

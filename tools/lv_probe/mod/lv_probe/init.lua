@@ -146,7 +146,11 @@ local function scan_terrain(area)
 					function(y) return kind_of(data[va:index(x, y, z)]) end, terrain_rules.is_overhang)
 				if #list ~= 1 then
 					overhang_columns = overhang_columns + 1
-					if #list == 0 then overhang_unknown = overhang_unknown + 1 end
+					if #list == 0 then
+						-- Only a slab over the void: no ground, like a shaft with no floor.
+						overhang_unknown = overhang_unknown + 1
+						unknown = unknown + 1
+					end
 				end
 				ground[x][z] = list
 				if sees_water then wet[x .. "," .. z] = true end
@@ -156,12 +160,32 @@ local function scan_terrain(area)
 			if covered then canopy_columns = canopy_columns + 1 end
 		end
 	end
-	local lowered
-	ground, lowered = metrics.resolve(ground, area.ref_y)
+	local ground_literal = metrics.lowest(ground)
+	local lowered, how
+	ground, lowered, how = metrics.resolve(ground, area.ref_y)
+	-- Up to 8 columns that took a lower level, with the nodes down them, to judge the rule by.
+	local lowered_samples = {}
+	for x = area.x1, area.x2 do
+		for z = area.z1, area.z2 do
+			local y, raw_y = ground[x][z], ground_raw[x][z]
+			if y and raw_y and y ~= raw_y and #lowered_samples < 8 and (lowered <= 8 or (x + z) % 7 == 0) then
+				local profile, last, count = {}, nil, 0
+				for ny = raw_y + 2, math.max(y - 2, area.y1), -1 do
+					local name = core.get_name_from_content_id(data[va:index(x, ny, z)]):gsub("^mcl_[a-z_]*:", "")
+					if name == last then count = count + 1 else
+						if last then profile[#profile + 1] = last .. "x" .. count end
+						last, count = name, 1
+					end
+				end
+				profile[#profile + 1] = (last or "?") .. "x" .. count
+				lowered_samples[#lowered_samples + 1] = string.format("%d,%d y=%d/%d %s", x, z, y, raw_y, table.concat(profile, " "))
+			end
+		end
+	end
 	local plant_counts = plants.count(data, va, {x1 = area.x1, x2 = area.x2, z1 = area.z1, z2 = area.z2, y1 = emin.y, y2 = emax.y}, plant_kind,
 		function(x, y, z) return core.get_name_from_content_id(data[va:index(x, y, z)]) end, vm:get_param2_data())
-	return {plants = plant_counts, dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, ground_raw = ground_raw,
-		overhang_columns = overhang_columns, overhang_lowered = lowered, overhang_unknown = overhang_unknown, wet = wet, leaves = leaves, trunks = trunks,
+	return {plants = plant_counts, dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, ground_raw = ground_raw, ground_literal = ground_literal,
+		overhang_columns = overhang_columns, overhang_lowered = lowered, overhang_how = how, overhang_samples = lowered_samples, overhang_unknown = overhang_unknown, wet = wet, leaves = leaves, trunks = trunks,
 		columns = columns, unknown = unknown, canopy_columns = canopy_columns, clipped = clipped}
 end
 
@@ -227,8 +251,10 @@ local function terrain_report(terrain, info, footprints)
 		heights = metrics.height_range(terrain.ground),
 		steps = metrics.steps(terrain.ground, footprints),
 		steps_raw = metrics.steps(terrain.ground_raw, footprints),
+		steps_literal = metrics.steps(terrain.ground_literal, footprints),
 		overhang_columns = terrain.overhang_columns, overhang_lowered = terrain.overhang_lowered,
-		overhang_unknown = terrain.overhang_unknown,
+		overhang_unknown = terrain.overhang_unknown, overhang_how = terrain.overhang_how,
+		overhang_samples = terrain.overhang_samples,
 		dirt_tops = terrain.dirt_tops, census = terrain.census, census_dirt = terrain.census_dirt,
 		unknown_columns = terrain.unknown,
 		plants = terrain.plants,
@@ -318,6 +344,8 @@ local function finish_site(site, outcome)
 				tostring(after.ground[s.x][s.z]), tostring(raw_y), table.concat(profile, " "))
 		end
 		result.after.traps.samples = sampled
+		result.after.traps_literal = metrics.traps(after.ground_literal, after.wet, footprints, floors,
+			anchor_of(info, footprints))
 		result.after.orphan_leaves = orphan_leaves(after)
 		result.structures = structures_near(site.area, footprints)
 		result.footprints = footprints
