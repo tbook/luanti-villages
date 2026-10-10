@@ -98,6 +98,84 @@ function M.emerge(area, done, engine)
 	engine.emerge_area(area.minp, area.maxp, callback)
 end
 
+-- Growth that stands in a column and cannot move with the surface (#214, #224):
+-- bamboo, cactus and sugar cane. Not the bamboo building blocks. Everything else that
+-- grows out of the ground is a plant (is_decor) and is moved with the surface.
+function M.is_growth(name, def)
+	if name == "mcl_core:cactus" or name == "mcl_core:reeds" then return true end
+	return name:find("^mcl_bamboo:bamboo") ~= nil and def ~= nil and def.groups ~= nil
+		and (def.groups.plant or 0) > 0
+end
+
+-- Decorations stand on the ground and are not ground: plants, flowers, a layer of
+-- snow. Groups first, then a few name words for plants that lack them.
+local DECOR_WORDS = {"grass", "fern", "flower", "bush", "sapling", "mushroom"}
+function M.is_decor(name, engine)
+	engine = engine or core
+	if name == "air" or name == "ignore" then return false end
+	local def = engine.registered_nodes[name]
+	if not def or def.walkable or (def.liquidtype or "none") ~= "none" then return false end
+	if name == "mcl_core:snow" then return true end
+	if M.is_growth(name, def) then return false end
+	if def.groups and (def.groups.plant or def.groups.flower or def.groups.flora) then return true end
+	for _, word in ipairs(DECOR_WORDS) do
+		if name:find(word, 1, true) then return true end
+	end
+	return false
+end
+
+-- A two-high plant is a bottom node `name` with a `name_top` above it (VoxeLibre's
+-- add_large_plant: tall grass, large fern, peony, rose bush, lilac, sunflower).
+function M.top_name(name, engine)
+	engine = engine or core
+	local top = name .. "_top"
+	if engine.registered_nodes[top] then return top end
+end
+function M.is_top_half(name, engine)
+	engine = engine or core
+	return name:sub(-4) == "_top" and engine.registered_nodes[name:sub(1, -5)] ~= nil
+end
+
+-- What stands on the surface node at y (before the column is rewritten): returns the
+-- plant node, and its top half for a two-high plant, or nil.
+function M.take_decor(x, z, y, engine)
+	engine = engine or core
+	local above = engine.get_node({x = x, y = y + 1, z = z})
+	if not M.is_decor(above.name, engine) or M.is_top_half(above.name, engine) then return end
+	local top = M.top_name(above.name, engine)
+	if not top then return above end
+	local up = engine.get_node({x = x, y = y + 2, z = z})
+	if up.name == top then return above, up end
+end
+
+-- A plant that grows on grass or dirt dies on sand: only a dead bush stays on it.
+local function valid_soil(surface, plant)
+	if surface:find("sand", 1, true) then return plant:find("dead", 1, true) ~= nil end
+	return true
+end
+
+-- After the surface at y is written: clear what still stands over it that must not (a
+-- bamboo, cactus or cane stalk, a stray plant half), then put the plant `decor`
+-- (with `decor_top`) back on it when `surface` is a soil it can stand on, else it is
+-- gone. A stalk is never kept: it would stand on a block it did not grow on.
+function M.put_decor(x, z, y, decor, decor_top, surface, engine)
+	engine = engine or core
+	for dy = 1, 32 do
+		local p = {x = x, y = y + dy, z = z}
+		local name = engine.get_node(p).name
+		if not M.is_growth(name, engine.registered_nodes[name]) then break end
+		engine.swap_node(p, {name = "air"})
+	end
+	for dy = 1, 3 do
+		local p = {x = x, y = y + dy, z = z}
+		if M.is_decor(engine.get_node(p).name, engine) then engine.swap_node(p, {name = "air"}) end
+	end
+	if decor and valid_soil(surface, decor.name) then
+		engine.swap_node({x = x, y = y + 1, z = z}, decor)
+		if decor_top then engine.swap_node({x = x, y = y + 2, z = z}, decor_top) end
+	end
+end
+
 -- What settlements.find_surface (mcl_villages/utils.lua) accepts above a
 -- surface node, matched by substring on the node name as it does: air, a
 -- plant, a tree (a trunk standing on it still counts) or snow.
@@ -148,7 +226,7 @@ function M.heights(area, surface_materials, engine, partial)
 				open = open_above(name),
 				leaves = name:find("leaves", 1, true) ~= nil,
 				growth = (def and def.groups and def.groups.tree ~= nil) or name:find("tree", 1, true) ~= nil
-					or name:find("cactus", 1, true) ~= nil or name:find("bamboo", 1, true) ~= nil,
+					or M.is_growth(name, def),
 			}
 			traits[id] = t
 		end
@@ -232,7 +310,8 @@ function M.materials(surface)
 end
 
 -- Fill `fill` (default dirt) under y, down to the first solid node, so the fill
--- always meets ground. Covers a hole under a building or a yard. Liquid is filled
+-- always meets ground. A bamboo, cactus or cane stalk is not
+-- ground (#224): the fill goes through it to the ground it stands on. Covers a hole under a building or a yard. Liquid is filled
 -- through (a pond under a raised column, lava, #142). It stops above an unloaded
 -- node (`ignore`: swapping it does nothing and the ground below is unknown). If no
 -- solid node lies within the foundation depth (20) it fills nothing: a dirt column
@@ -244,7 +323,8 @@ function M.fill_below(x, z, y, fill, engine)
 	for fy = y - 1, y - DEFAULT_BELOW, -1 do
 		local name = engine.get_node({x = x, y = fy, z = z}).name
 		local def = engine.registered_nodes[name]
-		if name == "ignore" or (def and def.walkable and (def.liquidtype or "none") == "none") then
+		if name == "ignore" or (def and def.walkable and (def.liquidtype or "none") == "none"
+				and not M.is_growth(name, def)) then
 			last = fy + 1
 			break
 		end

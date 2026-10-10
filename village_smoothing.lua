@@ -251,7 +251,11 @@ function M.apply(pads, targets, lookup, config, engine)
 					local column = lookup(x, z)
 					local top = math.max(column.y or was, was)
 					if target < was then top = math.max(top, was + config.cut_clear) end
+					-- What grew on the old surface goes onto the new one (#214); a stalk
+					-- (bamboo, cactus, cane) is cleared, never left under a block (#224).
+					local decor, decor_top = terrain.take_decor(x, z, was, engine)
 					terrain.set_column(x, z, top, target, surface, fill, engine)
+					terrain.put_decor(x, z, target, decor, decor_top, surface, engine)
 					stats.changed = stats.changed + 1
 					stats[target < was and "cut" or "filled"] = stats[target < was and "cut" or "filled"] + 1
 					stats.steepest = math.max(stats.steepest, math.abs(target - was))
@@ -312,7 +316,8 @@ function M.terraform(plan, pr, env, config)
 	local targets = M.targets(pads, function(x, z)
 		local column = lookup(x, z)
 		if not column or column.liquid or near_structure(x, z) then return nil end
-		return column.surface_y or column.y, column.overhang
+		-- The ground, not the top of what grows out of it (a stalk, #224).
+		return column.surface_y or column.base_y or column.y, column.overhang
 	end, config)
 	local stats = M.apply(pads, targets, lookup, config, engine)
 	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block, %d unloaded blocks skipped%s")

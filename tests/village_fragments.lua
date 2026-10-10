@@ -4,7 +4,8 @@ minetest = {get_modpath = function() return "." end}
 
 local names = {"air", "mcl_core:stone", "mcl_core:tree", "mcl_core:leaves", "mcl_core:water_source",
 	"mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:cobble", "mcl_nether:obsidian_x",
-	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence", "mcl_core:snow", "mcl_core:snow_3", "mcl_core:snowblock"}
+	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence", "mcl_core:snow", "mcl_core:snow_3", "mcl_core:snowblock",
+	"mcl_bamboo:bamboo", "mcl_core:cactus", "mcl_core:vine", "mcl_bamboo:bamboo_plank", "mcl_flowers:double_fern_top", "mcl_flowers:double_fern"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local registered = {
@@ -22,6 +23,11 @@ local registered = {
 	["mcl_fences:fence"] = {is_ground_content = false, groups = {deco_block = 1, fence = 1}},
 	["mcl_core:vine_x"] = {is_ground_content = false},
 	["mcl_core:snow"] = {}, ["mcl_core:snow_3"] = {}, ["mcl_core:snowblock"] = {},
+	["mcl_bamboo:bamboo"] = {walkable = true, groups = {plant = 1}},
+	["mcl_bamboo:bamboo_plank"] = {walkable = true, groups = {wood = 1}},
+	["mcl_core:cactus"] = {walkable = true}, ["mcl_core:vine"] = {walkable = false},
+	["mcl_flowers:double_fern_top"] = {walkable = false, groups = {plant = 1, double_plant = 2}},
+	["mcl_flowers:double_fern"] = {walkable = false, groups = {plant = 1, double_plant = 1}},
 }
 
 VoxelArea = {new = function(_, e)
@@ -256,5 +262,40 @@ assert(at(15, 7, 0) == "mcl_core:snow" and at(15, 6, 0) == "mcl_core:leaves", "l
 
 -- Empty zone.
 assert(fragments.clear_trees({}, nil, engine()).removed == 0)
+
+-- Bamboo and cactus in the zone are cleared like trees (#224); outside it they stand, and
+-- bamboo planks are a building, not growth.
+map = {}
+for y = 1, 4 do put(0, y, 0, "mcl_bamboo:bamboo") end
+for y = 1, 3 do put(1, y, 0, "mcl_core:cactus") end
+for y = 1, 4 do put(30, y, 0, "mcl_bamboo:bamboo") end
+put(2, 1, 0, "mcl_bamboo:bamboo_plank")
+stats = fragments.clear_trees({box(-1, 0, -1, 3, 6, 1)}, nil, engine())
+assert(stats.growth == 7 and stats.seeds == 0, "seven stalk nodes cleared, got " .. stats.growth)
+assert(count("mcl_bamboo:bamboo") == 4 and at(30, 4, 0) == "mcl_bamboo:bamboo", "stalks outside the zone stand")
+assert(count("mcl_core:cactus") == 0)
+assert(at(2, 1, 0) == "mcl_bamboo:bamboo_plank", "bamboo planks stay")
+assert(writes == 1, "written once")
+
+-- A vine on a removed trunk and the vines under a removed leaf go; a vine elsewhere stays (#225).
+map = {}
+tree(0, 0)
+for y = 2, 4 do put(1, y, 0, "mcl_core:vine") end -- beside the trunk
+for y = 1, 4 do put(-2, y, 1, "mcl_core:vine") end -- hangs from a leaf at y=5 (under (-2, 5, 1))
+put(20, 3, 3, "mcl_core:vine") -- on something else, far away
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
+assert(stats.vines == 7, "seven vines removed, got " .. stats.vines)
+assert(count("mcl_core:vine") == 1 and at(20, 3, 3) == "mcl_core:vine", "only the far vine stays")
+
+-- The top half of a double fern left over a tree's leaves floats once they go; a whole
+-- fern next to the tree stays.
+map = {}
+tree(0, 0)
+put(0, 7, 0, "mcl_flowers:double_fern_top") -- on the leaf at (0, 6, 0)
+put(-2, 7, 0, "mcl_flowers:double_fern_top") -- on a leaf too
+put(10, 1, 10, "mcl_flowers:double_fern"); put(10, 2, 10, "mcl_flowers:double_fern_top")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
+assert(stats.plant_tops == 2, "two floating tops removed, got " .. stats.plant_tops)
+assert(at(0, 7, 0) == nil and at(-2, 7, 0) == nil and at(10, 2, 10) == "mcl_flowers:double_fern_top", "the whole fern stays")
 
 print("village_fragments: ok")

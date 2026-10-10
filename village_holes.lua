@@ -339,31 +339,6 @@ function M.plan(spec, config)
 	return result
 end
 
--- Decorations stand on the ground and are not ground: plants, flowers, a layer of
--- snow. Groups first, then a few name words for plants that lack them.
-local DECOR_WORDS = {"grass", "fern", "flower", "bush", "sapling", "mushroom"}
-local function is_decor(name, engine)
-	if name == "air" or name == "ignore" then return false end
-	local def = engine.registered_nodes[name]
-	if not def or def.walkable or (def.liquidtype or "none") ~= "none" then return false end
-	if name == "mcl_core:snow" then return true end
-	if def.groups and (def.groups.plant or def.groups.flower or def.groups.flora) then return true end
-	for _, word in ipairs(DECOR_WORDS) do
-		if name:find(word, 1, true) then return true end
-	end
-	return false
-end
-
--- A two-high plant is a bottom node `name` with a `name_top` above it (VoxeLibre's
--- add_large_plant: tall grass, large fern, peony, rose bush, lilac, sunflower).
-local function top_name(name, engine)
-	local top = name .. "_top"
-	if engine.registered_nodes[top] then return top end
-end
-local function is_top_half(name, engine)
-	return name:sub(-4) == "_top" and engine.registered_nodes[name:sub(1, -5)] ~= nil
-end
-
 -- A walkable node that is not a full block, such as a layer of snow or a path: it
 -- would stay as a sliver inside new fill.
 local function partial(name, engine)
@@ -383,18 +358,7 @@ function M.apply(plan, material, config, engine)
 	for _, cell in ipairs(plan.cells) do
 		local surface, fill = material(cell.x, cell.z)
 		local decor, decor_top
-		if not cell.lava then
-			local above = engine.get_node({x = cell.x, y = cell.from + 1, z = cell.z})
-			if is_decor(above.name, engine) and not is_top_half(above.name, engine) then
-				local top = top_name(above.name, engine)
-				if not top then
-					decor = above
-				else
-					local up = engine.get_node({x = cell.x, y = cell.from + 2, z = cell.z})
-					if up.name == top then decor, decor_top = above, up end
-				end
-			end
-		end
+		if not cell.lava then decor, decor_top = terrain.take_decor(cell.x, cell.z, cell.from, engine) end
 		local bottom = cell.lava and cell.from or cell.from + 1
 		if not cell.lava and cell.name and partial(cell.name, engine) then bottom = cell.from end
 		for y = bottom, cell.to - 1 do
@@ -402,15 +366,9 @@ function M.apply(plan, material, config, engine)
 		end
 		engine.swap_node({x = cell.x, y = cell.to, z = cell.z}, {name = surface})
 		if cell.lava then terrain.fill_below(cell.x, cell.z, bottom, fill, engine) end
-		-- What may still stand over the new surface: the upper half of a tall plant.
-		for y = cell.to + 1, cell.to + 3 do
-			local p = {x = cell.x, y = y, z = cell.z}
-			if is_decor(engine.get_node(p).name, engine) then engine.swap_node(p, {name = "air"}) end
-		end
-		if decor then
-			engine.swap_node({x = cell.x, y = cell.to + 1, z = cell.z}, decor)
-			if decor_top then engine.swap_node({x = cell.x, y = cell.to + 2, z = cell.z}, decor_top) end
-		end
+		-- What may still stand over the new surface: the upper half of a tall plant, the
+		-- top of a stalk. The plant that stood on the old ground goes back, on soil only.
+		terrain.put_decor(cell.x, cell.z, cell.to, decor, decor_top, surface, engine)
 	end
 end
 
