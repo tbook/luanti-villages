@@ -25,7 +25,7 @@ their jobsite lose it, so vanilla demotes them.
 | `fisherman.lua` | Water-based fisherman profession, the fishing loop, and the bobber and rod entities |
 | `nitwit.lua` | Keeps nitwits from being demoted to unemployed by VoxeLibre's jobsite check |
 | `keeper.lua` | Tavern keeper role, which is a butcher underneath and claims a jukebox, plus its menu and hours |
-| `music.lua` | On holidays the keeper on duty plays the jukebox's disc from dinner to close |
+| `music.lua` | On holidays the keeper on duty plays the jukebox's disc (or the day's default record when it holds none) from dinner to close, started per player in hearing range (#187) |
 | `tavern.lua` | The evening tavern visit and keeper takeover |
 | `far_trips.lua` | Hides the bed from vanilla's `wandered_too_far` test (#216) while a villager has an errand (claimed jobsite at work, tavern, church, bell) more than 50 nodes from home; `init.lua` runs vanilla's `do_custom` through it |
 | `wander.lua` | Replaces vanilla's aimless walk with short, checked straight legs that stop short of walls |
