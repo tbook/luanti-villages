@@ -23,13 +23,25 @@ local M = {}
 M.config = {
 	margin = 2, -- the flat yard around a footprint
 	radius = 8, -- how far from a pad the ground is changed
-	cap = 5, -- no column moves more than this
+	cap = 5, -- no column moves more than this, except to cut back a steep rise (cut_max)
+	cut_max = 12, -- a cut that trims ground steeper than 1:1 back to a 1:1 slope from the yard goes up to this deep
+	wall = 6, -- a step this tall beside a footprint or yard counts as a wall in the log
 	relax_passes = 100, -- limit on slope-limiting sweeps
 	below = 20, above = 24, -- the area reaches this far under the lowest pad and over the highest
 	cut_clear = 3, -- a cut removes this much above the old surface, for whatever stands on it
 	structure_margin = 1, -- ground this close to a structure is left alone
 	block = 16,
 }
+
+-- A copy of M.config with the settings applied.
+function M.configured(engine)
+	engine = engine or core
+	local config = {}
+	for k, v in pairs(M.config) do config[k] = v end
+	local v = engine.settings and tonumber(engine.settings:get("living_villages_cut_max"))
+	if v then config.cut_max = v end
+	return config
+end
 
 local function round(v) return math.floor(v + 0.5) end
 
@@ -86,7 +98,7 @@ function M.targets(pads, height_at, config)
 		bx0, bz0 = math.min(bx0 or p.x0, p.x0 - reach), math.min(bz0 or p.z0, p.z0 - reach)
 		bx1, bz1 = math.max(bx1 or p.x1, p.x1 + reach), math.max(bz1 or p.z1, p.z1 + reach)
 	end
-	local result = {violations = 0}
+	local result = {violations = 0, walls = 0, wall_max = 0}
 	if not bx0 then
 		function result.at() end
 		result.was, result.pad, result.kind = result.at, result.at, result.at
@@ -122,6 +134,11 @@ function M.targets(pads, height_at, config)
 				if near then
 					owner[i] = near
 					local p = pads[near]
+					-- How deep this column may be cut (#220): the cap, or more where the
+					-- ground rises steeper than 1:1 from the pad's yard, to trim it back to
+					-- that slope instead of leaving a wall at the building.
+					local ramp = math.max(0, math.ceil(near_d - config.margin))
+					local cut = clamp(t - (p.y + ramp), config.cap, math.max(config.cap, config.cut_max))
 					if near_d == 0 then
 						kind[i], goal[i], free[i] = "footprint", p.y, false
 					elseif overhang then
@@ -129,13 +146,13 @@ function M.targets(pads, height_at, config)
 						was[i], owner[i] = nil, nil
 					elseif yard_hit then
 						kind[i], free[i] = "yard", false
-						goal[i] = clamp(p.y, t - config.cap, t + config.cap)
+						goal[i] = clamp(p.y, t - cut, t + config.cap)
 					else
 						kind[i], free[i] = "skirt", true
 						local blend = sum / weights
-						goal[i] = clamp(round(t + fade(dmin, radius) * (blend - t)), t - config.cap, t + config.cap)
+						goal[i] = clamp(round(t + fade(dmin, radius) * (blend - t)), t - cut, t + config.cap)
 					end
-					low[i], high[i] = t - config.cap, t + config.cap
+					low[i], high[i] = t - cut, t + config.cap
 				else
 					goal[i], free[i] = t, false
 				end
@@ -176,6 +193,10 @@ function M.targets(pads, height_at, config)
 					if ox <= bx1 and oz <= bz1 and goal[oi]
 							and (goal[i] ~= was[i] or goal[oi] ~= was[oi]) and math.abs(goal[i] - goal[oi]) > 1 then
 						result.violations = result.violations + 1
+						local jump = math.abs(goal[i] - goal[oi])
+						if jump >= config.wall and (kind[i] ~= "skirt" and kind[i] or kind[oi] ~= "skirt" and kind[oi]) then
+							result.walls, result.wall_max = result.walls + 1, math.max(result.wall_max, jump)
+						end
 					end
 				end
 			end
@@ -272,8 +293,8 @@ end
 -- load_node, scan (optional, village_fragments.scan_structures), clear_trees, engine, and `original` to fall back on when the area
 -- can't be loaded. Returns true if the ground was smoothed.
 function M.terraform(plan, pr, env, config)
-	config = config or M.config
 	local engine = env.engine
+	config = config or M.configured(engine)
 	local pads, why = M.pads(plan, env.settlements.schematic_table, config)
 	local function fall_back(reason)
 		engine.log("warning", "[living_villages] ground not smoothed, using VoxeLibre's terraform: " .. reason)
@@ -329,8 +350,8 @@ function M.terraform(plan, pr, env, config)
 		return column.y, column.overhang
 	end, config)
 	local stats = M.apply(pads, targets, lookup, config, engine)
-	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block, %d unloaded blocks skipped%s")
-		:format(stats.changed, stats.cut, stats.filled, stats.steepest, targets.violations, missing,
+	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block (%d walls of %d+, tallest %d), %d unloaded blocks skipped%s")
+		:format(stats.changed, stats.cut, stats.filled, stats.steepest, targets.violations, targets.walls, config.wall, targets.wall_max, missing,
 			started and (", " .. math.floor((engine.get_us_time() - started) / 1000) .. " ms") or ""))
 
 	-- Then the holes the smoothing leaves: the gaps between buildings and where paths go.

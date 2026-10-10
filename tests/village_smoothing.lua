@@ -49,6 +49,22 @@ t = smoothing.targets(pads, flat(0), cfg)
 assert(t.at(-2, 1) == 5, "yard capped")
 assert(t.at(1, 1) == 10, "footprint is never capped")
 
+-- A hillside rising far above the pad (#220): the cap alone left the yard 7 above
+-- the footprint. The yard is cut down to the pad, and farther out the cut trims
+-- ground steeper than 1:1 from the yard back to that slope.
+t = smoothing.targets(pads, flat(22), cfg)
+assert(t.at(-2, 1) == 10 and t.at(5, 1) == 10, "steep hillside: yard cut to the pad")
+assert(t.at(-3, 1) == 11 and t.at(-4, 1) == 12, "steep hillside: 1:1 slope from the yard")
+assert(t.walls == 0 or t.wall_max < cfg.wall, "no wall beside the pad, got " .. t.wall_max)
+-- Rises beyond cut_max are cut by cut_max, and cut_max <= cap turns this off.
+t = smoothing.targets(pads, flat(40), cfg)
+assert(t.at(-2, 1) == 28 and t.walls > 0, "mountain: cut by cut_max, the rest is landscape")
+local old = {}
+for k, v in pairs(cfg) do old[k] = v end
+old.cut_max = old.cap
+t = smoothing.targets(pads, flat(22), old)
+assert(t.at(-2, 1) == 17, "cut_max = cap is the old behaviour")
+
 -- Two pads at different heights: the ground between lies between them, and the
 -- steps stay walkable.
 local two = pads_of({0, 0, 10}, {10, 0, 14})
