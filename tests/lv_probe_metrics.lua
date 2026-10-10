@@ -77,4 +77,83 @@ check("fill and cut", fc.fill == 4 and fc.cut == 3)
 local range = M.height_range(map(function(x) return x end))
 check("height range", range.min == 0 and range.max == 8 and range.range == 8)
 check("empty height range", M.height_range({}) == nil)
+-- Overhang slabs (#219): the probe reads the mod's own definition, so load the
+-- real village_terrain.lua (no side effects, needs only a `minetest` table).
+minetest = minetest or {}
+local terrain = dofile("village_terrain.lua")
+
+-- A column is a list of kinds from y = 1 upward.
+local function column(spec)
+	local kinds = {}
+	for y, k in ipairs(spec) do kinds[y] = k end
+	return function(y) return kinds[y] or "air" end
+end
+local function levels(spec)
+	local top = #spec
+	while spec[top] ~= "ground" do top = top - 1 end
+	return M.levels(top, 1, column(spec), terrain.is_overhang)
+end
+local G, A = "ground", "air"
+local function same(a, b)
+	if #a ~= #b then return false end
+	for i = 1, #a do if a[i] ~= b[i] then return false end end
+	return true
+end
+-- Ground up to 10, then 5 air, then a 2-thick slab: the slab top (17) or the ground (10).
+local slab = {G, G, G, G, G, G, G, G, G, G, A, A, A, A, A, G, G}
+check("slab levels", same(levels(slab), {17, 10}))
+-- A slab over only 3 air is a crust over a pocket: it stays ground (mod rule).
+check("crust over a small pocket", same(levels({G, G, G, G, G, G, G, G, G, G, A, A, A, G, G}), {15}))
+-- A run thicker than 6 is a hill, not a slab; a normal column is ground.
+check("thick run", same(levels({G, G, G, A, A, A, A, A, G, G, G, G, G, G, G}), {15}))
+check("normal column", same(levels({G, G, G, G, G}), {5}))
+-- A slab over a slab over ground; leaves on the slab count as part of it.
+check("stacked slabs", same(levels({G, G, A, A, A, A, G, A, A, A, A, "leaves", G}), {13, 7, 2}))
+-- A slab over a pond: the bed under the water is not a level.
+check("slab over water", same(levels({G, G, G, "water", "water", A, A, A, A, A, G, G}), {12}))
+-- No ground under the slab inside the scan: it is no level at all.
+check("slab over the void", same(M.levels(7, 1, column({A, A, A, A, A, A, G}), terrain.is_overhang), {}))
+
+-- Choosing a level. A 9x9 area of ground at 10 with a block of slab columns in the
+-- middle: levels {17, 10} (a slab over the village) or {10, 4} (a cave roof).
+local function area(slab_levels)
+	local lv = {}
+	for x = 0, 8 do
+		lv[x] = {}
+		for z = 0, 8 do lv[x][z] = (x >= 3 and x <= 5 and z >= 3 and z <= 5) and slab_levels or {10} end
+	end
+	return lv
+end
+local ground, lowered = M.resolve(area({17, 10}), 10)
+check("slab among level ground is skipped", ground[4][4] == 10 and ground[0][0] == 10 and lowered == 9)
+ground, lowered = M.resolve(area({10, 4}), 10)
+check("cave roof at the surrounding level stays", ground[4][4] == 10 and lowered == 0)
+-- Slab columns only, no certain neighbours: the village floor decides.
+local only = {[0] = {[0] = {17, 10}}}
+check("floor decides: village under the slab", M.resolve(only, 11)[0][0] == 10)
+check("floor decides: village on the slab", M.resolve(only, 17)[0][0] == 17)
+-- A tie between two levels keeps the higher one.
+local ties = {[0] = {[0] = {12, 8}, [1] = {10}, [2] = {10}, [-1] = {10}}}
+check("tie keeps the higher level", M.resolve(ties, nil)[0][0] == 12)
+-- The radius widens until 3 columns without a slab are in reach, and the decisions are counted.
+local wide = {[0] = {[0] = {17, 10}}, [3] = {[0] = {10}, [1] = {10}, [-1] = {10}}}
+ground, lowered, how = M.resolve(wide, 17)
+check("radius widening decides at 4", ground[0][0] == 10 and how.by_radius.r4 == 1 and how.by_radius.r2 == 0 and how.by_ref == 0)
+-- Two neighbours are too few: the floor decides.
+ground, lowered, how = M.resolve({[0] = {[0] = {17, 10}, [1] = {10}, [2] = {10}}}, 17)
+check("fewer than 3 neighbours fall back to the floor", ground[0][0] == 17 and how.by_ref == 1)
+-- No neighbours and no floor: the top is kept, and counted as undecided.
+ground, lowered, how = M.resolve(only, nil)
+check("no ref keeps the top", ground[0][0] == 17 and lowered == 0 and how.undecided == 1)
+check("lowest level", M.lowest({[0] = {[0] = {17, 10}, [1] = {5}}})[0][0] == 10)
+-- A column that is only a slab over the void has no ground.
+check("slab over the void is unknown", M.resolve({[0] = {[0] = {}}}, 10)[0][0] == nil)
+check("median floor", M.median_floor({{pos = {y = 5}}, {pos = {y = 9}}, {pos = {y = 7}}}) == 7)
+
+-- Next to a slab column, the corrected map has no wall; the raw map does.
+local raw = map(function(x) return x >= 5 and 17 or 10 end)
+local fixed = map(function() return 10 end)
+check("raw slab reads as a wall", M.steps(raw, {}).largest == 7)
+check("corrected slab is level", M.steps(fixed, {}).largest == 0)
+
 print("lv_probe_metrics ok")

@@ -121,4 +121,44 @@ node in a column that is not a tree or leaves, so a ruined portal or an outpost 
 (`structures` says when one is near). #141 and #142 may sharpen the definitions of
 `traps` and `orphans`; if they do, change `metrics.lua` and the baselines in the catalog together.
 
+### Overhang slabs (#219)
+
+Since #219 a column whose topmost walkable node is the top of an overhang slab is measured at
+the ground under the slab when that is where a villager walks. A slab is the mod's definition
+(`village_terrain.is_overhang`, #209): a solid run at most 6 thick with at least 4 air nodes
+directly under it. `run.sh` copies `village_terrain.lua` from the checkout it is in into the probe
+mod and the probe calls that function, so the two cannot drift apart.
+
+The mod's rule alone also matches the roof of a cave or ledge that villagers do walk on (applied
+alone it moved the forest case from 5 to 138 traps), so `metrics.levels` lists the heights a
+column might be walked at (the top, then the ground under each slab; a bed under water is not
+one) and `metrics.resolve` takes the level nearest the ground of the columns around it (the
+median of the columns without a slab within 2, 4, 6 then 10 blocks, at least 3 of them), else
+nearest the median building floor. A column that is only a slab over the void has no ground.
+
+The corrected maps feed `steps`, `pit_depth`, `heights`, `traps` and `fill_cut`. The old numbers,
+with the slab top as ground, stay beside them so earlier tables remain comparable:
+`after.steps_raw`, `after.traps_raw`, `natural.pit_depth_raw`, `natural.heights_raw`,
+`natural.fill_cut_raw` (and the same `_raw` fields in `after`), and `report.sh` prints `step_raw`,
+`steps>1_raw` and `traps_raw`. `overhang_columns` counts the slab columns, `overhang_lowered` those
+that took the ground under the slab and `overhang_unknown` those with no ground under it.
+`after.traps.samples` lists up to 8 trapped regions (`x,z n=columns y=corrected/raw` and the node
+names down the column) to see what a trap is. Tables before #219 are raw; the catalog gives both.
+`census` and `orphans` are not affected.
+
+`after.steps_literal` and `after.traps_literal` apply the mod's rule alone (always the ground under
+a slab), to tell how much of a change is the rule and how much `resolve`'s choice. In the catalog
+the rule alone makes steps and traps worse nearly everywhere; the choice mostly keeps the slab top
+(ledges and cave roofs villagers walk on), so corrected is close to raw except where the top is not
+ground at all (jungle: cocoa pods and vine crusts in the canopy). `overhang_how` counts how the
+ambiguous columns were decided: by the ground within 2, 4, 6 or 10 blocks, or by the median
+building floor when fewer than 3 slab-free columns lay within 10 (`by_ref`; 0 in every catalog case,
+natural and after the build), or not at all (`undecided`). `overhang_samples` lists some lowered
+columns with the node names down them. A column that is only a slab over the void counts in
+`unknown_columns`.
+
+Results written before #219 have none of these fields, so the corrected tables in the catalog
+cannot be rebuilt from the tracked `results/*.jsonl`: regenerate them with `run_cases.sh` and
+`run_cases.sh --with-mod`.
+
 `tests/lv_probe_metrics.lua` covers the pure functions in `metrics.lua`.

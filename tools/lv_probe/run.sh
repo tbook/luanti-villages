@@ -68,6 +68,9 @@ rm -f "$results/$label.jsonl"
 mkdir -p "$world/worldmods" "$results"
 cp -R "$here/mod/lv_probe" "$world/worldmods/lv_probe"
 cp "$mod_dir/village_index.lua" "$world/worldmods/lv_probe/village_index.lua"
+# The probe's definition of an overhang is the mod's (#219), from this checkout whatever mod
+# --mod-dir measures, so runs stay comparable; loading it has no side effects.
+cp "$repo_root/village_terrain.lua" "$world/worldmods/lv_probe/village_terrain.lua"
 # The mod under test is a copy in worldmods, which loads without a world.mt entry; the
 # user-directory copy is never enabled.
 if [ "$with_mod" = 1 ]; then lv_stage_mod "$mod_dir" "$world/worldmods/living_villages"; fi

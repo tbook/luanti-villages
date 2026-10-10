@@ -111,6 +111,88 @@ the change), and Orphans and Steps>1 by about 10%.
 | desert | 8 / 8 | 325 / 315 | 38 / 38 |
 | mesa | 12 / 12 | 107 / 97 | 0 / 0 |
 
+### Overhang slabs in the metrics (#219)
+
+Since #219 the probe measures a column under an overhang slab (the mod's `is_overhang`: a solid
+run at most 6 thick over at least 4 air) at the ground under it, when that ground continues the
+terrain around it (see the probe README). The two tables above are **raw**: the slab top counted
+as ground. Below, each cell is `raw / corrected` from the same run, so one world gives both. They
+are single runs after the change, on `origin/main` at 9cb8f75 (the layout can differ from the
+tables above by a house, and the mod-run column differs from the #155 table for that reason).
+
+| Case | Vanilla Step | Steps>1 | Traps | With mod Step | Steps>1 | Traps |
+|------|--------------|---------|-------|---------------|---------|-------|
+| cliff | 84 / 84 | 1374 / 1249 | 0 / 0 | 84 / 85 | 2407 / 2271 | 5 / 5 |
+| hillside | 77 / 78 | 1172 / 1148 | 0 / 0 | 80 / 80 | 1886 / 1908 | 0 / 0 |
+| tower | 58 / 58 | 1416 / 1406 | 246 / 246 | 23 / 23 | 1769 / 1769 | 72 / 72 |
+| mountain-edge | 83 / 85 | 250 / 228 | 63 / 63 | 83 / 83 | 272 / 238 | 17 / 17 |
+| pit | 44 / 44 | 114 / 114 | 10 / 10 | 9 / 9 | 18 / 18 | 5 / 5 |
+| forest | 17 / 17 | 208 / 207 | 40 / 42 | 14 / 14 | 436 / 437 | 5 / 8 |
+| jungle | 20 / 15 | 780 / 628 | 7 / 14 | 20 / 13 | 478 / 137 | 0 / 0 |
+| portal | 14 / 17 | 406 / 381 | 16 / 16 | 22 / 22 | 352 / 348 | 0 / 0 |
+| portal-outpost | 35 / 34 | 655 / 666 | 26 / 35 | 35 / 35 | 467 / 470 | 9 / 9 |
+| outpost | 20 / 20 | 307 / 324 | 3 / 10 | 20 / 20 | 489 / 504 | 1 / 5 |
+| flat | 3 / 3 | 8 / 8 | 5 / 5 | 10 / 17 | 140 / 142 | 7 / 7 |
+| flat-small | 1 / 1 | 0 / 0 | 0 / 0 | 12 / 12 | 122 / 124 | 0 / 0 |
+| snow-flat | 2 / 2 | 2 / 2 | 0 / 0 | 13 / 13 | 93 / 93 | 0 / 0 |
+| snow-steep | 80 / 81 | 958 / 883 | 6 / 7 | 80 / 81 | 1078 / 997 | 72 / 72 |
+| desert | 12 / 12 | 134 / 133 | 0 / 0 | 8 / 8 | 315 / 316 | 38 / 38 |
+| mesa | 9 / 10 | 20 / 22 | 9 / 10 | 12 / 14 | 99 / 103 | 0 / 0 |
+| Testlandia (seed 18442661806533097198, chunk -912, 2448) | | | | 56 / 53 | 1239 / 1201 | 2 / 4 |
+
+How much of the correction is the rule and how much is the choice, with the mod, from a second
+run (raw / literal / corrected: `literal` takes the mod's rule alone, always the ground under the
+slab; `corrected` is what the probe reports). `Slab` columns are those in the natural terrain
+that match the rule, `Lowered` those that took the ground under the slab. The median-floor
+fallback (fewer than 3 slab-free columns within 10 blocks) was used for 0 columns in every case,
+in the natural terrain and after the build, so nothing here depends on it.
+
+| Case | Slab | Lowered | Steps>1 raw / literal / corrected | Traps raw / literal / corrected |
+|------|------|---------|-----------------------------------|---------------------------------|
+| cliff | 574 | 338 | 2406 / 2237 / 2268 | 5 / 5 / 5 |
+| hillside | 289 | 119 | 1886 / 2028 / 1908 | 0 / 3 / 0 |
+| tower | 31 | 3 | 1769 / 1789 / 1769 | 72 / 96 / 72 |
+| mountain-edge | 268 | 76 | 272 / 383 / 238 | 17 / 63 / 17 |
+| pit | 5 | 0 | 18 / 26 / 18 | 5 / 9 / 5 |
+| forest | 267 | 69 | 437 / 623 / 454 | 5 / 138 / 8 |
+| jungle | 304 | 131 | 478 / 305 / 137 | 0 / 46 / 0 |
+| portal | 158 | 64 | 352 / 433 / 349 | 0 / 28 / 0 |
+| portal-outpost | 82 | 35 | 467 / 522 / 470 | 9 / 35 / 9 |
+| outpost | 111 | 50 | 489 / 535 / 504 | 1 / 0 / 5 |
+| flat | 18 | 1 | 140 / 157 / 142 | 7 / 7 / 7 |
+| flat-small | 9 | 4 | 122 / 128 / 124 | 0 / 0 / 0 |
+| snow-flat | 7 | 2 | 90 / 103 / 90 | 0 / 0 / 0 |
+| snow-steep | 283 | 139 | 1078 / 1069 / 997 | 72 / 89 / 72 |
+| desert | 8 | 4 | 315 / 318 / 316 | 38 / 38 / 38 |
+| mesa | 45 | 10 | 99 / 146 / 103 | 0 / 15 / 0 |
+| Testlandia | 409 | 179 | 1238 / 1371 / 1200 | 2 / 13 / 4 |
+
+What to make of it, honestly:
+
+- Apart from jungle, the corrected numbers stay within about 10% of the raw ones (the first table
+  of this section is an earlier run, so cells differ by the layout noise). The rule alone makes
+  steps and traps worse (forest traps 5 to 138): it also matches ledges and cave roofs that
+  villagers walk on, and the ground under them is a hollow. The choice (take the level nearest the
+  surrounding ground) mostly keeps those roofs, so corrected is close to raw by construction
+  wherever the slab top continues the terrain; it differs only where the slab top is far from its
+  neighbours.
+- Jungle (steps>1 478 to 137) is a different effect: the "ground" there is often a cocoa pod
+  (walkable) hanging in the canopy, 4 air over the real ground, or a vine-hung leaf crust. Those
+  are not ground at all, so much of that drop is a true correction (the rule alone gives 305; the
+  choice then also lowers real ledges to their neighbours' level, which is where the rest comes
+  from and is partly circular).
+- Lowered columns at cliff, snow-steep and Testlandia are mostly thin ledges and outpost slabs far
+  above the village floor, with the real ground 30 or more blocks lower. `natural.overhang_samples`
+  and `after.overhang_samples` list some with the node names down the column.
+- `flat` with the mod (step 10 raw, 17 corrected): one column at (-771, -1880) is a single stone
+  node over 16 air in a natural cave, and its neighbours are the cave floor, so it takes -7 and
+  steps 17 against the ledge at 10. That is the rule working on an odd natural spot, not a resolve
+  error, and the village is not near it.
+
+These numbers cannot be rebuilt from the tracked `tools/lv_probe/results/*.jsonl` (they have no
+`_raw`, `_literal` or overhang fields). Regenerate with `tools/lv_probe/run_cases.sh` and
+`run_cases.sh --with-mod`, and read the fields with `report.sh` or `jq`.
+
 ### Walls beside pads (#220)
 
 The smoothing log line reports `N walls of 6+, tallest M`: adjacent target heights, after smoothing

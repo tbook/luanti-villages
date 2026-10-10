@@ -16,9 +16,10 @@ jq -r '
 	  (.natural.canopy_cover | n), (.natural.trunk_nodes | n),
 	  (.after.steps.largest | n), (.after.steps.over_one | n),
 	  (.after.traps.columns | n), (.after.orphan_leaves | n),
+	  (.after.steps_raw.largest | n), (.after.steps_raw.over_one | n), (.after.traps_raw.columns | n),
 	  ([.structures[]? | select(.name != "mineshaft" and .name != "geode") | "\(.name | sub("_overworld$"; ""))@\(.distance // "?")"] | join("+") | if . == "" then "-" else . end),
 	  ((.timing_ms.plan + .timing_ms.terraform + .timing_ms.paths + (.timing_ms.place_total // 0)) | if . == null then "-" else (. | round | tostring) end)
 	] | @tsv' "$@" 2> /dev/null | {
-	printf 'seed\tchunk\toutcome\tbiome\tbldg\tCT\tfloor\tnbr\tterr\tpit\tfill\tcut\tcanopy\ttrunks\tstep\tsteps>1\ttraps\torphans\tstructures\tms\n'
+	printf 'seed\tchunk\toutcome\tbiome\tbldg\tCT\tfloor\tnbr\tterr\tpit\tfill\tcut\tcanopy\ttrunks\tstep\tsteps>1\ttraps\torphans\tstep_raw\tsteps>1_raw\ttraps_raw\tstructures\tms\n'
 	cat
 } | column -t -s "$(printf '\t')"
