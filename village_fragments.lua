@@ -144,10 +144,13 @@ end
 -- clipped, snow}: fills started, nodes removed, fills that hit the cap, and
 -- snow layers removed. A layer above the VoxelManip
 -- region (the top of the zone plus the cap height) is not seen.
+-- Known limit: like trees, stalks and their vines are removed near ruined portals and
+-- outposts too, where the smoothing leaves the ground alone; clear_trees does not know
+-- the structures.
 -- Bamboo, cactus and sugar cane inside the zone go too (`growth`), as they would
 -- otherwise be read as ground by the smoothing and buried or left under new
 -- blocks (#224), and so do vines hanging on a removed node, with the vines
--- under them (`vines`, #225), and so does the top half of a two-high plant left
+-- under them (`vines`, #225; a vine on a standing node stays), and so does the top half of a two-high plant left
 -- on a removed leaf (`plant_tops`: its bottom half was under the leaves).
 function M.clear_trees(zone, config, engine)
 	engine = engine or core
@@ -306,18 +309,41 @@ function M.clear_trees(zone, config, engine)
 		end
 	end
 
-	-- A vine on a removed trunk or leaf, and the vines hanging under it, would be left
-	-- in the air: a vine drops only when something changes beside it, and a write like
-	-- this one sends no update.
-	local sides = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}}
-	for _, n in ipairs(gone) do
-		for _, d in ipairs(sides) do
+	-- A vine whose support was removed (the node its param2 points at: a trunk, a leaf, or
+	-- the vine above it) would be left in the air: a vine drops only when something changes
+	-- beside it, and a write like this one sends no update. A vine on a standing node (a
+	-- cliff, a leaf outside the fill) stays. Without param2 data any neighbouring vine goes.
+	local param2 = vm.get_param2_data and vm:get_param2_data() or nil
+	local toward = {[0] = {0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
+	local queue, head = {}, 1
+	for _, n in ipairs(gone) do queue[#queue + 1] = n end
+	while head <= #queue do
+		local n = queue[head]
+		head = head + 1
+		for _, d in pairs(toward) do
 			local x, y, z = n[1] + d[1], n[2] + d[2], n[3] + d[3]
-			while x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z
-					and is_vine(data[va:index(x, y, z)]) do
-				data[va:index(x, y, z)] = air
-				stats.vines = stats.vines + 1
-				y = y - 1
+			if x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z then
+				local index = va:index(x, y, z)
+				if is_vine(data[index]) then
+					local attached = true
+					if param2 then
+						local t = toward[param2[index] % 8]
+						attached = t ~= nil and x + t[1] == n[1] and y + t[2] == n[2] and z + t[3] == n[3]
+						-- VoxeLibre also lets a vine hang under a vine of the same param2 when there
+						-- is nothing beside it (mcl_core.check_vines_supported).
+						if not attached and t and t[2] == 0 and d[2] == -1 and n[4] ~= nil
+								and param2[index] == n[4] then
+							local sx, sy, sz = x + t[1], y + t[2], z + t[3]
+							attached = sx < emin.x or sx > emax.x or sz < emin.z or sz > emax.z
+								or data[va:index(sx, sy, sz)] == air
+						end
+					end
+					if attached then
+						data[index] = air
+						stats.vines = stats.vines + 1
+						queue[#queue + 1] = {x, y, z, param2 and param2[index] or nil}
+					end
+				end
 			end
 		end
 	end

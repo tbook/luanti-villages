@@ -42,6 +42,7 @@ end}
 
 -- A sparse map of "x,y,z" -> node name over air; a VoxelManip reads and writes it.
 local map, reads, writes
+local param2 = {} -- "x,y,z" -> param2 of a node, default 0
 local function engine()
 	reads, writes = 0, 0
 	return {
@@ -61,6 +62,15 @@ local function engine()
 				end end end
 				return data
 			end
+			function vm:get_param2_data()
+					local a, b = area[1], area[2]
+					local va = VoxelArea:new({MinEdge = a, MaxEdge = b})
+					local data = {}
+					for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
+						data[va:index(x, y, z)] = param2[x .. "," .. y .. "," .. z] or 0
+					end end end
+					return data
+				end
 			function vm:set_data(data)
 				local a, b = area[1], area[2]
 				local va = VoxelArea:new({MinEdge = a, MaxEdge = b})
@@ -280,12 +290,22 @@ assert(writes == 1, "written once")
 -- A vine on a removed trunk and the vines under a removed leaf go; a vine elsewhere stays (#225).
 map = {}
 tree(0, 0)
-for y = 2, 4 do put(1, y, 0, "mcl_core:vine") end -- beside the trunk
-for y = 1, 4 do put(-2, y, 1, "mcl_core:vine") end -- hangs from a leaf at y=5 (under (-2, 5, 1))
+param2 = {}
+for y = 2, 4 do put(1, y, 0, "mcl_core:vine"); param2["1," .. y .. ",0"] = 3 end -- on the trunk (support at -x)
+for y = 1, 4 do put(-2, y, 1, "mcl_core:vine") end -- hangs from a leaf at y=5, param2 0: support above
+put(2, 4, 2, "mcl_core:vine"); param2["2,4,2"] = 2; put(3, 4, 2, "mcl_core:stone") -- on a standing stone, leaf above goes
+-- a chain on the trunk side at z=-1 (support +z... the trunk is at z=0 so p2 4): the top is on the
+-- trunk (y=4), the two under it hang with nothing beside them, the lowest has a stone beside it
+for y = 1, 4 do put(0, y, -1, "mcl_core:vine"); param2["0," .. y .. ",-1"] = 4 end
+put(0, 1, 0, "mcl_core:stone") -- the trunk is stone at y=1: the vine at y=1 is on a standing node
 put(20, 3, 3, "mcl_core:vine") -- on something else, far away
 stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
-assert(stats.vines == 7, "seven vines removed, got " .. stats.vines)
-assert(count("mcl_core:vine") == 1 and at(20, 3, 3) == "mcl_core:vine", "only the far vine stays")
+assert(stats.vines == 10, "ten vines removed, got " .. stats.vines)
+assert(at(0, 1, -1) == "mcl_core:vine" and at(0, 2, -1) == nil and at(0, 3, -1) == nil and at(0, 4, -1) == nil,
+	"trunk vines go with the trunk, their hanging neighbours too; the one on a stone stays")
+assert(count("mcl_core:vine") == 3 and at(20, 3, 3) == "mcl_core:vine", "the far vine stays")
+assert(at(2, 4, 2) == "mcl_core:vine", "a vine on a standing node stays when the leaf above it goes")
+param2 = {}
 
 -- The top half of a double fern left over a tree's leaves floats once they go; a whole
 -- fern next to the tree stays.

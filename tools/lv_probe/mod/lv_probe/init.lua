@@ -147,7 +147,7 @@ local function scan_terrain(area)
 		end
 	end
 	local plant_counts = plants.count(data, va, {x1 = area.x1, x2 = area.x2, z1 = area.z1, z2 = area.z2, y1 = emin.y, y2 = emax.y}, plant_kind,
-		function(x, y, z) return core.get_name_from_content_id(data[va:index(x, y, z)]) end)
+		function(x, y, z) return core.get_name_from_content_id(data[va:index(x, y, z)]) end, vm:get_param2_data())
 	return {plants = plant_counts, dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, wet = wet, leaves = leaves, trunks = trunks,
 		columns = columns, unknown = unknown, canopy_columns = canopy_columns, clipped = clipped}
 end

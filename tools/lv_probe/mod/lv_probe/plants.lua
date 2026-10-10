@@ -26,7 +26,7 @@ local function bump(t, k, x, y, z)
 	end
 end
 
-function M.count(data, va, area, kind, name_at)
+function M.count(data, va, area, kind, name_at, param2)
 	local out = {buried_growth = 0, buried_plant = 0, dirt_on_growth = 0, floating = 0,
 		hole_all = 0, hole_any = 0, vines_unsupported = 0, growth = 0, plants = 0, vines = 0, samples = {}}
 	-- Pass 1: the ground top of each column, skipping leaves, growth, plants and liquids.
@@ -95,7 +95,18 @@ function M.count(data, va, area, kind, name_at)
 							if solid(x + d[1], y, z + d[2]) then held = true break end
 						end
 					end
-					if not held then bump(out, "vines_unsupported", x, y, z) end
+					if not held then
+							bump(out, "vines_unsupported", x, y, z)
+							local ctx = out.samples.vine_context or {}
+							out.samples.vine_context = ctx
+							if #ctx < SAMPLES and name_at and param2 then
+								local p2 = param2[va:index(x, y, z)]
+								local dirs8 = {[0] = {0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
+								local d = dirs8[p2 % 8] or {0, 0, 0}
+								ctx[#ctx + 1] = x .. "," .. y .. "," .. z .. " p2=" .. p2 .. " support=" .. name_at(x + d[1], y + d[2], z + d[3])
+									.. " above=" .. name_at(x, y + 1, z)
+							end
+						end
 				end
 				above_kind = k
 			end

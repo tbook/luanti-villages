@@ -158,10 +158,10 @@ local cactus = lookup(9, 0)
 assert(cactus.ground_y == 13 and cactus.base_y == 10 and not cactus.base_liquid, "base skips a cactus")
 assert(pond.ground_y == 10 and pond.ground_liquid, "ground of a pond is its water")
 -- A bamboo stalk (4 high, on grass at 10): its top is the column top, but not the ground,
--- and the grass under it is no surface for find_surface (#224).
+-- and the grass under it is the surface (find_surface would refuse it, we do not, #224).
 local bamboo = lookup(11, 0)
 assert(bamboo.y == 14 and bamboo.base_y == 10 and bamboo.base_name == "mcl_core:dirt_with_grass", "base skips bamboo")
-assert(bamboo.surface_y == nil, "grass under bamboo is no surface, so callers must use base_y")
+assert(bamboo.surface_y == 10, "grass under bamboo is the surface: a stalk is open space above it")
 local tuft = lookup(1, 0)
 assert(tuft.y == 10 and tuft.surface_y == 10, "a plant is not solid and is open space above the surface")
 local snow = lookup(2, 0)
@@ -206,6 +206,14 @@ assert(over(16, 0).surface_y == 14 and not over(16, 0).overhang, "a gap of 3 is 
 assert(over(17, 0).overhang, "air to the bottom of the area counts")
 assert(not over(19, 0).overhang, "ordinary ground")
 assert(not over(14, 1).overhang, "the neighbouring row is ordinary ground")
+-- Growth on a slab does not hide the surface or the overhang (#209 with #224).
+put(14, 15, 15, "mcl_core:dirt"); put(14, 17, 19, "mcl_bamboo:bamboo")
+over = assert(terrain.heights({minp = vec(14, 0, 0), maxp = vec(19, 20, 1)}, surface))
+assert(over(14, 0).surface_y == 16 and over(14, 0).base_y == 16 and over(14, 0).overhang, "a slab with a stalk on it is still an overhang")
+-- A stalk on a thick ledge over a cave: the ledge is ground, not an overhang.
+put(15, 19, 20, "mcl_bamboo:bamboo")
+over = assert(terrain.heights({minp = vec(14, 0, 0), maxp = vec(19, 20, 1)}, surface))
+assert(over(15, 0).surface_y == 18 and over(15, 0).base_y == 18 and not over(15, 0).overhang, "a stalk on a ledge: the ledge is ground")
 for x = 14, 18 do put(x, 0, 20, nil) end
 
 -- fill_below does not stop over air above ground lower than 20 (#209), and a
@@ -321,6 +329,17 @@ bush, top = terrain.take_decor(34, 0, 5, engine)
 assert(bush.name == "mcl_flowers:peony" and top.name == "mcl_flowers:peony_top")
 terrain.put_decor(34, 0, 8, bush, top, "mcl_core:dirt_with_grass", engine)
 assert(node(34, 9, 0) == "mcl_flowers:peony" and node(34, 10, 0) == "mcl_flowers:peony_top")
+-- Things that are not plants beside a plant are left alone: a torch over it, a sign.
+registered["mcl_torches:torch"] = {walkable = false}
+registered["signs:sign"] = {walkable = false}
+reset(36); put(36, 6, 6, "mcl_farming:sweet_berry_bush_3"); put(36, 8, 8, "mcl_torches:torch")
+bush, top = terrain.take_decor(36, 0, 5, engine)
+terrain.put_decor(36, 0, 6, bush, top, "mcl_core:dirt_with_grass", engine)
+assert(node(36, 8, 0) == "mcl_torches:torch" and node(36, 7, 0) == "mcl_farming:sweet_berry_bush_3", "a torch is left alone")
+reset(37); put(37, 6, 6, "signs:sign")
+assert(terrain.take_decor(37, 0, 5, engine) == nil, "a sign is not a plant")
+terrain.put_decor(37, 0, 5, nil, nil, "mcl_core:dirt_with_grass", engine)
+assert(node(37, 6, 0) == "signs:sign", "and stays")
 -- put_decor clears a stalk left standing over the surface, and a stray plant half.
 reset(35); put(35, 6, 9, "mcl_bamboo:bamboo"); put(35, 10, 10, "mcl_flowers:peony_top")
 terrain.put_decor(35, 0, 5, nil, nil, "mcl_core:dirt_with_grass", engine)

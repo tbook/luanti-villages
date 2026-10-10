@@ -315,9 +315,18 @@ function M.terraform(plan, pr, env, config)
 	end
 	local targets = M.targets(pads, function(x, z)
 		local column = lookup(x, z)
-		if not column or column.liquid or near_structure(x, z) then return nil end
-		-- The ground, not the top of what grows out of it (a stalk, #224).
-		return column.surface_y or column.base_y or column.y, column.overhang
+		if not column or near_structure(x, z) then return nil end
+		-- The ground, not the top of what grows out of it (a stalk, #224), and wet or
+		-- dry by that node, not by the leaves over it.
+		if column.surface_y then
+			if column.liquid then return nil end
+			return column.surface_y, column.overhang
+		elseif column.base_y then
+			if column.base_liquid then return nil end
+			return column.base_y, column.overhang
+		end
+		if column.liquid then return nil end
+		return column.y, column.overhang
 	end, config)
 	local stats = M.apply(pads, targets, lookup, config, engine)
 	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block, %d unloaded blocks skipped%s")

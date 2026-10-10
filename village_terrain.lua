@@ -149,6 +149,7 @@ function M.take_decor(x, z, y, engine)
 end
 
 -- A plant that grows on grass or dirt dies on sand: only a dead bush stays on it.
+-- Only sand is checked: VoxeLibre sets no per-plant soil group on its flowers and ferns.
 local function valid_soil(surface, plant)
 	if surface:find("sand", 1, true) then return plant:find("dead", 1, true) ~= nil end
 	return true
@@ -199,7 +200,7 @@ end
 -- - surface_y, material: the highest node in settlements.surface_mat that
 --   find_surface would accept: air, a plant, a trunk or snow above it, and no
 --   leaves below it. nil where the column has none (a shaft, a pond bed)
--- - overhang: true when surface_y is only a thin slab over air (see OVERHANG_*), so
+-- - overhang: true when surface_y (or base_y, where growth hides the surface) is only a thin slab over air (see OVERHANG_*), so
 --   it is not the column's ground (#209)
 -- Returns nil and a reason if any of the area is still unloaded, because the
 -- column tops would then be wrong; emerge first. With `partial` set, a column with
@@ -224,6 +225,7 @@ function M.heights(area, surface_materials, engine, partial)
 				solid_or_liquid = id ~= engine.CONTENT_AIR and (liquid or (def and def.walkable) or false) or false,
 				liquid = liquid,
 				open = open_above(name),
+				stalk = M.is_growth(name, def),
 				leaves = name:find("leaves", 1, true) ~= nil,
 				growth = (def and def.groups and def.groups.tree ~= nil) or name:find("tree", 1, true) ~= nil
 					or M.is_growth(name, def),
@@ -265,14 +267,17 @@ function M.heights(area, surface_materials, engine, partial)
 					local below = below_id and trait(below_id) or nil
 					-- A snow layer with air under it floats (its tree is gone): not ground.
 					local floating = t.name == "mcl_core:snow" and below_id == engine.CONTENT_AIR
-					if (not above or above.open) and not (below and below.leaves) and not floating then
+					if (not above or above.open or above.stalk) and not (below and below.leaves) and not floating then
 						column.surface_y, column.material = y, t.name
 					end
 				end
 			end
-			if column.surface_y then
+			-- A column whose surface is hidden by growth (grass under bamboo or a sapling) is
+			-- judged by its base, so a slab with a stalk on it is an overhang too.
+			local top_y = column.surface_y or (not column.base_liquid and column.base_y) or nil
+			if top_y then
 				-- Walk down the solid run under the surface, then count the air under it.
-				local y, thick = column.surface_y, 0
+				local y, thick = top_y, 0
 				while y >= area.minp.y and thick <= OVERHANG_MAX_THICKNESS do
 					local t = trait(data[va:index(x, y, z)])
 					if not t.solid_or_liquid and data[va:index(x, y, z)] ~= ignore then break end
@@ -310,8 +315,8 @@ function M.materials(surface)
 end
 
 -- Fill `fill` (default dirt) under y, down to the first solid node, so the fill
--- always meets ground. A bamboo, cactus or cane stalk is not
--- ground (#224): the fill goes through it to the ground it stands on. Covers a hole under a building or a yard. Liquid is filled
+-- always meets ground. Covers a hole under a building or a yard. A bamboo, cactus
+-- or cane stalk is not ground (#224): the fill goes through it. Liquid is filled
 -- through (a pond under a raised column, lava, #142). It stops above an unloaded
 -- node (`ignore`: swapping it does nothing and the ground below is unknown). If no
 -- solid node lies within the foundation depth (20) it fills nothing: a dirt column
