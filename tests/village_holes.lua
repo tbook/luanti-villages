@@ -397,6 +397,31 @@ local before = swaps
 holes.apply(cell(6, 5, 6, "mcl_core:dirt"), material, cfg, fake)
 assert(swaps - before == 1, "only the surface is written for a raise of one")
 
+-- A berry bush at the bottom of a filled hole is re-seated on the new surface (#214); a
+-- stalk (bamboo, cactus) standing in the hole is replaced by the fill and cleared above it
+-- (#224), never left under or over the new surface; a plant is not put on sand.
+fake.registered_nodes["mcl_farming:sweet_berry_bush_3"] = {walkable = false, drawtype = "plantlike", groups = {plant = 1}}
+fake.registered_nodes["mcl_bamboo:bamboo"] = {walkable = true, drawtype = "normal", groups = {plant = 1}}
+fake.registered_nodes["mcl_core:cactus"] = {walkable = true, drawtype = "normal"}
+fake.registered_nodes["mcl_core:sand"] = {walkable = true, drawtype = "normal"}
+put(8, 5, 0, "mcl_core:dirt_with_grass"); put(8, 6, 0, "mcl_farming:sweet_berry_bush_3")
+holes.apply(cell(8, 5, 9, "mcl_core:dirt_with_grass"), material, cfg, fake)
+assert(name_at(8, 6, 0) == "mcl_core:dirt" and name_at(8, 9, 0) == "mcl_core:dirt_with_grass"
+	and name_at(8, 10, 0) == "mcl_farming:sweet_berry_bush_3", "berry bush at the bottom of a filled hole stands on the new surface")
+put(9, 5, 0, "mcl_core:dirt_with_grass")
+for y = 6, 9 do put(9, y, 0, "mcl_bamboo:bamboo") end
+holes.apply(cell(9, 5, 8, "mcl_core:dirt_with_grass"), material, cfg, fake)
+for y = 6, 7 do assert(name_at(9, y, 0) == "mcl_core:dirt", "stalk replaced by fill at " .. y) end
+assert(name_at(9, 8, 0) == "mcl_core:dirt_with_grass" and name_at(9, 9, 0) == "air", "stalk over the new surface cleared")
+put(10, 5, 0, "mcl_core:dirt_with_grass")
+for y = 6, 8 do put(10, y, 0, "mcl_core:cactus") end
+holes.apply(cell(10, 5, 12, "mcl_core:dirt_with_grass"), material, cfg, fake)
+for y = 6, 11 do assert(name_at(10, y, 0) == "mcl_core:dirt", "cactus under the fill is gone at " .. y) end
+local function sand() return "mcl_core:sand", "mcl_core:sandstone" end
+put(11, 5, 0, "mcl_core:dirt_with_grass"); put(11, 6, 0, "mcl_flowers:poppy")
+holes.apply(cell(11, 5, 7, "mcl_core:dirt_with_grass"), sand, cfg, fake)
+assert(name_at(11, 7, 0) == "mcl_core:sand" and name_at(11, 8, 0) == "air", "a flower is not put on sand")
+
 -- configured: the settings override the defaults.
 local conf = holes.configured({settings = {get = function(_, k)
 	return ({living_villages_cliff_rise = "2", living_villages_hole_budget = "500"})[k]

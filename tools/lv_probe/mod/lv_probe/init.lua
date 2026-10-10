@@ -17,6 +17,7 @@ local modpath = core.get_modpath("lv_probe")
 local metrics = dofile(modpath .. "/metrics.lua")
 local index = dofile(modpath .. "/village_index.lua")
 local census = dofile(modpath .. "/census.lua")
+local plants = dofile(modpath .. "/plants.lua")
 
 local MARGIN = 8 -- columns mapped beyond the outermost building
 local BELOW, ABOVE = 64, 96 -- vertical reach around the buildings' floors
@@ -71,6 +72,31 @@ local function area_of(info)
 		y1 = y1 - BELOW, y2 = y2 + ABOVE}, footprints
 end
 
+-- Node classes for the plant census (plants.lua, #214).
+local plant_kinds = {}
+local function plant_kind(id)
+	local kind = plant_kinds[id]
+	if kind then return kind end
+	local name = core.get_name_from_content_id(id)
+	local def = core.registered_nodes[name]
+	local groups = def and def.groups or {}
+	if name == "air" then kind = "air"
+	elseif name == "ignore" then kind = "ignore"
+	elseif def and (def.liquidtype or "none") ~= "none" then kind = "liquid"
+	elseif name:find("leaves", 1, true) then kind = "leaves"
+	elseif name == "mcl_core:vine" then kind = "vine"
+	elseif name == "mcl_core:cactus" or name == "mcl_core:reeds"
+		or (name:find("^mcl_bamboo:bamboo") and groups.plant) then kind = "growth"
+	elseif def and not def.walkable and (groups.plant or groups.flower or groups.flora or groups.sapling
+		or name:find("tallgrass", 1, true) or name:find("fern", 1, true)) then kind = "plant"
+	elseif name:find("^mcl_core:dirt") or name == "mcl_core:podzol" or name == "mcl_core:coarse_dirt"
+		or name == "mcl_core:mycelium" then kind = "soil"
+	elseif def and def.walkable then kind = "solid"
+	else kind = "other" end
+	plant_kinds[id] = kind
+	return kind
+end
+
 -- Reads the map once and returns the ground map, the columns with water over
 -- them, tree counts, and the data needed to find leaves without a trunk.
 local CENSUS_DEPTH = 6
@@ -120,7 +146,9 @@ local function scan_terrain(area)
 			if covered then canopy_columns = canopy_columns + 1 end
 		end
 	end
-	return {dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, wet = wet, leaves = leaves, trunks = trunks,
+	local plant_counts = plants.count(data, va, {x1 = area.x1, x2 = area.x2, z1 = area.z1, z2 = area.z2, y1 = emin.y, y2 = emax.y}, plant_kind,
+		function(x, y, z) return core.get_name_from_content_id(data[va:index(x, y, z)]) end, vm:get_param2_data())
+	return {plants = plant_counts, dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, wet = wet, leaves = leaves, trunks = trunks,
 		columns = columns, unknown = unknown, canopy_columns = canopy_columns, clipped = clipped}
 end
 
@@ -187,6 +215,7 @@ local function terrain_report(terrain, info, footprints)
 		steps = metrics.steps(terrain.ground, footprints),
 		dirt_tops = terrain.dirt_tops, census = terrain.census, census_dirt = terrain.census_dirt,
 		unknown_columns = terrain.unknown,
+		plants = terrain.plants,
 		clipped_columns = terrain.clipped,
 		canopy_cover = terrain.columns > 0 and math.floor(100 * terrain.canopy_columns / terrain.columns) / 100 or 0,
 		trunk_nodes = #terrain.trunks,
@@ -248,6 +277,7 @@ local function finish_site(site, outcome)
 		result.natural = site.natural
 		result.natural.fill_cut = metrics.fill_and_cut(info, footprints, site.natural_ground)
 		result.after = terrain_report(after, info, footprints)
+		result.terraformed_plants = site.terraformed
 		result.after.traps = metrics.traps(after.ground, after.wet, footprints, floors,
 			anchor_of(info, footprints))
 		result.after.orphan_leaves = orphan_leaves(after)
@@ -310,7 +340,15 @@ local function wrap_pipeline()
 		site.natural = terrain_report(natural, info, site.footprints)
 		return info
 	end
-	settlements.terraform = timed("terraform", settlements.terraform)
+	local terraform = timed("terraform", settlements.terraform)
+	-- The plant census again straight after the terraform, before the buildings are
+	-- placed, to tell what the terrain steps leave from what the schematics do (#214).
+	settlements.terraform = function(...)
+		local result = terraform(...)
+		local site = current
+		if site and site.area then site.terraformed = read_terrain(site.area).plants end
+		return result
+	end
 	settlements.paths = timed("paths", settlements.paths)
 
 	-- Schematics go in through emerge callbacks after place_schematics returns,

@@ -81,6 +81,15 @@ claimant's profession), `approach` and `standable`: counts of the cardinal appro
 a villager's profession or jobsite: `t`, `id` (first 6 characters), `what`, `pos`, `bed`). The census
 steps every 10 s, so `t` is a multiple of 10.
 
+## Plant census (#214, #224)
+
+Every result has `natural.plants` and `after.plants` (`plants.lua`): counts over the village area of
+`buried_growth` / `buried_plant` (a stalk or plant with a solid block directly over it), `dirt_on_growth`
+(soil directly on bamboo, cactus or sugar cane), `floating` (a plant or stalk with air under its base),
+`hole_all` / `hole_any` (a base 2 or more below all / any of the four neighbouring ground tops; `hole_any`
+also counts natural slopes), `growth`, `plants`, `vines`, `vines_unsupported`, and `samples` (up to 8
+positions per count).
+
 ## What it reports
 
 One JSON line per site, and `report.sh` prints the main columns.
