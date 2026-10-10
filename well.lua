@@ -27,9 +27,10 @@ local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local WATER = "mcl_core:water_source"
 
--- Wells are looked for this far from the villager's bed, and a villager's
--- drift about one adds GATHER_RADIUS to it.
-local SEARCH_RADIUS = 44
+-- Wells are looked for this far from the villager's bed. A villager drifting about
+-- one is at most GATHER_RADIUS + STRAY further, 49 nodes at the most, inside the
+-- 50 that vanilla tolerates.
+local SEARCH_RADIUS = 42
 -- A scan covers a grid cell of the map and what a villager standing anywhere in
 -- it could reach: SEARCH_RADIUS plus half a cell. Vertically a well is within a
 -- few nodes of the ground by the bed, so a cell and SCAN_Y more.
@@ -42,6 +43,8 @@ local MAX_WATER = 20000
 -- How long a scan stands before the area is looked at again. Short enough that
 -- a well beyond what was loaded is found when it is.
 local SCAN_SECONDS = 600
+-- ...and when a candidate could not be judged because part of it is not loaded.
+local RESCAN_SECONDS = 60
 -- A well needs at least this many places to stand about it.
 local MIN_SPOTS = 4
 
@@ -73,9 +76,10 @@ local WALK_PER_NODE = 2
 local WALK_MAX = 300
 local UNREACHABLE_SECONDS = 600
 local FIELDS = {
-	"_villages_well", "_villages_well_skipped", "_villages_well_checked", "_villages_well_day",
-	"_villages_well_going", "_villages_wander_anchor",
+	"_villages_well", "_villages_well_skipped", "_villages_well_checked", "_villages_wander_anchor",
 }
+-- _villages_well_day and _villages_well_going are saved with the villager: a
+-- reloaded one does not roll again for the same day.
 
 local wells = {}
 local scans = {}
@@ -119,18 +123,24 @@ end
 -- the well or nil.
 local function examine(corner)
 	local x, y, z = corner.x, corner.y, corner.z
+	-- A node not loaded cannot be judged: the answer is then "unknown", not "no".
+	local unknown = false
+	local function judge(test, pos)
+		if not core.get_node_or_nil(pos) then unknown = true end
+		return test(pos)
+	end
 	for dx = 0, 1 do
 		for dz = 0, 1 do
 			-- Below solid and above dry: not the top of a deeper or taller body.
-			if not solid({x = x + dx, y = y - 1, z = z + dz}) then return nil end
-			if not dry({x = x + dx, y = y + 1, z = z + dz}) then return nil end
+			if not judge(solid, {x = x + dx, y = y - 1, z = z + dz}) then return nil, unknown end
+			if not judge(dry, {x = x + dx, y = y + 1, z = z + dz}) then return nil, unknown end
 		end
 	end
 	for i = 0, 1 do
 		for _, wall in ipairs({
 			{x - 1, z + i}, {x + 2, z + i}, {x + i, z - 1}, {x + i, z + 2},
 		}) do
-			if not solid({x = wall[1], y = y, z = wall[2]}) then return nil end
+			if not judge(solid, {x = wall[1], y = y, z = wall[2]}) then return nil, unknown end
 		end
 	end
 	local well = {
@@ -146,13 +156,13 @@ local function examine(corner)
 	for cx = math.floor(well.center.x) - reach, math.floor(well.center.x) + reach + 1 do
 		for cz = math.floor(well.center.z) - reach, math.floor(well.center.z) + reach + 1 do
 			local distance = math.sqrt((cx - well.center.x) ^ 2 + (cz - well.center.z) ^ 2)
-			if distance >= SPOT_MIN and distance <= SPOT_MAX
-				and common.is_standing_space({x = cx, y = well.stand_y, z = cz}) then
-				count = count + 1
+			if distance >= SPOT_MIN and distance <= SPOT_MAX then
+				if not core.get_node_or_nil({x = cx, y = well.stand_y - 1, z = cz}) then unknown = true end
+				if common.is_standing_space({x = cx, y = well.stand_y, z = cz}) then count = count + 1 end
 			end
 		end
 	end
-	if count < MIN_SPOTS then return nil end
+	if count < MIN_SPOTS then return nil, unknown end
 	return well
 end
 
@@ -164,6 +174,7 @@ local function scan(origin)
 	local grid = math.floor(origin.x / GRID) .. "," .. math.floor(origin.y / GRID) .. "," .. math.floor(origin.z / GRID)
 	if (scans[grid] or 0) > now() then return end
 	scans[grid] = now() + SCAN_SECONDS
+	local unsure = false
 	local sources = core.find_nodes_in_area(
 		{x = cx - SCAN_HALF, y = cy - SCAN_Y, z = cz - SCAN_HALF},
 		{x = cx + SCAN_HALF, y = cy + SCAN_Y, z = cz + SCAN_HALF}, {WATER})
@@ -177,13 +188,16 @@ local function scan(origin)
 	for _, pos in ipairs(sources) do
 		if set[key({x = pos.x + 1, y = pos.y, z = pos.z})] and set[key({x = pos.x, y = pos.y, z = pos.z + 1})]
 			and set[key({x = pos.x + 1, y = pos.y, z = pos.z + 1})] and not wells[key(pos)] then
-			local well = examine(pos)
+			local well, unknown = examine(pos)
+			if unknown then unsure = true end
 			if well then
 				wells[well.key] = well
 				core.log("action", string.format("[living_villages] well found at (%d,%d,%d)", pos.x, pos.y, pos.z))
 			end
 		end
 	end
+	-- Part of a candidate was not loaded: look again soon.
+	if unsure then scans[grid] = now() + RESCAN_SECONDS end
 end
 
 -- Whether the well is still there: its four sources are. A well in a part of
@@ -292,12 +306,20 @@ local function release_spot(state)
 end
 
 -- Let the well go: free the place and the spot, stop walking to it or about it.
-local function leave(self)
+local function leave(self, reason)
 	local state = self._villages_well
 	if state then
 		release_spot(state)
 		vacate(state.well, self._id)
 		common.stop_walk(self)
+		-- A route still being planned would start a walk to the old spot later.
+		local walk = self._villages_goto_route
+		if walk and walk.status == "planning" and state.goal and walk.goal
+			and walk.goal.x == state.goal.x and walk.goal.y == state.goal.y and walk.goal.z == state.goal.z then
+			self._villages_goto_route = nil
+		end
+		core.log("action", string.format("[living_villages] villager %s left the well after %s s (%s)",
+			tostring(self._id), state.arrived_at and (now() - state.arrived_at) or "-", reason or "ended"))
 	end
 	self._villages_well = nil
 	self._villages_wander_anchor = nil
@@ -339,6 +361,7 @@ end
 -- Any other non-answer is a failure, and two give the well up.
 local function start_walk(self, state, spot)
 	if self.ready_to_path and not self:ready_to_path(true) then return true end
+	state.goal = spot
 	if self:gopath(spot, function() end, true) then return true end
 	state.failures = (state.failures or 0) + 1
 	return state.failures < 2
@@ -352,14 +375,14 @@ end
 
 -- Done for the day: leave, and do not come back this morning.
 local function finish(self)
-	leave(self)
+	leave(self, "stay over")
 	self._villages_well_going = false
 end
 
 local function join(self, pos)
 	local state = self._villages_well
 	if state and (skipped(self, state.well) or not standing(state.well)) then
-		leave(self)
+		leave(self, "well gone or passed over")
 		state = nil
 	end
 	if not state then
@@ -373,6 +396,8 @@ local function join(self, pos)
 		end
 		state = {well = well, since = now(), limit = walk_limit(self, well.center)}
 		self._villages_well = state
+		core.log("action", string.format("[living_villages] villager %s sets off for the well at (%d,%d,%d)",
+			tostring(self._id), well.water.x, well.water.y, well.water.z))
 	end
 	local well = state.well
 	-- The stay is over wherever the villager has got to: not another walk back.
@@ -382,7 +407,7 @@ local function join(self, pos)
 		hold_spot(self, state)
 		if now() - state.since > state.limit then
 			skip(self, well, "the walk took too long")
-			leave(self)
+			leave(self, "walk took too long")
 		end
 		return
 	end
@@ -390,6 +415,7 @@ local function join(self, pos)
 	if about_well(pos, well, reach) then
 		if not state.arrived then
 			state.arrived, state.failures = true, nil
+			state.arrived_at = state.arrived_at or now()
 			-- Set once: being pushed out and walking back does not extend the stay.
 			state.leave_at = state.leave_at or now() + STAY_MIN + math.random() * (STAY_MAX - STAY_MIN)
 			release_spot(state)
@@ -406,7 +432,7 @@ local function join(self, pos)
 	self._villages_wander_anchor = nil
 	if now() - state.since > state.limit then
 		skip(self, well, "the walk took too long")
-		return leave(self)
+		return leave(self, "walk took too long")
 	end
 	if not state.spot then
 		state.spot = pick_spot(well, self._id)
@@ -415,7 +441,7 @@ local function join(self, pos)
 	hold_spot(self, state)
 	if not start_walk(self, state, state.spot) then
 		skip(self, well, "no route")
-		return leave(self)
+		return leave(self, "no route")
 	end
 end
 
@@ -445,14 +471,14 @@ local function install(def)
 	end
 
 	def.on_die = function(self, pos, cmi_cause)
-		leave(self)
+		leave(self, "died")
 		return original_die(self, pos, cmi_cause)
 	end
 
 	def.do_custom = function(self, dtime)
 		-- Before the other wrappers, so that a route they start as the stage
 		-- ends is not mistaken for the visit's and stopped.
-		if self._villages_well and (not free(self) or not enabled()) then leave(self) end
+		if self._villages_well and (not free(self) or not enabled()) then leave(self, "stage over or setting off") end
 		local result = original_custom(self, dtime)
 		if result == false then return result end
 		if not enabled() or not free(self) then return result end
@@ -490,4 +516,5 @@ return {
 	STAY_MIN = STAY_MIN,
 	STAY_MAX = STAY_MAX,
 	SCAN_SECONDS = SCAN_SECONDS,
+	RESCAN_SECONDS = RESCAN_SECONDS,
 }

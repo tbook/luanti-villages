@@ -160,6 +160,41 @@ do
 	now = now + well.SCAN_SECONDS + 1
 end
 
+-- A well whose wall is in an unloaded block is not judged: it is looked at again soon.
+do
+	local world = new_world(0)
+	local well = fresh_module()
+	local real_get = minetest.get_node_or_nil
+	local hidden = {x = ORIGIN + 1, y = 2, z = ORIGIN + 3}
+	minetest.get_node_or_nil = function(pos)
+		if pos.x == hidden.x and pos.y == hidden.y and pos.z == hidden.z then return nil end
+		return real_get(pos)
+	end
+	local origin = {x = ORIGIN - 6, y = 1, z = ORIGIN + 3}
+	well.scan(origin)
+	assert(next(well.wells) == nil, "a well with an unloaded wall is not taken yet")
+	area_calls = 0
+	now = now + well.RESCAN_SECONDS - 1
+	well.scan(origin)
+	assert(area_calls == 0, "not looked at before the short wait")
+	now = now + 2
+	minetest.get_node_or_nil = real_get
+	well.scan(origin)
+	assert(next(well.wells), "found once the block is loaded, after a minute and not ten")
+	now = now + well.SCAN_SECONDS + 1
+	-- A true negative waits the long time.
+	local pond_world = new_world(0, false)
+	for dx = 0, 1 do for dz = 0, 1 do pond_world.set({x = 10 + dx, y = 0, z = 10 + dz}, "mcl_core:water_source") end end
+	local pond = fresh_module()
+	pond.scan({x = 10, y = 1, z = 10})
+	now = now + pond.RESCAN_SECONDS + 1
+	area_calls = 0
+	pond.scan({x = 10, y = 1, z = 10})
+	assert(area_calls == 0, "a pond is not looked at again after a minute")
+	now = now + pond.SCAN_SECONDS
+end
+assert(dofile("well.lua").SEARCH_RADIUS + dofile("well.lua").GATHER_RADIUS + 2 < 50, "a visit stays inside vanilla's 50 nodes from the bed")
+
 -- Villagers.
 local world, well
 local def, gopaths, answer
@@ -460,4 +495,43 @@ world.timeofday = WORK
 handoff.do_custom(guest, 0.1)
 assert(guest.state == "gowp" and guest._villages_well == nil, "the next stage's trip survives the stage change")
 
+-- A route still being planned when the villager lets go is dropped; others' routes are not.
+setup()
+local planner = villager(ORIGIN - 6, ORIGIN + 3)
+planner.gopath = function(s, target)
+	s.state = "stand"
+	s._villages_goto_route = {status = "planning", goal = {x = target.x, y = target.y, z = target.z}}
+	return true
+end
+tick(planner)
+assert(planner._villages_goto_route and planner._villages_goto_route.status == "planning", "control: a route is being planned")
+world.timeofday = WORK
+tick(planner)
+assert(planner._villages_goto_route == nil and planner._villages_well == nil, "a route in planning is dropped when the visit ends")
+setup()
+local other = villager(ORIGIN - 6, ORIGIN + 3)
+other.gopath = function(s, target)
+	s.state = "stand"
+	s._villages_goto_route = {status = "planning", goal = {x = target.x, y = target.y, z = target.z}}
+	return true
+end
+tick(other)
+other._villages_goto_route.goal = {x = 1, y = 1, z = 1}
+world.timeofday = WORK
+tick(other)
+assert(other._villages_goto_route, "a route to somewhere else is left alone")
+
+-- The day's roll is saved, so a reload does not roll again.
+setup()
+local reloaded = villager(ORIGIN - 6, ORIGIN + 3, {_villages_well_going = false})
+tick(reloaded)
+local saved = def.get_staticdata(reloaded)
+assert(saved._villages_well_day == day and saved._villages_well_going == false, "the day's roll is saved")
+def.on_activate(reloaded, "", 0)
+assert(reloaded._villages_well_day == day and reloaded._villages_well_going == false, "a reload keeps it")
+local n = #gopaths
+tick(reloaded, 5)
+assert(#gopaths == n, "a villager done for the day does not go again after a reload")
+
 print("well tests passed")
+
