@@ -18,6 +18,7 @@ local metrics = dofile(modpath .. "/metrics.lua")
 local index = dofile(modpath .. "/village_index.lua")
 local census = dofile(modpath .. "/census.lua")
 local plants = dofile(modpath .. "/plants.lua")
+local remains = dofile(modpath .. "/remains.lua")
 
 local MARGIN = 8 -- columns mapped beyond the outermost building
 local BELOW, ABOVE = 64, 96 -- vertical reach around the buildings' floors
@@ -95,6 +96,37 @@ local function plant_kind(id)
 	else kind = "other" end
 	plant_kinds[id] = kind
 	return kind
+end
+
+-- Node classes for the tree remains census (remains.lua, #232).
+local remains_kinds = {}
+local function remains_kind(id)
+	local kind = remains_kinds[id]
+	if kind then return kind end
+	local name = core.get_name_from_content_id(id)
+	local def = core.registered_nodes[name]
+	if name == "ignore" then kind = "ignore"
+	elseif name:find("^mcl_cocoas:cocoa_%d") then kind = "cocoa"
+	elseif name == "mcl_core:vine" then kind = "vine"
+	elseif core.get_item_group(name, "leaves") ~= 0 or name:find("leaves", 1, true) then kind = "leaves"
+	elseif core.get_item_group(name, "tree") ~= 0 then kind = "trunk"
+	elseif def and def.walkable and (def.node_box == nil or def.node_box.type == "regular")
+		and (def.collision_box == nil or def.collision_box.type == "regular") then kind = "support"
+	else kind = "other" end
+	remains_kinds[id] = kind
+	return kind
+end
+
+-- Cocoa pods without a trunk, vines without a support and leaves without a trunk (#232).
+local function read_remains(area)
+	local reach = remains.LEAF_REACH
+	local vm = core.get_voxel_manip()
+	local emin, emax = vm:read_from_map({x = area.x1 - reach, y = area.y1 - reach, z = area.z1 - reach},
+		{x = area.x2 + reach, y = area.y2 + reach, z = area.z2 + reach})
+	local data = vm:get_data()
+	local va = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	return remains.count(data, va, area, remains_kind, vm:get_param2_data(),
+		function(x, y, z) return core.get_name_from_content_id(data[va:index(x, y, z)]) end)
 end
 
 -- Reads the map once and returns the ground map, the columns with water over
@@ -209,13 +241,14 @@ local function anchor_of(info, footprints)
 	return {x = math.floor((f.x1 + f.x2) / 2), z = math.floor((f.z1 + f.z2) / 2)}
 end
 
-local function terrain_report(terrain, info, footprints)
+local function terrain_report(terrain, info, footprints, area)
 	local report = {
 		heights = metrics.height_range(terrain.ground),
 		steps = metrics.steps(terrain.ground, footprints),
 		dirt_tops = terrain.dirt_tops, census = terrain.census, census_dirt = terrain.census_dirt,
 		unknown_columns = terrain.unknown,
 		plants = terrain.plants,
+		remains = read_remains(area),
 		clipped_columns = terrain.clipped,
 		canopy_cover = terrain.columns > 0 and math.floor(100 * terrain.canopy_columns / terrain.columns) / 100 or 0,
 		trunk_nodes = #terrain.trunks,
@@ -276,7 +309,7 @@ local function finish_site(site, outcome)
 		result.floors = metrics.floor_heights(info)
 		result.natural = site.natural
 		result.natural.fill_cut = metrics.fill_and_cut(info, footprints, site.natural_ground)
-		result.after = terrain_report(after, info, footprints)
+		result.after = terrain_report(after, info, footprints, site.area)
 		result.terraformed_plants = site.terraformed
 		result.after.traps = metrics.traps(after.ground, after.wet, footprints, floors,
 			anchor_of(info, footprints))
@@ -337,7 +370,7 @@ local function wrap_pipeline()
 		site.area, site.footprints = area_of(info)
 		local natural = read_terrain(site.area)
 		site.natural_ground = natural.ground
-		site.natural = terrain_report(natural, info, site.footprints)
+		site.natural = terrain_report(natural, info, site.footprints, site.area)
 		return info
 	end
 	local terraform = timed("terraform", settlements.terraform)

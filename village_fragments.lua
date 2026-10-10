@@ -18,6 +18,8 @@ M.config = {
 	cap_nodes = 400, -- a tree fill that reaches this many nodes is a canopy linking many trees
 	cap_radius = 10, -- or that strays this far sideways from the node it started at
 	cap_height = 40, -- or this far up or down (a jungle tree is taller than it is wide)
+	orphan_margin = 12, -- leaves with no trunk, floating trunks and loose cocoa pods go this far beyond the zone (#232)
+	leaf_reach = 6, -- a leaf decays when no trunk is within this distance (mcl_core.update_leaves)
 }
 
 -- Natural nodes that are not ground content, so they are not structures: trunks,
@@ -142,11 +144,18 @@ end
 -- single VoxelManip, so it needs the blocks loaded; see village_terrain.emerge.
 -- Snow layers resting on a removed node go with it. Returns {seeds, removed,
 -- clipped, snow}: fills started, nodes removed, fills that hit the cap, and
--- snow layers removed. A layer above the VoxelManip
+-- snow layers removed (and `floating`, `orphans`, `cocoa`, see below). A layer above the VoxelManip
 -- region (the top of the zone plus the cap height) is not seen.
 -- Known limit: like trees, stalks and their vines are removed near ruined portals and
 -- outposts too, where the smoothing leaves the ground alone; clear_trees does not know
 -- the structures.
+-- A capped fill only clips to the zone, which leaves part of a tall tree standing: a canopy
+-- above the zone, a trunk cut off in the air. VoxeLibre decays orphaned leaves only when a
+-- trunk next to them is dug, never after a write like this one, so a follow-up pass over the
+-- zone and `orphan_margin` blocks round it removes what no longer holds together (#232):
+-- trunk pieces with air under all of their bottom nodes (`floating`), leaves with no trunk
+-- within `leaf_reach` (`orphans`, VoxeLibre's own decay rule), and cocoa pods whose trunk
+-- is gone (`cocoa`). Leaves near a node that was not loaded are kept.
 -- Bamboo, cactus and sugar cane inside the zone go too (`growth`), as they would
 -- otherwise be read as ground by the smoothing and buried or left under new
 -- blocks (#224), and so do vines hanging on a removed node, with the vines
@@ -163,16 +172,21 @@ function M.clear_trees(zone, config, engine)
 		lo.x, lo.y, lo.z = math.min(lo.x, box.minp.x), math.min(lo.y, box.minp.y), math.min(lo.z, box.minp.z)
 		hi.x, hi.y, hi.z = math.max(hi.x, box.maxp.x), math.max(hi.y, box.maxp.y), math.max(hi.z, box.maxp.z)
 	end
-	local stats = {seeds = 0, removed = 0, clipped = 0, snow = 0, growth = 0, vines = 0, plant_tops = 0}
+	local stats = {seeds = 0, removed = 0, clipped = 0, snow = 0, growth = 0, vines = 0, plant_tops = 0,
+		floating = 0, orphans = 0, cocoa = 0}
 	if not lo then return stats end
-	local region_min = {x = lo.x - radius, y = lo.y - height, z = lo.z - radius}
-	local region_max = {x = hi.x + radius, y = hi.y + height, z = hi.z + radius}
+	local margin = config.orphan_margin or M.config.orphan_margin
+	local reach = config.leaf_reach or M.config.leaf_reach
+	local pad = math.max(radius, margin + reach)
+	local region_min = {x = lo.x - pad, y = lo.y - height, z = lo.z - pad}
+	local region_max = {x = hi.x + pad, y = hi.y + height, z = hi.z + pad}
 
 	local vm = engine.get_voxel_manip()
 	local emin, emax = vm:read_from_map(region_min, region_max)
 	local data = vm:get_data()
 	local va = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
 	local air = engine.CONTENT_AIR
+	local param2 = vm.get_param2_data and vm:get_param2_data() or nil
 
 	local tree_of = {}
 	local function is_tree(id)
@@ -233,6 +247,23 @@ function M.clear_trees(zone, config, engine)
 		end
 		return known
 	end
+	-- 1 trunk, 2 leaves, 3 cocoa pod (attached to the side of a trunk), false anything else.
+	local class_of = {}
+	local function class(id)
+		local known = class_of[id]
+		if known == nil then
+			local name = engine.get_name_from_content_id(id)
+			local def = name and engine.registered_nodes[name]
+			known = false
+			if not name then
+			elseif is_trunk(name, def) then known = 1
+			elseif is_leaves(name, def) then known = 2
+			elseif def and def.groups and (def.groups.cocoa or 0) > 0 then known = 3
+			elseif name == "mcl_core:vine" then known = 4 end
+			class_of[id] = known
+		end
+		return known
+	end
 	local function in_zone(x, y, z)
 		for _, box in ipairs(zone) do
 			if x >= box.minp.x and x <= box.maxp.x and y >= box.minp.y and y <= box.maxp.y
@@ -273,6 +304,21 @@ function M.clear_trees(zone, config, engine)
 	end
 
 	local gone = {} -- tree nodes removed, for the vines that hung on them
+	local function remove(x, y, z)
+		data[va:index(x, y, z)] = air
+		stats.removed = stats.removed + 1
+		gone[#gone + 1] = {x, y, z}
+		if y + 1 <= emax.y then
+			local above = va:index(x, y + 1, z)
+			if is_snow_layer(data[above]) then
+				data[above] = air
+				stats.snow = stats.snow + 1
+			elseif is_plant_top(data[above]) then
+				data[above] = air
+				stats.plant_tops = stats.plant_tops + 1
+			end
+		end
+	end
 	for z = lo.z, hi.z do
 		for y = lo.y, hi.y do
 			for x = lo.x, hi.x do
@@ -284,21 +330,7 @@ function M.clear_trees(zone, config, engine)
 						local nodes, capped = fill(x, y, z)
 						if capped then stats.clipped = stats.clipped + 1 end
 						for _, n in ipairs(nodes) do
-							if not capped or in_zone(n[1], n[2], n[3]) then
-								data[va:index(n[1], n[2], n[3])] = air
-								stats.removed = stats.removed + 1
-								gone[#gone + 1] = n
-								if n[2] + 1 <= emax.y then
-									local above = va:index(n[1], n[2] + 1, n[3])
-									if is_snow_layer(data[above]) then
-										data[above] = air
-										stats.snow = stats.snow + 1
-									elseif is_plant_top(data[above]) then
-										data[above] = air
-										stats.plant_tops = stats.plant_tops + 1
-									end
-								end
-							end
+							if not capped or in_zone(n[1], n[2], n[3]) then remove(n[1], n[2], n[3]) end
 						end
 					elseif is_stalk(data[index]) then
 						data[index] = air
@@ -309,11 +341,180 @@ function M.clear_trees(zone, config, engine)
 		end
 	end
 
+	-- What a clipped fill left (see the header). The area is the zone grown by `margin`
+	-- sideways, up to the top of the region.
+	local box_lo = {x = math.max(lo.x - margin, emin.x), y = math.max(lo.y, emin.y), z = math.max(lo.z - margin, emin.z)}
+	local box_hi = {x = math.min(hi.x + margin, emax.x), y = emax.y, z = math.min(hi.z + margin, emax.z)}
+	local function near_zone(x, y, z)
+		for _, box in ipairs(zone) do
+			if x >= box.minp.x - margin and x <= box.maxp.x + margin and z >= box.minp.z - margin
+					and z <= box.maxp.z + margin and y >= box.minp.y then
+				return true
+			end
+		end
+		return false
+	end
+	local trunks, leaves, pods, vines, trunk_runs = {}, {}, {}, {}, {}
+	local stride = emax.x - emin.x + 1
+	for z = emin.z, emax.z do
+		for x = emin.x, emax.x do
+			local runs
+			for y = emin.y, emax.y do
+				local c = class(data[va:index(x, y, z)])
+				if c == 1 then
+					runs = runs or {}
+					if runs[#runs] == y - 1 then runs[#runs] = y else runs[#runs + 1] = y; runs[#runs + 1] = y end
+					if x >= box_lo.x and x <= box_hi.x and z >= box_lo.z and z <= box_hi.z and y >= box_lo.y then
+						trunks[#trunks + 1] = {x, y, z}
+					end
+				elseif c and x >= box_lo.x and x <= box_hi.x and z >= box_lo.z and z <= box_hi.z and y >= box_lo.y then
+					if c == 2 then leaves[#leaves + 1] = {x, y, z}
+					elseif c == 3 then pods[#pods + 1] = {x, y, z}
+					else vines[#vines + 1] = {x, y, z} end
+				end
+			end
+			if runs then trunk_runs[(z - emin.z) * stride + (x - emin.x)] = runs end
+		end
+	end
+
+	-- Trunk pieces hanging in the air: a connected piece (26 neighbours) whose bottom nodes
+	-- all have air under them. A piece that touches the edge of the region counts as held.
+	local seen, dirty = {}, {}
+	for _, t in ipairs(trunks) do
+		local key = va:index(t[1], t[2], t[3])
+		if not seen[key] and near_zone(t[1], t[2], t[3]) then
+			seen[key] = true
+			local piece, held, head = {t}, false, 1
+			while head <= #piece do
+				local x, y, z = piece[head][1], piece[head][2], piece[head][3]
+				head = head + 1
+				if x == emin.x or x == emax.x or y == emin.y or y == emax.y or z == emin.z or z == emax.z then
+					held = true
+				else
+					local below = data[va:index(x, y - 1, z)]
+					if below ~= air and class(below) ~= 1 then held = true end
+					for dz = -1, 1 do for dy = -1, 1 do for dx = -1, 1 do
+						local nx, ny, nz = x + dx, y + dy, z + dz
+						if (dx ~= 0 or dy ~= 0 or dz ~= 0) and nx >= emin.x and nx <= emax.x
+								and ny >= emin.y and ny <= emax.y and nz >= emin.z and nz <= emax.z then
+							local ni = va:index(nx, ny, nz)
+							if not seen[ni] and class(data[ni]) == 1 then
+								seen[ni] = true
+								piece[#piece + 1] = {nx, ny, nz}
+							end
+						end
+					end end end
+				end
+			end
+			if not held then
+				for _, n in ipairs(piece) do
+					remove(n[1], n[2], n[3])
+					dirty[(n[3] - emin.z) * stride + (n[1] - emin.x)] = true
+				end
+				stats.floating = stats.floating + #piece
+			end
+		end
+	end
+	for ck, _ in pairs(dirty) do
+		local x, z = emin.x + ck % stride, emin.z + math.floor(ck / stride)
+		local runs
+		for y = emin.y, emax.y do
+			if class(data[va:index(x, y, z)]) == 1 then
+				runs = runs or {}
+				if runs[#runs] == y - 1 then runs[#runs] = y else runs[#runs + 1] = y; runs[#runs + 1] = y end
+			end
+		end
+		trunk_runs[ck] = runs
+	end
+
+	local function unloaded(x, y, z)
+		return x < emin.x or x > emax.x or y < emin.y or y > emax.y or z < emin.z or z > emax.z
+			or data[va:index(x, y, z)] == engine.CONTENT_IGNORE
+	end
+	local function has_trunk_near(x, y, z)
+		for dz = -reach, reach do
+			for dx = -reach, reach do
+				local nx, nz = x + dx, z + dz
+				if nx >= emin.x and nx <= emax.x and nz >= emin.z and nz <= emax.z then
+					local runs = trunk_runs[(nz - emin.z) * stride + (nx - emin.x)]
+					if runs then
+						for i = 1, #runs, 2 do
+							if runs[i] <= y + reach and runs[i + 1] >= y - reach then return true end
+						end
+					end
+				end
+			end
+		end
+		return false
+	end
+	for _, l in ipairs(leaves) do
+		local x, y, z = l[1], l[2], l[3]
+		if near_zone(x, y, z) and not has_trunk_near(x, y, z)
+				and not (unloaded(x - reach, y - reach, z - reach) or unloaded(x + reach, y - reach, z - reach)
+					or unloaded(x - reach, y + reach, z - reach) or unloaded(x + reach, y + reach, z - reach)
+					or unloaded(x - reach, y - reach, z + reach) or unloaded(x + reach, y - reach, z + reach)
+					or unloaded(x - reach, y + reach, z + reach) or unloaded(x + reach, y + reach, z + reach)) then
+			remove(x, y, z)
+			stats.orphans = stats.orphans + 1
+		end
+	end
+	-- Cocoa pods hang on the side of a jungle trunk; param2 is the facedir toward it.
+	local facedir = {[0] = {0, 0, 1}, {1, 0, 0}, {0, 0, -1}, {-1, 0, 0}}
+	for _, p in ipairs(param2 and pods or {}) do
+		local x, y, z = p[1], p[2], p[3]
+		local d = facedir[param2[va:index(x, y, z)] % 4]
+		local tx, ty, tz = x + d[1], y + d[2], z + d[3]
+		if near_zone(x, y, z) and tx >= emin.x and tx <= emax.x and ty >= emin.y and ty <= emax.y
+				and tz >= emin.z and tz <= emax.z and class(data[va:index(tx, ty, tz)]) ~= 1
+				and data[va:index(tx, ty, tz)] ~= engine.CONTENT_IGNORE then
+			data[va:index(x, y, z)] = air
+			stats.cocoa = stats.cocoa + 1
+		end
+	end
+
+	-- Vines that mcl_core.check_vines_supported would drop (a full walkable cube beside or
+	-- over them, or a vine above with the same param2 when they hang): mapgen leaves some,
+	-- and the removals above leave more. VoxeLibre's decay ABM removes them only near a
+	-- player. Top first, so a vine hanging under a removed one goes too.
+	if param2 then
+		local support_of = {}
+		local function supports(id)
+			local known = support_of[id]
+			if known == nil then
+				local name = engine.get_name_from_content_id(id)
+				local def = name and engine.registered_nodes[name]
+				known = (def and def.walkable ~= false and name ~= "air" and name ~= "mcl_core:vine"
+					and (def.node_box == nil or def.node_box.type == "regular")
+					and (def.collision_box == nil or def.collision_box.type == "regular")) or false
+				support_of[id] = known
+			end
+			return known
+		end
+		local wall = {[0] = {0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
+		for i = #vines, 1, -1 do
+			local x, y, z = vines[i][1], vines[i][2], vines[i][3]
+			local index = va:index(x, y, z)
+			local d = near_zone(x, y, z) and data[index] ~= air and wall[param2[index] % 8]
+			if d then
+				local nx, ny, nz = x + d[1], y + d[2], z + d[3]
+				local held = nx < emin.x or nx > emax.x or ny < emin.y or ny > emax.y or nz < emin.z or nz > emax.z
+					or data[va:index(nx, ny, nz)] == engine.CONTENT_IGNORE or supports(data[va:index(nx, ny, nz)])
+				if not held and d[2] == 0 and y + 1 <= emax.y then
+					local up = va:index(x, y + 1, z)
+					held = class(data[up]) == 4 and param2[up] == param2[index]
+				end
+				if not held then
+					data[index] = air
+					stats.vines = stats.vines + 1
+				end
+			end
+		end
+	end
+
 	-- A vine whose support was removed (the node its param2 points at: a trunk, a leaf, or
 	-- the vine above it) would be left in the air: a vine drops only when something changes
 	-- beside it, and a write like this one sends no update. A vine on a standing node (a
 	-- cliff, a leaf outside the fill) stays. Without param2 data any neighbouring vine goes.
-	local param2 = vm.get_param2_data and vm:get_param2_data() or nil
 	local toward = {[0] = {0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
 	local queue, head = {}, 1
 	for _, n in ipairs(gone) do queue[#queue + 1] = n end
@@ -348,7 +549,7 @@ function M.clear_trees(zone, config, engine)
 		end
 	end
 
-	if stats.removed > 0 or stats.growth > 0 or stats.vines > 0 or stats.plant_tops > 0 then
+	if stats.removed > 0 or stats.growth > 0 or stats.vines > 0 or stats.plant_tops > 0 or stats.cocoa > 0 then
 		vm:set_data(data)
 		vm:write_to_map(true)
 	end
