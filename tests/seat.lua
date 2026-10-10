@@ -136,8 +136,16 @@ end
 -- Arriving beside a free seat, a guest takes it: pinned down in the chair,
 -- facing the table, legs forward, and the chair held for it.
 local alice = villager("alice", {x = 1, y = -0.49, z = 1})
+-- She was walking the tavern route when she came within reach of the chair (#230).
+alice._villages_follow = {final = {x = 1, y = 0, z = 1}}
+alice._villages_tavern_route = {status = "travelling", id = 7, target = {x = 1, y = 0, z = 1}}
 def.do_custom(alice, 0.1)
 assert(alice._villages_tavern_arrived and alice._villages_seated, "sits at once beside the chair")
+-- Sitting ends the walk: a follower flag and a "travelling" route left behind read as a
+-- lost walk once she gets up, and cancelled the route (#230).
+assert(alice._villages_follow == nil, "the walk is over")
+assert(alice._villages_tavern_route.status == "arrived" and alice._villages_tavern_route.id == 7,
+	"the tavern route ended with it")
 local pos = alice.object:get_pos()
 assert(pos.x == 2 and pos.z == 0 and near(pos.y, -(0.585 - 0.108)), "down in the chair")
 assert(near(alice.target_yaw, -math.pi / 2), "faces +x, toward the table")
@@ -160,8 +168,16 @@ def.do_custom(bob, 0.1)
 assert(bob._villages_seat and vector.equals(bob._villages_seat.chair, east), "the other seat")
 assert(not bob._villages_seated and #gopaths == before + 1 and vector.equals(gopaths[#gopaths].target, {x = 5, y = 0, z = 0}))
 bob.object:set_pos({x = 5, y = -0.49, z = 0})
+-- Bob's walk was a goto route to the approach square (church pews walk the same way), beside an
+-- unrelated bed route that must stay as it is (#230).
+bob._villages_follow = {final = {x = 5, y = 0, z = 0}}
+bob._villages_goto_route = {status = "travelling", id = 3, goal = {x = 5, y = 0, z = 0}}
+bob._villages_bed_route = {status = "travelling", id = 4, target = {x = 0, y = 0, z = 2}}
 gopaths[#gopaths].callback(bob)
 assert(bob._villages_seated and near(bob.target_yaw, math.pi / 2), "sits facing -x")
+assert(bob._villages_follow == nil, "callback sit ends the walk")
+assert(bob._villages_goto_route.status == "arrived" and bob._villages_goto_route.id == 3, "goto route ended")
+assert(bob._villages_bed_route.status == "travelling" and bob._villages_bed_route.id == 4, "bed route untouched")
 
 -- No seat left: the third guest stands inside, as before.
 local carol = villager("carol", {x = 1, y = -0.49, z = 2})
@@ -173,6 +189,8 @@ assert(carol._villages_tavern_arrived and not carol._villages_seat and carol.ord
 mcl_cozy = {players = {singleplayer = {{x = 2, y = 0, z = 0}, "sit"}}}
 def.do_custom(alice, 0.1)
 assert(not alice._villages_seated and not alice.bones["leg.right"], "stands up")
+assert(alice._villages_tavern_route.status == "arrived" and not alice._villages_follow,
+	"getting up cancels nothing and sets no retry hold")
 pos = alice.object:get_pos()
 assert(pos.x == 1 and pos.z == 1, "at the square she came from")
 assert(alice.collisionbox[4] == 0.3, "box restored")
@@ -254,5 +272,24 @@ def.do_custom(dave, 0.1)
 assert(dave._villages_seated)
 def.on_die(dave, dave.object:get_pos())
 assert(seat.reservations[key(west)] == nil)
+
+-- A route still being planned when the guest sits is dropped, so its late result cannot start a
+-- walk under a seated guest; a goto route to somewhere else is not the seat's (#230).
+local common = dofile("common.lua")
+local sitter = {
+	_villages_tavern_route = {status = "planning", id = 1},
+	_villages_goto_route = {status = "planning", id = 2, goal = {x = 5, y = 0, z = 0}},
+}
+common.end_seat_walk(sitter, {x = 5, y = 0, z = 0})
+assert(sitter._villages_tavern_route == nil and sitter._villages_goto_route == nil, "planning routes dropped")
+local elsewhere = {_villages_goto_route = {status = "travelling", id = 5, goal = {x = 9, y = 0, z = 9}}}
+common.end_seat_walk(elsewhere, {x = 5, y = 0, z = 0})
+assert(elsewhere._villages_goto_route.status == "travelling", "another destination is left alone")
+
+-- stop_walk (tavern end_visit, bell leave) drops the follower's flag with the state.
+local walker = {state = "gowp", _villages_follow = {}, _target = {}, object = {set_velocity = function() end}}
+assert(common.stop_walk(walker) and walker.state == "stand" and walker._villages_follow == nil and walker._target == nil)
+local idle = {state = "stand", _villages_follow = {}}
+assert(common.stop_walk(idle) == false and idle._villages_follow, "not a walk: nothing touched")
 
 print("seat.lua: ok")

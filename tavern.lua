@@ -45,12 +45,7 @@ local function end_visit(self)
 	seat.stand(self)
 	local route = self._villages_tavern_route
 	self._villages_tavern_route = nil
-	if route and route.status == "travelling" and self.state == "gowp" then
-		-- The same stop navigation.lua uses when it cancels a trip.
-		self.state = "stand"
-		self._target, self.current_target, self.waypoints, self.callback_arrived = nil, nil, nil, nil
-		self.object:set_velocity(vector.zero())
-	end
+	if route and route.status == "travelling" then common.stop_walk(self) end
 	self._villages_tavern_target = nil
 	self._villages_tavern_arrived = nil
 	if self.order == "stand" then self.order = nil end

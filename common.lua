@@ -176,7 +176,48 @@ end
 -- the villager whose do_activity is running around that call.
 local current_villager
 
+-- Another mover is taking a villager off a walk the follower is driving (#230): stop it
+-- the way navigation.lua cancels a trip, and drop the follower's flag too. The flag outlives
+-- the state, so a walk ended without it reads as a lost one later.
+local function stop_walk(self)
+	if self.state ~= "gowp" then return false end
+	self.state = "stand"
+	self._target, self.current_target, self.waypoints, self.callback_arrived = nil, nil, nil, nil
+	self._villages_follow, self._villages_follow_failed = nil, nil
+	self.object:set_velocity(vector.zero())
+	return true
+end
+
+-- A guest sits down within reach of its chair, which ends the walk to it (#230). Clears the
+-- follower's flag and ends the routes that were bound for the seat: a tavern route, and the
+-- goto route if it is to the seat's approach square (church pews walk on that one). A route
+-- still being planned is dropped, so its late result cannot start a walk under a seated guest.
+-- The bed, job and other routes are not the seat's and are left alone.
+local function end_seat_walk(self, approach)
+	self._villages_follow, self._villages_follow_failed = nil, nil
+	local function bound(route)
+		return route and approach and route.goal and route.goal.x == math.floor(approach.x + 0.5)
+			and route.goal.y == math.floor(approach.y + 0.5) and route.goal.z == math.floor(approach.z + 0.5)
+	end
+	local tavern = self._villages_tavern_route
+	if tavern and tavern.status == "travelling" then
+		self._villages_tavern_route = {status = "arrived", id = tavern.id, target = tavern.target}
+	elseif tavern and tavern.status == "planning" then
+		self._villages_tavern_route = nil
+	end
+	local walk = self._villages_goto_route
+	if bound(walk) then
+		if walk.status == "travelling" then
+			self._villages_goto_route = {status = "arrived", id = walk.id, target = walk.target or walk.goal}
+		elseif walk.status == "planning" then
+			self._villages_goto_route = nil
+		end
+	end
+end
+
 return {
+	stop_walk = stop_walk,
+	end_seat_walk = end_seat_walk,
 	schedule_stage = stage_at,
 	is_holiday = is_holiday,
 	-- Replacement for VoxeLibre's get_activity(tod), which villager.lua

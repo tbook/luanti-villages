@@ -131,7 +131,7 @@ so the jump lands mid-trip. The log gets a line per villager per second,
 `[lv_trips] jump t=... id=... pos=... state=... route=... follow=... wp=... left=... door=...`
 (`door` lists the wooden doors in and beside the villager's cell with their param2), and the result
 file one `jump` record per villager: `planning_max_s` (longest wait in route status `planning`),
-`first_move_s`, `bed_dist`, `max_dtime`. Count the follower's `walk ended` lines in the log.
+`first_move_s`, `bed_dist`, `max_dtime`. Count the follower's `walk ended` lines in the log. Every change of a villager's `state` or `order` is logged too, `[lv_trips] write t=... id=... state gowp -> stand follow=... by file:line < ...`, with the four calling frames (#230). To do that the probe permanently replaces each villager's metatable and moves its `state` and `order` fields into a shadow table, until the server restarts; use it for watching, not for a run whose other behaviour you want to trust.
 Not for a repeat run of the same village from the same clone: villagers differ a little each time, so run
 it several times. Used for #202 and #203.
 
