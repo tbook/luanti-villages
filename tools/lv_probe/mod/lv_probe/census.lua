@@ -59,7 +59,15 @@ function census.run(area, emit, done)
 	local waited = 0
 	local timeline, last = {}, {}
 	local function tick()
-		core.set_timeofday(waited < putter and 0.24 or 0.33)
+		-- Setting the time back counts as a new day (get_day_count), which would give every
+		-- villager a fresh roll each tick, so a putter census stops the clock instead.
+		local wanted = waited < putter and 0.24 or 0.33
+		if putter > 0 then
+			core.settings:set("time_speed", "0")
+			if waited == 0 or waited == putter then core.set_timeofday(wanted) end
+		else
+			core.set_timeofday(wanted)
+		end
 		waited = waited + 10
 		-- What each villager held at each step, so a change shows when it happened.
 		for _, object in ipairs(core.get_objects_inside_radius(center, radius)) do

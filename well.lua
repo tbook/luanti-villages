@@ -396,8 +396,8 @@ local function join(self, pos)
 		end
 		state = {well = well, since = now(), limit = walk_limit(self, well.center)}
 		self._villages_well = state
-		core.log("action", string.format("[living_villages] villager %s sets off for the well at (%d,%d,%d)",
-			tostring(self._id), well.water.x, well.water.y, well.water.z))
+		core.log("action", string.format("[living_villages] villager %s sets off for the well at (%d,%d,%d) (day %s)",
+			tostring(self._id), well.water.x, well.water.y, well.water.z, tostring(self._villages_well_day)))
 	end
 	local well = state.well
 	-- The stay is over wherever the villager has got to: not another walk back.
