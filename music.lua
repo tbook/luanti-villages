@@ -15,25 +15,21 @@ local JUKEBOX = "mcl_jukebox:jukebox"
 -- Dinner begins at 15:30 and the tavern closes at 17:30 (common.lua's Home).
 local START = 15500
 local STOP = 17500
--- Played non-positionally, as mcl_jukebox does: a positional sound follows the
--- client's inverse-distance falloff and was far too soft (playtest of #187),
--- and max_hear_distance only filters who gets it at the start. So the gain is
--- set here by distance: full within FULL_RADIUS (a tavern is about 12 wide),
--- falling linearly to MIN_GAIN at HEAR_DISTANCE.
-local FULL_RADIUS = 14
-local HEAR_DISTANCE = 24
--- Never faded to 0: sound_fade to 0 deletes the sound, and it must stay alive
--- for a player standing at the edge. Inaudible in practice.
-local MIN_GAIN = 0.02
--- Gain per second of a distance fade, and the least gain change worth sending.
-local FADE_STEP = 1
-local GAIN_EPSILON = 0.05
--- A player who walks this much farther out is forgotten, so coming back restarts the track.
-local FORGET_MARGIN = 8
+-- A positional sound is attenuated by the client (OpenAL inverse distance):
+-- the `gain` given is the gain at 3 nodes, and it falls as 3 * gain / distance,
+-- clamped to 1. Gain 1 was audible only beside the jukebox (playtest of #187).
+-- A gain above 1 is honoured and widens the radius of full volume to about
+-- 3 * GAIN nodes (12), still falling smoothly beyond it (0.3 at 40 nodes).
+local GAIN = 4
+-- Who gets the track when it starts (max_hear_distance only filters at start).
+local HEAR_DISTANCE = 40
+-- A player who walks this much farther out is forgotten, so coming back
+-- restarts the track. Past it the sound is already about 0.2.
+local FORGET_MARGIN = 16
 -- The keeper checks at this interval, in seconds.
 local CHECK_SECONDS = 2
 
--- By jukebox position: {pos, heard = {player name = {handle, gain}}, record, sound}, only
+-- By jukebox position: {pos, heard = {player name = handle}, record, sound}, only
 -- for music this module began.
 local playing = {}
 -- The day each jukebox last had its music started, so a disc that ends is not
@@ -79,13 +75,7 @@ local function stop(pos)
 	local current = playing[key(pos)]
 	if not current then return end
 	playing[key(pos)] = nil
-	for _, heard in pairs(current.heard) do core.sound_stop(heard.handle) end
-end
-
-local function gain_at(distance)
-	if distance <= FULL_RADIUS then return 1 end
-	local t = (distance - FULL_RADIUS) / (HEAR_DISTANCE - FULL_RADIUS)
-	return math.max(MIN_GAIN, 1 - t * (1 - MIN_GAIN))
+	for _, handle in pairs(current.heard) do core.sound_stop(handle) end
 end
 
 -- Start the sound for each player now in range who is not hearing it, and
@@ -97,29 +87,18 @@ local function sync_listeners(current)
 		local distance = vector.distance(player:get_pos(), current.pos)
 		if distance <= HEAR_DISTANCE then
 			near[name] = true
-			local gain = gain_at(distance)
-			local heard = current.heard[name]
-			if not heard then
-				current.heard[name] = {
-					handle = core.sound_play(current.sound, {to_player = name, gain = gain}),
-					gain = gain,
-				}
-			elseif math.abs(heard.gain - gain) >= GAIN_EPSILON then
-				core.sound_fade(heard.handle, FADE_STEP, gain)
-				heard.gain = gain
+			if not current.heard[name] then
+				current.heard[name] = core.sound_play(current.sound, {
+					to_player = name, pos = current.pos, gain = GAIN, max_hear_distance = HEAR_DISTANCE,
+				})
 			end
 		elseif distance <= HEAR_DISTANCE + FORGET_MARGIN then
 			near[name] = true
-			local heard = current.heard[name]
-			if heard and heard.gain > MIN_GAIN then
-				core.sound_fade(heard.handle, FADE_STEP, MIN_GAIN)
-				heard.gain = MIN_GAIN
-			end
 		end
 	end
-	for name, heard in pairs(current.heard) do
+	for name, handle in pairs(current.heard) do
 		if not near[name] then
-			core.sound_stop(heard.handle)
+			core.sound_stop(handle)
 			current.heard[name] = nil
 		end
 	end
