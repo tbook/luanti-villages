@@ -3,7 +3,7 @@ local time = 15600 / 24000
 local now, day, holiday = 0, 4, true
 local disc, played, stopped = nil, {}, {}
 local players = {}
-local logs = {}
+local logs, faded = {}, {}
 local node = "mcl_jukebox:jukebox"
 
 minetest = {
@@ -35,6 +35,7 @@ minetest = {
 		for k, v in pairs(changes) do minetest.registered_nodes[name][k] = v end
 	end,
 	sound_stop = function(handle) table.insert(stopped, handle) end,
+	sound_fade = function(handle, step, gain) table.insert(faded, {handle = handle, step = step, gain = gain}) end,
 	log = function(level, msg) table.insert(logs, msg) end,
 	get_connected_players = function()
 		local list = {}
@@ -87,11 +88,26 @@ check(#played == 0, "a distant player hears nothing")
 players.ann = {x = 5, y = 2, z = 3}
 tick(); tick()
 check(#played == 1 and played[1].name == "mcl_jukebox_track_1", "default record (day 4 of 2) plays")
-check(played[1].spec.to_player == "ann" and played[1].spec.pos.x == 1, "positional, to the one player")
-check(played[1].spec.max_hear_distance == 24, "hear distance")
+check(played[1].spec.to_player == "ann" and played[1].spec.pos == nil, "non-positional, to the one player")
+check(played[1].spec.gain == 1, "full gain close")
 players.bob = {x = 1, y = 2, z = 20}
 tick()
 check(#played == 2 and played[2].spec.to_player == "bob", "second player gets their own")
+check(math.abs(played[2].spec.gain - 0.706) < 0.01, "reduced gain farther (17 of 14..24)")
+-- Fades follow distance, only when the change is worth sending.
+players.bob = {x = 1, y = 2, z = 5}
+tick()
+check(#faded == 1 and faded[1].handle == 2 and faded[1].gain == 1, "fades back to full when close")
+tick()
+check(#faded == 1, "no fade when the gain is unchanged")
+players.bob = {x = 1, y = 2, z = 26}
+tick()
+check(faded[2].handle == 2 and math.abs(faded[2].gain - 0.2) < 0.15 and faded[2].gain > 0.02, "fades down with distance")
+players.bob = {x = 1, y = 2, z = 3 + 24}
+tick()
+check(math.abs(faded[3].gain - 0.02) < 1e-6, "near silence at the hearing distance, never 0")
+players.bob = {x = 1, y = 2, z = 20}
+tick()
 -- Going just out of range keeps the handle; going well out stops it and re-entry restarts.
 players.ann = {x = 28, y = 2, z = 3}
 tick()
