@@ -100,9 +100,9 @@ tools/lv_trips/run.sh Testlandia -2625,30,250 A1 --stages work --build tools/lv_
 ```
 
 The probe treats every villager as having a player near (a headless server has none, and
-mcl_mobs would freeze them all). `--far SECONDS` (needs `--spot`) keeps vanilla's rule instead, so
+mcl_mobs would freeze them all). `--far SECONDS` (needs `--spot` or `--jump`) keeps vanilla's rule instead, so
 villagers stand still as they do when the player is more than 48 nodes away, until SECONDS after the
-spot run starts, when a player "arrives" (a negative number: never; `0`: off, the default). Without `--spot` it is refused. Until the spot run starts (world load and setup) the villagers are frozen too. This is how #201 was
+spot run starts, when a player "arrives" (a negative number: never; `0`: off, the default). Without `--spot` or `--jump` it is refused; a negative number prints a note that the villagers stay frozen for the whole run. Until the spot run starts (world load and setup) the villagers are frozen too. This is how #201 was
 reproduced: `--far 20` with `--spot -1731.3,19.5,994.0:-1772,16,962 --goto -1720,22,994 --stages work` in
 Testlandia (village point `-1731,20,994`).
 
@@ -115,6 +115,25 @@ bed route's status, the follower's current waypoint, the waypoints left and the 
 trip is also written as a normal `trip` line. It runs until 20 s after the last trip ends (so a villager sent away again after arriving shows, #216) or for 150 s, and the
 other villagers carry on as they like, so a run can start with a route cancelled by something else
 (look at the `route=` column). The log path is printed when the run starts.
+
+## A stage change under every villager (`--jump`)
+
+```sh
+tools/lv_trips/run.sh WORLD X,Y,Z LABEL --jump work:tavern [--far SECONDS] [--lag MS] [--settle S] [--watch S] [--scatter S]
+```
+
+`--jump FROM:TO` (stage names, `sleep` is just after midnight; takes `--radius` but not `--stages` or `--rounds`) holds the FROM hour for `--settle`
+seconds (default 40) so the village is in its natural state, then sets the clock to the TO hour as
+`/time` does and watches every villager for `--watch` seconds (default 90). `--far SECONDS` keeps
+vanilla's freezing until SECONDS after the jump, `--lag MS` busy-waits once 5 s after it (a long server
+step), `--scatter S` first puts each villager beside another's bed and lets it start a trip for S seconds,
+so the jump lands mid-trip. The log gets a line per villager per second,
+`[lv_trips] jump t=... id=... pos=... state=... route=... follow=... wp=... left=... door=...`
+(`door` lists the wooden doors in and beside the villager's cell with their param2), and the result
+file one `jump` record per villager: `planning_max_s` (longest wait in route status `planning`),
+`first_move_s`, `bed_dist`, `max_dtime`. Count the follower's `walk ended` lines in the log.
+Not for a repeat run of the same village from the same clone: villagers differ a little each time, so run
+it several times. Used for #202 and #203.
 
 ## What a trial does
 
