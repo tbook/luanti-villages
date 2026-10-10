@@ -144,8 +144,9 @@ end
 -- single VoxelManip, so it needs the blocks loaded; see village_terrain.emerge.
 -- Snow layers resting on a removed node go with it. Returns {seeds, removed,
 -- clipped, snow}: fills started, nodes removed, fills that hit the cap, and
--- snow layers removed (and `floating`, `orphans`, `cocoa`, see below). A layer above the VoxelManip
--- region (the top of the zone plus the cap height) is not seen.
+-- snow layers removed. A layer above the VoxelManip region (the top of the zone plus
+-- the cap height) is not seen. The stats also carry `floating`, `orphans` and `cocoa`
+-- (see the follow-up pass below).
 -- Known limit: like trees, stalks and their vines are removed near ruined portals and
 -- outposts too, where the smoothing leaves the ground alone; clear_trees does not know
 -- the structures.
@@ -155,7 +156,12 @@ end
 -- zone and `orphan_margin` blocks round it removes what no longer holds together (#232):
 -- trunk pieces with air under all of their bottom nodes (`floating`), leaves with no trunk
 -- within `leaf_reach` (`orphans`, VoxeLibre's own decay rule), and cocoa pods whose trunk
--- is gone (`cocoa`). Leaves near a node that was not loaded are kept.
+-- is gone (`cocoa`). Leaves near a node that was not loaded are kept, and so are trunk
+-- pieces and leaves that touch a structure node (a log beam in a ruined structure or an
+-- outpost is natural by name but belongs to the structure); structure_test decides.
+-- Known limit: leaves a player placed are kept by VoxeLibre through node metadata
+-- (`player_leaves`), which a VoxelManip cannot read, so a hedge within the skirt of a village
+-- built where a player has been is removed. Villages are built on freshly generated land.
 -- Bamboo, cactus and sugar cane inside the zone go too (`growth`), as they would
 -- otherwise be read as ground by the smoothing and buried or left under new
 -- blocks (#224), and so do vines hanging on a removed node, with the vines
@@ -263,6 +269,30 @@ function M.clear_trees(zone, config, engine)
 			class_of[id] = known
 		end
 		return known
+	end
+	local structure_name = M.structure_test(engine)
+	local structure_of = {}
+	local function is_structure(id)
+		local known = structure_of[id]
+		if known == nil then
+			local name = engine.get_name_from_content_id(id)
+			known = name ~= nil and structure_name(name)
+			structure_of[id] = known
+		end
+		return known
+	end
+	-- Whether a structure or an unloaded node touches (x, y, z): returns "structure" or "ignore".
+	local function touches(x, y, z)
+		local found
+		for dz = -1, 1 do for dy = -1, 1 do for dx = -1, 1 do
+			local nx, ny, nz = x + dx, y + dy, z + dz
+			if nx >= emin.x and nx <= emax.x and ny >= emin.y and ny <= emax.y and nz >= emin.z and nz <= emax.z then
+				local id = data[va:index(nx, ny, nz)]
+				if id == engine.CONTENT_IGNORE then return "ignore" end
+				if is_structure(id) then found = "structure" end
+			end
+		end end end
+		return found
 	end
 	local function in_zone(x, y, z)
 		for _, box in ipairs(zone) do
@@ -384,7 +414,7 @@ function M.clear_trees(zone, config, engine)
 		local key = va:index(t[1], t[2], t[3])
 		if not seen[key] and near_zone(t[1], t[2], t[3]) then
 			seen[key] = true
-			local piece, held, head = {t}, false, 1
+			local piece, held, head = {t}, touches(t[1], t[2], t[3]) ~= nil, 1
 			while head <= #piece do
 				local x, y, z = piece[head][1], piece[head][2], piece[head][3]
 				head = head + 1
@@ -392,7 +422,7 @@ function M.clear_trees(zone, config, engine)
 					held = true
 				else
 					local below = data[va:index(x, y - 1, z)]
-					if below ~= air and class(below) ~= 1 then held = true end
+					if (below ~= air and class(below) ~= 1) or touches(x, y, z) then held = true end
 					for dz = -1, 1 do for dy = -1, 1 do for dx = -1, 1 do
 						local nx, ny, nz = x + dx, y + dy, z + dz
 						if (dx ~= 0 or dy ~= 0 or dz ~= 0) and nx >= emin.x and nx <= emax.x
@@ -449,7 +479,7 @@ function M.clear_trees(zone, config, engine)
 	end
 	for _, l in ipairs(leaves) do
 		local x, y, z = l[1], l[2], l[3]
-		if near_zone(x, y, z) and not has_trunk_near(x, y, z)
+		if near_zone(x, y, z) and not has_trunk_near(x, y, z) and not touches(x, y, z)
 				and not (unloaded(x - reach, y - reach, z - reach) or unloaded(x + reach, y - reach, z - reach)
 					or unloaded(x - reach, y + reach, z - reach) or unloaded(x + reach, y + reach, z - reach)
 					or unloaded(x - reach, y - reach, z + reach) or unloaded(x + reach, y - reach, z + reach)
@@ -494,8 +524,14 @@ function M.clear_trees(zone, config, engine)
 		for i = #vines, 1, -1 do
 			local x, y, z = vines[i][1], vines[i][2], vines[i][3]
 			local index = va:index(x, y, z)
-			local d = near_zone(x, y, z) and data[index] ~= air and wall[param2[index] % 8]
-			if d then
+			local live = near_zone(x, y, z) and data[index] ~= air
+			-- param2 6 and 7 are no wallmounted direction: wallmounted_to_dir gives nil,
+			-- check_vines_supported returns nil and the decay ABM drops the vine.
+			local d = live and wall[param2[index] % 8]
+			if live and not d then
+				data[index] = air
+				stats.vines = stats.vines + 1
+			elseif d then
 				local nx, ny, nz = x + d[1], y + d[2], z + d[3]
 				local held = nx < emin.x or nx > emax.x or ny < emin.y or ny > emax.y or nz < emin.z or nz > emax.z
 					or data[va:index(nx, ny, nz)] == engine.CONTENT_IGNORE or supports(data[va:index(nx, ny, nz)])

@@ -12,6 +12,8 @@
 --   orphan_clusters              connected groups of orphan leaves (26 neighbours)
 --   orphan_high                  orphan leaves 4 or more above the highest support under them
 --   samples                      up to 8 positions per count
+-- The vine and leaf rules duplicate those of village_fragments.clear_trees on purpose: the
+-- probe is the independent check on them and loads without the mod.
 local M = {}
 
 M.LEAF_REACH = 6
@@ -50,7 +52,7 @@ function M.count(data, va, area, kind, param2, name_at)
 					out.vines = out.vines + 1
 					local p2 = param2[va:index(x, y, z)]
 					local d = WALLMOUNTED[p2 % 8]
-					local held = d == nil
+					local held = false -- param2 6 and 7 give no direction: VoxeLibre drops the vine
 					if d then
 						local nk = kind_at(x + d[1], y + d[2], z + d[3])
 						held = nk == "ignore" or nk == "support" or nk == "trunk" or nk == "leaves"

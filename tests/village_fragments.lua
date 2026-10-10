@@ -5,9 +5,10 @@ minetest = {get_modpath = function() return "." end}
 local names = {"air", "mcl_core:stone", "mcl_core:tree", "mcl_core:leaves", "mcl_core:water_source",
 	"mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:cobble", "mcl_nether:obsidian_x",
 	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence", "mcl_core:snow", "mcl_core:snow_3", "mcl_core:snowblock",
-	"mcl_bamboo:bamboo", "mcl_core:cactus", "mcl_core:vine", "mcl_bamboo:bamboo_plank", "mcl_flowers:double_fern_top", "mcl_flowers:double_fern", "mcl_cocoas:cocoa_3"}
+	"mcl_bamboo:bamboo", "mcl_core:cactus", "mcl_core:vine", "mcl_bamboo:bamboo_plank", "mcl_flowers:double_fern_top", "mcl_flowers:double_fern", "mcl_cocoas:cocoa_3", "ignore"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
+names[99] = "ignore"; ids.ignore = 99
 local registered = {
 	["air"] = {},
 	["mcl_core:stone"] = {is_ground_content = true},
@@ -412,6 +413,49 @@ put(40, 8, 0, "mcl_core:vine")
 stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
 assert(at(5, 8, 0) == nil and at(5, 7, 0) == nil and stats.vines == 2, "unsupported vines go, got " .. stats.vines)
 assert(at(6, 3, 0) == "mcl_core:vine" and at(40, 8, 0) == "mcl_core:vine", "supported and distant vines stay")
+param2 = {}
+
+-- Structures and unloaded nodes (#232). A log beam over air is a floating trunk piece, but
+-- one that touches a structure node (cobble here) belongs to the structure and stays.
+map = {}
+for x = 5, 9 do put(x, 6, 0, "mcl_core:tree") end -- a beam in the margin, nothing under it
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 0 and stats.floating == 5, "a log beam in the air is floating")
+map = {}
+for x = 5, 9 do put(x, 6, 0, "mcl_core:tree") end
+put(5, 6, 1, "mcl_core:cobble") -- a post of the structure beside one end
+put(5, 5, 1, "mcl_core:cobble")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 5 and stats.floating == 0, "a beam that touches a structure stays")
+-- Leaves beside a structure stay too.
+map = {}
+put(6, 12, 0, "mcl_core:leaves"); put(7, 12, 0, "mcl_core:cobble")
+put(5, 12, 5, "mcl_core:leaves")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(6, 12, 0) == "mcl_core:leaves" and at(5, 12, 5) == nil, "orphan leaves touching a structure stay, others go")
+
+-- A node that was not loaded: leaves within its reach may be held by a trunk there.
+map = {}
+put(5, 12, 0, "mcl_core:leaves")
+put(11, 18, 6, "ignore") -- a corner of the leaf's reach
+put(9, 12, 0, "mcl_core:leaves")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(5, 12, 0) == "mcl_core:leaves", "leaves next to unloaded nodes are kept")
+assert(at(9, 12, 0) == nil, "leaves with all their reach loaded go")
+-- A trunk piece beside an unloaded node is held.
+map = {}
+for y = 6, 8 do put(6, y, 0, "mcl_core:tree") end
+put(7, 7, 0, "ignore")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 3 and stats.floating == 0, "a piece next to an unloaded node is held")
+
+-- A vine with param2 6 or 7 has no direction; VoxeLibre drops it.
+map = {}
+param2 = {}
+put(4, 5, 0, "mcl_core:vine"); param2["4,5,0"] = 6
+put(5, 5, 0, "mcl_core:vine"); param2["5,5,0"] = 7; put(5, 6, 0, "mcl_core:stone")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(4, 5, 0) == nil and at(5, 5, 0) == nil, "vines with param2 6 and 7 go")
 param2 = {}
 
 print("village_fragments: ok")
