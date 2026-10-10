@@ -117,6 +117,154 @@ assert(t.at(1, 1) == 10, "footprint overhang is set")
 -- Empty plan.
 assert(smoothing.targets({}, flat(1), cfg).at(0, 0) == nil)
 
+-- The slope limit (#235). The sweep it replaced clamped a skirt column to each
+-- neighbor in turn, so when two neighbors were more than 2 apart the last one won
+-- and the column could stay several blocks off a yard it had the range to match.
+do
+	-- A single pad at 10 (yard x -2..5), ground 13 under the yard. West of it, the
+	-- skirt column x=-3 is 18 high except a notch at z=1 that is 12 (as in the
+	-- 2002 example: a yard at 8 beside a skirt column left at 19 that 14 could have
+	-- been cut to 9): its own range 7..17 reaches the yard's 10, its neighbors' 13..23 do not.
+	local function notch(x, z)
+		if x == -3 then return z == 1 and 12 or 18 end
+		if x == -4 then return 12 end
+		if x <= -5 then return 14 end
+		return 13
+	end
+	local nt = smoothing.targets(pads, notch, cfg)
+	assert(nt.at(-2, 1) == 10 and nt.kind(-2, 1) == "yard" and nt.kind(-3, 1) == "skirt")
+	assert(math.abs(nt.at(-3, 1) - nt.at(-2, 1)) <= 1, "the notch is within a block of the yard, got " .. nt.at(-3, 1))
+	assert(nt.at(-3, 0) == 13 and nt.at(-3, 2) == 13, "the neighbors that cannot reach it stay at their cap, got " .. nt.at(-3, 0))
+	for z = nt.z0, nt.z1 do for x = nt.x0, nt.x1 do
+		if nt.at(x, z) then assert(math.abs(nt.at(x, z) - nt.was(x, z)) <= cfg.cap, "cap") end
+	end end
+
+	-- No order: the same terrain mirrored across the pad (x -> 3 - x) gives the mirrored result.
+	local function mirrored(x, z) return notch(3 - x, z) end
+	local mt = smoothing.targets(pads, mirrored, cfg)
+	for z = nt.z0, nt.z1 do for x = nt.x0, nt.x1 do
+		assert(nt.at(x, z) == mt.at(3 - x, z), "mirror (" .. x .. "," .. z .. "): " .. tostring(nt.at(x, z)) .. " vs " .. tostring(mt.at(3 - x, z)))
+	end end
+
+	-- Two pads, 10 and 14, on ground 12: the yards are exact, the skirt between them
+	-- rises from one to the other a block at a time, each skirt column beside a yard
+	-- within a block of that yard's own height (not the other pad's).
+	local two_pads = pads_of({0, 0, 10}, {14, 0, 14})
+	local tw = smoothing.targets(two_pads, flat(12), cfg)
+	assert(tw.at(5, 1) == 10 and tw.kind(5, 1) == "yard" and tw.at(12, 1) == 14 and tw.kind(12, 1) == "yard")
+	local last = tw.at(5, 1)
+	for x = 6, 11 do
+		local v = tw.at(x, 1)
+		assert(tw.kind(x, 1) == "skirt" and v >= last and v - last <= 1, "monotone ramp at " .. x .. ": " .. v .. " after " .. last)
+		last = v
+	end
+	assert(tw.at(12, 1) - last <= 1, "ramp reaches the second yard")
+	assert(tw.violations == 0, "walkable between two pads, " .. tw.violations)
+
+	-- An interval that is empty: a yard column (natural 30, so 25) beside a skirt column whose
+	-- ground is 40 (range 35..45) cannot be matched. It takes the closest feasible value, the
+	-- lowest the cap allows, and the pair is counted as a step.
+	local gap = smoothing.targets(pads, function(x) return x == -3 and 40 or 30 end, cfg)
+	assert(gap.at(-2, 1) == 25 and gap.at(-3, 1) == 35, "closest feasible value, got " .. gap.at(-3, 1))
+	assert(gap.violations > 0 and gap.walls > 0, "the gap is counted, got " .. gap.violations)
+
+	-- Flat ground at the pad's height or a plain hill: nothing odd happens (checked above), and the
+	-- same input gives the same output, run to run.
+	local function rough(x, z) return 12 + ((x * 7 + z * 13) % 11) % 6 end
+	local first = smoothing.targets(pads, rough, cfg)
+	local second = smoothing.targets(pads, rough, cfg)
+	for z = first.z0, first.z1 do for x = first.x0, first.x1 do
+		assert(first.at(x, z) == second.at(x, z), "deterministic")
+	end end
+	assert(first.violations == second.violations)
+
+	-- Over many rough grounds and two pads, no skirt column is left more than a block off a
+	-- yard or footprint column that its own range could have matched.
+	local seed = 17
+	local function rnd(n) seed = (seed * 1103515245 + 12345) % 2147483648; return math.floor(seed / 65536) % n end
+	local left = 0
+	for _ = 1, 40 do
+		local rp = pads_of({0, 0, 10 + rnd(8)}, {14, 3, 10 + rnd(8)})
+		local amp, scale, cells = 3 + rnd(12), 1 + rnd(4), {}
+		local rt = smoothing.targets(rp, function(x, z)
+			local key = math.floor(x / scale) .. "," .. math.floor(z / scale)
+			if not cells[key] then cells[key] = 10 + rnd(amp * 2) - amp end
+			return cells[key]
+		end, cfg)
+		for z = rt.z0, rt.z1 do for x = rt.x0, rt.x1 do
+			local a = rt.at(x, z)
+			if a and rt.kind(x, z) == "skirt" then
+				for _, d in ipairs({{1, 0}, {0, 1}, {-1, 0}, {0, -1}}) do
+					local b, kb = rt.at(x + d[1], z + d[2]), rt.kind(x + d[1], z + d[2])
+					local w = rt.was(x, z)
+					if b and (kb == "yard" or kb == "footprint") and b - 1 <= w + cfg.cap and b + 1 >= w - cfg.cap
+							and math.abs(a - b) > 1 then
+						left = left + 1
+					end
+				end
+			end
+		end end
+	end
+	assert(left == 0, left .. " skirt columns left off a yard they could match")
+
+	-- Cliff foot (the 2026 geometry): flat ground at 3 under a pad at 10, so the yard is
+	-- capped at 8. The skirt ramps down from the yard a block at a time and then is the
+	-- ground itself: no shelf at the yard's level (a blend toward the pad's height held the
+	-- skirt up to the cap round the whole foot).
+	local foot = smoothing.targets(pads, flat(3), cfg)
+	assert(foot.at(-2, 1) == 8 and foot.kind(-2, 1) == "yard")
+	local ramp = {}
+	for x = -3, -10, -1 do ramp[#ramp + 1] = foot.at(x, 1) end
+	assert(table.concat(ramp, " ") == "7 6 5 4 3 3 3 3", "ramp then ground, got " .. table.concat(ramp, " "))
+	assert(foot.at(1, -9) == 3 and foot.at(1, -8) == 3 and foot.at(1, 12) == 3, "ground beyond the ramp on the other sides")
+
+	-- Mild ground (terraces one block apart, a ramp of 1 in 6) leaves no step over one block
+	-- anywhere, in the skirt or at its rim. A guard against over-bending, not evidence for
+	-- the trade-off: the solve bends the slope where it must, and on ground like this it
+	-- never must.
+	for _, mild in ipairs({
+		function(x) return 11 + math.floor(x / 6) end,
+		function(x, z) return 12 + math.floor((x + z) / 7) % 2 end,
+		function(x, z) return 9 + math.floor(z / 5) end,
+	}) do
+		local mt2 = smoothing.targets(pads, mild, cfg)
+		local skirt_steps = 0
+		for z = mt2.z0, mt2.z1 do for x = mt2.x0, mt2.x1 do
+			local a = mt2.at(x, z)
+			for _, d in ipairs({{1, 0}, {0, 1}}) do
+				local b = mt2.at(x + d[1], z + d[2])
+				if a and b and math.abs(a - b) > 1 and mt2.kind(x, z) == "skirt" and mt2.kind(x + d[1], z + d[2]) == "skirt" then
+					skirt_steps = skirt_steps + 1
+				end
+			end
+		end end
+		assert(skirt_steps == 0, "skirt-skirt steps on mild ground: " .. skirt_steps)
+		assert(mt2.violations == 0, "steps on mild ground: " .. mt2.violations)
+	end
+
+	-- A window of sources (spread with a step limit) keeps a lower source that is near when a higher
+	-- one is too far to carry on: columns 1..6 in a row, a source of 29 beside column 1 and one of 5
+	-- beside column 3, within 3 steps.
+	local free6 = {true, true, true, true, true, true}
+	local best, steps = smoothing.spread({1, 29, 1, 3, 5, 1}, 0, free6, 6, 3)
+	assert(best[1] == 29 and best[3] == 27 and steps[3] == 3, "the higher source holds column 3")
+	assert(best[4] == 4 and steps[4] == 2 and best[5] == 3 and steps[5] == 3, "the lower one still reaches columns 4 and 5")
+	assert(best[6] == nil, "and no further")
+
+	-- Cost: a 400 x 400 area (radius 150 round four pads) is planned in a few seconds at most.
+	local big = {}
+	for k, v in pairs(cfg) do big[k] = v end
+	big.radius = 150
+	local bp = pads_of({0, 0, 12}, {60, 40, 18}, {120, 10, 9}, {40, -70, 15})
+	local started = os.clock()
+	local bt = smoothing.targets(bp, function(x, z)
+		return 12 + math.floor(6 * math.sin(x / 7) + 5 * math.cos(z / 5) + 4 * math.sin((x + z) / 3))
+	end, big)
+	local took = os.clock() - started
+	assert((bt.x1 - bt.x0 + 1) * (bt.z1 - bt.z0 + 1) >= 300 * 300, "a large area")
+	assert(took < 10, "targets on a large area took " .. took .. " s")
+end
+
 -- apply: record swaps on a fake map.
 local swaps, map = {}, {}
 local function key(x, y, z) return x .. "," .. y .. "," .. z end
@@ -259,10 +407,10 @@ for y = 15, 40 do
 end
 for y = 0, 14 do assert(world["-6," .. y .. ",1"] == nil, "ground under the overhang written at y=" .. y) end
 assert(world["-6,18,2"] == "air", "a normal hill beside it is still cut")
--- The ground beside it was smoothed to 13, so the shaft is filled from its floor to 13.
-assert(world["13,13,1"] == "mcl_core:dirt_with_grass" and world["13,12,1"] == "mcl_core:dirt"
+-- The ground beside it was left at 14 (the pit is no source for the skirt, #235), so the shaft is filled from its floor to 14.
+assert(world["13,14,1"] == "mcl_core:dirt_with_grass" and world["13,13,1"] == "mcl_core:dirt"
 	and world["13,0,1"] == "mcl_core:dirt" and world["13,-7,1"] == "mcl_core:dirt", "shaft filled to the rim")
-assert(world["13,14,1"] == nil, "nothing above the rim")
+assert(world["13,15,1"] == nil, "nothing above the rim")
 -- A tree or a cactus is not a peak: no ramp is built round it.
 for key in pairs(world) do
 	local x, z = key:match("^(-?%d+),%-?%d+,(-?%d+)$")

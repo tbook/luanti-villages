@@ -117,16 +117,46 @@ The smoothing log line reports `N walls of 6+, tallest M`: adjacent target heigh
 and before the hole filling, that differ by 6 or more with a footprint or yard column on at least one
 side (`config.wall`). Probe runs with `--with-mod`, walls (tallest):
 
-| Case | Seed | Walls |
-|------|------|-------|
-| tower | 2002 | 6 (11) |
-| snow-steep | 2006 | 2 (6) |
-| mountain-edge | 2007 | 4 (20) |
-| hillside | 2014 | 35 (21) |
-| cliff | 2026 | 4 (42) |
+How the numbers were made: "before" is origin/main plus #236 (the metric), "after" is the #235 branch,
+both from `tools/lv_probe/run.sh SEED --chunk X,Z --with-mod` (a fresh throwaway world each; seeds and
+chunks are in `cases.txt`, Testlandia is seed 18442661806533097198 at -912,2448). All columns come from
+the smoothing log line. Walls are "N (tallest)"; steps are its "steps still over 1 block" (targets,
+before the hole filling); cut / filled are columns.
 
-Only 6 of the 2014 walls are cap-limited yards; the rest are natural cliffs between two pads or the
-sweep of #235. The probe's `Step` column is not a measure of these (#219).
+| Case | Seed | Walls before | Walls after | Steps before | Steps after | Cut / filled before | Cut / filled after |
+|------|------|--------------|-------------|--------------|-------------|---------------------|--------------------|
+| tower | 2002 | 6 (11) | 0 (0) | 370 | 319 | 1753 / 1729 | 1131 / 1535 |
+| snow-steep | 2006 | 2 (6) | 1 (6) | 95 | 97 | 891 / 2293 | 725 / 1507 |
+| mountain-edge | 2007 | 4 (20) | 4 (20) | 101 | 101 | 888 / 1945 | 608 / 1320 |
+| hillside | 2014 | 35 (21) | 14 (17) | 546 | 592 | 1850 / 3225 | 1481 / 2864 |
+| cliff | 2026 | 4 (42) | 4 (42) | 422 | 354 | 899 / 3068 | 798 / 3539 |
+| Testlandia | 18442661806533097198 | 16 (17) | 2 (7) | 334 | 349 | 1162 / 2637 | 930 / 2201 |
+
+What is left after #235 is cap-limited yards and natural cliffs between two pads (2026: yards at 52
+and 10; 2007: 13 and -7); no skirt column is left off a yard it could have matched.
+
+Where the steps went (a trade-off). The old sweep averaged the slope out, so its steps sat at the
+rim of the skirt, against the untouched ground. The solve pins the rim to the untouched ground and
+bends the slope inside the skirt wherever the ground is steeper than 1:1 and the cap cannot help.
+On the six areas that is more skirt-to-skirt steps and fewer rim steps (2014: skirt-skirt 312 -> 453,
+skirt-to-untouched 58 -> 7; 2026: 290 -> 306 and 84 -> 16); on rough ground in a fuzz about twice the
+skirt-skirt steps and half the rim steps. A villager now meets a drop of 2 or 3 blocks inside the
+skirt instead of at its rim. It was not cheap to bound: letting the untouched ground pull the skirt
+less (bounds from the pads only) takes a third to a half off the skirt-skirt steps but brings the rim steps
+back and the total up by 5 to 50%, so the rim stays pinned. On ground the cap lets the skirt follow
+(terraces a block apart, a ramp of 1 in 6) there are no steps at all, which a test checks.
+
+Earthwork. The skirt keeps its own height unless the slope limit moves it (an earlier version drew
+it toward a blend of the pads' heights, which built a plateau up to the cap round cap-limited yards:
+2026 filled 3898 columns). A ramp appears only where the natural ground differs from the yard's
+height, and where the ground already matches the pad at the yard edge it stays as it is (and is cut
+less than the old blend did). The one visible change on typical terrain is a 45-degree bank hugging
+the yard edge where flat ground is 4 to 8 blocks off the pad level (ground 16 against a pad at 10:
+10 10 11 12 13 14 15 16 16), where the old blend gave a rounded rise over the whole radius. The
+flatter apron the blend left round each yard on bumpy ground is gone. Filling still grows on 2026 (3068 -> 3539) because the ramps from cap-limited
+yards up to the ground below them are now complete; everywhere else cut and fill both fall.
+
+The probe's `Step` column is not a measure of these (#219).
 
 ### Village yield
 

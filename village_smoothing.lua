@@ -6,11 +6,10 @@
 -- the holes and cliffs the smoothing leaves (village_holes.lua, #142, #155).
 --
 -- Each building gets a pad, its footprint plus a flat yard at the site's height.
--- Every column within `radius` of a pad is pulled toward an inverse-distance
--- blend of the nearby pads' heights, fading to nothing at the radius, then
--- limited to one block of difference from its neighbors so villagers can walk
--- it. The planning half (targets) is a pure function, so it is tested without
--- the engine.
+-- Every column within `radius` of a pad (the skirt) keeps its height unless the
+-- slope limit moves it, as little as it must, to leave no step over one block
+-- against a yard or the untouched ground, so villagers can walk it (#235). The
+-- planning half (targets) is a pure function, so it is tested without the engine.
 --
 -- Loading this has no side effects. The engine functions come in through `env`.
 local core = minetest
@@ -25,22 +24,13 @@ M.config = {
 	radius = 8, -- how far from a pad the ground is changed
 	cap = 5, -- no column moves more than this
 	wall = 6, -- a step this tall beside a footprint or yard counts as a wall in the log
-	relax_passes = 100, -- limit on slope-limiting sweeps
 	below = 20, above = 24, -- the area reaches this far under the lowest pad and over the highest
 	cut_clear = 3, -- a cut removes this much above the old surface, for whatever stands on it
 	structure_margin = 1, -- ground this close to a structure is left alone
 	block = 16,
 }
 
-local function round(v) return math.floor(v + 0.5) end
-
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
-
--- 1 at distance 0, 0 at the radius, flat at both ends.
-local function fade(d, radius)
-	local s = clamp(d / radius, 0, 1)
-	return 1 - s * s * (3 - 2 * s)
-end
 
 -- Pads from a plan: {x0, z0, x1, z1} the footprint, {yx0 ...} the yard, y the
 -- floor (the schematic's bottom slice is the ground layer, so pos.y is the
@@ -66,6 +56,224 @@ local function distance(x, z, x0, z0, x1, z1)
 	local dz = math.max(z0 - z, 0, z - z1)
 	return math.sqrt(dx * dx + dz * dz)
 end
+
+-- Like `spread` but only from sources within `maxd` steps, by layers: a bucket
+-- queue gives a column to the highest source, and would lose a nearer, lower one
+-- when the higher one is too far to carry on.
+local function window(seeds, free, width, maxd)
+	local best, from, frontier = {}, {}, {}
+	for k = 1, #seeds, 3 do
+		local i, v = seeds[k], seeds[k + 1]
+		if not best[i] then frontier[#frontier + 1] = i end
+		if not best[i] or v > best[i] then best[i], from[i] = v, seeds[k + 2] end
+	end
+	for layer = 2, maxd do
+		local update, count = {}, 0
+		for _, i in ipairs(frontier) do
+			local v = best[i] - 1
+			local col = (i - 1) % width
+			for _, j in ipairs({col > 0 and i - 1 or 0, col < width - 1 and i + 1 or 0, i - width, i + width}) do
+				if free[j] and (not best[j] or v > best[j]) and (not update[j] or v > update[j]) then
+					if not update[j] then count = count + 1 end
+					update[j] = v
+				end
+			end
+		end
+		if count == 0 then break end
+		frontier = {}
+		for j, v in pairs(update) do
+			best[j], from[j] = v, layer
+			frontier[#frontier + 1] = j
+		end
+		table.sort(frontier)
+	end
+	return best, from
+end
+
+-- Bucket-queue Dijkstra with unit steps over the free columns (see limit_slope),
+-- from all sources, or only those within `maxd` steps.
+local function spread(seeds, floor_v, free, width, maxd)
+	if maxd then return window(seeds, free, width, maxd) end
+	-- seeds: flat list of {index, value, d}. Returns, for each free column, the
+	-- highest value of seed value - steps, and the steps of the first such seed.
+	local best, from, buckets, top_v = {}, {}, {}, -math.huge
+	for k = 1, #seeds, 3 do
+		local v = seeds[k + 1]
+		local bucket = buckets[v]
+		if not bucket then
+			bucket = {}
+			buckets[v] = bucket
+			top_v = math.max(top_v, v)
+		end
+		local m = #bucket
+		bucket[m + 1], bucket[m + 2] = seeds[k], seeds[k + 2]
+	end
+	local function push(i, v, d)
+		local bucket = buckets[v]
+		if not bucket then
+			bucket = {}
+			buckets[v] = bucket
+		end
+		local m = #bucket
+		bucket[m + 1], bucket[m + 2] = i, d
+	end
+	for v = top_v, floor_v, -1 do
+		local bucket = buckets[v]
+		if bucket then
+			local k = 1
+			while k <= #bucket do
+				local i, d = bucket[k], bucket[k + 1]
+				k = k + 2
+				if not best[i] then
+					best[i], from[i] = v, d
+					if v > floor_v then
+						local col = (i - 1) % width
+						if col > 0 and free[i - 1] and not best[i - 1] then push(i - 1, v - 1, d + 1) end
+						if col < width - 1 and free[i + 1] and not best[i + 1] then push(i + 1, v - 1, d + 1) end
+						if free[i - width] and not best[i - width] then push(i - width, v - 1, d + 1) end
+						if free[i + width] and not best[i + width] then push(i + width, v - 1, d + 1) end
+					end
+				end
+			end
+			buckets[v] = nil
+		end
+	end
+	return best, from
+end
+
+-- Seeds for the bounds (sign 1: lower, -1: upper) or the smoothing: each free
+-- column's own value (`own[i]`, at 0 steps) and each reachable fixed neighbor's
+-- (at 1 step). Own values go first so a bucket stays sorted by steps.
+local function seeds_of(sign, own, fixed, hard, low, high, free, width, n)
+	local seeds, floor_v = {}, math.huge
+	local function add(i, v, d)
+		seeds[#seeds + 1], seeds[#seeds + 2], seeds[#seeds + 3] = i, v, d
+		if v < floor_v then floor_v = v end
+	end
+	for i = 1, n do
+		if free[i] then
+			if own then
+				add(i, sign * own[i], 0)
+			else
+				-- A bound below what the column's cap range allows is no bound.
+				floor_v = math.min(floor_v, sign > 0 and low[i] or -high[i])
+			end
+		end
+	end
+	for i = 1, n do
+		if free[i] then
+			local col = (i - 1) % width
+			local lo, hi = low[i] - 1, high[i] + 1
+			local g
+			g = col > 0 and fixed[i - 1]
+			if g and (hard[i - 1] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
+			g = col < width - 1 and fixed[i + 1]
+			if g and (hard[i + 1] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
+			g = fixed[i - width]
+			if g and (hard[i - width] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
+			g = fixed[i + width]
+			if g and (hard[i + width] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
+		end
+	end
+	return seeds, floor_v
+end
+
+-- Limits the slope (#235) of the free (skirt) columns of a grid `width` wide,
+-- indexed row by row: `goal` is every column's target (a free column's is its
+-- own height), `low`/`high` a free column's cap range, `free` marks the columns that
+-- may move. The rest (footprints, yards, untouched ground) never do. Each free
+-- column ends within one block of every neighbor wherever its cap range allows
+-- it, in three steps:
+--   1. Bounds. A fixed column of height g, d steps away through free columns,
+--      allows [g - d, g + d]. Two bucket-queue passes (Dijkstra with unit steps,
+--      `spread`) give each free column the highest lower and lowest upper bound
+--      over all fixed columns, cut down by its own cap range. A neighbor of the
+--      untouched ground that the cap range cannot come within one block of is no
+--      source (a pit beside the skirt would only drag it to the cap); a pad's
+--      column always is, and pulls as far as the cap lets it.
+--   2. Conflicts. Where the bounds cross, the sources cannot all be met (a yard
+--      and a cliff past the cap, two pads at odds). The nearest ones win: the
+--      column takes the bounds from the fixed columns within 16, 8, 4, 2, 1
+--      steps, the most that leave it a range, so the break falls away from the
+--      yard. If even the adjacent ones disagree the nearer takes the column's
+--      single value (the cap range counts as nearest, then a tie takes the middle).
+--   3. Smoothing. The goals held in the bounds are made 1-Lipschitz by the mean
+--      of the largest such field below them and the smallest above them (min of
+--      v + d and max of v - d over the free columns, with the fixed neighbors),
+--      which takes off mounds and fills dips, whatever order the neighbors come
+--      in. The mean stays in the bounds.
+
+local function limit_slope(goal, low, high, free, hard, width, depth)
+	local n = width * depth
+	local fixed, open = {}, {}
+	for i = 1, n do
+		if goal[i] then
+			if free[i] then open[i] = true else fixed[i] = goal[i] end
+		end
+	end
+	-- Each free column's cap range cut down by the fixed columns within `maxd`
+	-- steps, and the steps to whatever set each end (0 for its own cap).
+	local function bounds(maxd)
+		local seeds, floor_v = seeds_of(1, nil, fixed, hard, low, high, open, width, n)
+		local fl, fl_d = spread(seeds, floor_v, open, width, maxd)
+		seeds, floor_v = seeds_of(-1, nil, fixed, hard, low, high, open, width, n)
+		local fu, fu_d = spread(seeds, floor_v, open, width, maxd)
+		local lower, upper, lower_d, upper_d = {}, {}, {}, {}
+		for i = 1, n do
+			if open[i] then
+				if fl[i] and fl[i] > low[i] then lower[i], lower_d[i] = fl[i], fl_d[i] else lower[i], lower_d[i] = low[i], 0 end
+				if fu[i] and -fu[i] < high[i] then upper[i], upper_d[i] = -fu[i], fu_d[i] else upper[i], upper_d[i] = high[i], 0 end
+			end
+		end
+		return lower, upper, lower_d, upper_d
+	end
+	local lower, upper, lower_d, upper_d = bounds()
+	local crossed = {}
+	for i = 1, n do
+		if open[i] and lower[i] > upper[i] then crossed[#crossed + 1] = i end
+	end
+	-- Sources that cannot all be met: keep the nearest ones. A crossed column takes
+	-- its bounds from the fixed columns within the most steps that still leave it a
+	-- range, and where even the adjacent ones disagree (or its cap misses them) the
+	-- nearer wins and the value is fixed.
+	for _, reach_d in ipairs({16, 8, 4, 2, 1}) do
+		if #crossed == 0 then break end
+		local l, u, ld, ud = bounds(reach_d)
+		local rest = {}
+		for _, i in ipairs(crossed) do
+			if l[i] <= u[i] then
+				lower[i], upper[i], lower_d[i], upper_d[i] = l[i], u[i], ld[i], ud[i]
+			elseif reach_d == 1 then
+				local v
+				if ld[i] < ud[i] then v = l[i]
+				elseif ud[i] < ld[i] then v = u[i]
+				else v = math.floor((l[i] + u[i]) / 2) end
+				v = clamp(v, low[i], high[i])
+				lower[i], upper[i] = v, v
+			else
+				rest[#rest + 1] = i
+			end
+		end
+		crossed = rest
+	end
+	-- Smoothing: the goals held in their bounds are made 1-Lipschitz by the mean
+	-- of the largest field below them and the smallest above them.
+	local hold = {}
+	for i = 1, n do
+		if open[i] then hold[i] = clamp(goal[i], lower[i], upper[i]) end
+	end
+	local seeds, floor_v = seeds_of(-1, hold, fixed, hard, low, high, open, width, n)
+	local under = spread(seeds, floor_v, open, width)
+	seeds, floor_v = seeds_of(1, hold, fixed, hard, low, high, open, width, n)
+	local over = spread(seeds, floor_v, open, width)
+	for i = 1, n do
+		if open[i] then
+			goal[i] = clamp(math.floor((over[i] - under[i]) / 2), lower[i], upper[i])
+		end
+	end
+end
+
+M.spread = spread -- for the tests
 
 -- The pure planning half. `height_at(x, z)` gives a column's current terrain
 -- height, or nil to leave it alone (water, or outside what was read), and as a
@@ -106,20 +314,15 @@ function M.targets(pads, height_at, config)
 			if t then
 				local i = index(x, z)
 				was[i] = t
-				-- The pad whose footprint holds the column or is nearest, and the
-				-- blend of every pad within the radius of its yard.
-				local near, near_d, yard_hit, sum, weights, dmin = nil, math.huge, nil, 0, 0, math.huge
+				-- The pad whose footprint holds the column or is nearest, within the
+				-- radius of its yard.
+				local near, near_d, yard_hit = nil, math.huge, nil
 				for n, p in ipairs(pads) do
 					local d = distance(x, z, p.yx0, p.yz0, p.yx1, p.yz1)
 					if d < radius then
 						local fd = distance(x, z, p.x0, p.z0, p.x1, p.z1)
 						if fd < near_d then near, near_d = n, fd end
 						if d == 0 then yard_hit = true end
-						dmin = math.min(dmin, d)
-						if d > 0 then
-							local w = 1 / (d * d)
-							sum, weights = sum + w * p.y, weights + w
-						end
 					end
 				end
 				if near then
@@ -134,9 +337,8 @@ function M.targets(pads, height_at, config)
 						kind[i], free[i] = "yard", false
 						goal[i] = clamp(p.y, t - config.cap, t + config.cap)
 					else
-						kind[i], free[i] = "skirt", true
-						local blend = sum / weights
-						goal[i] = clamp(round(t + fade(dmin, radius) * (blend - t)), t - config.cap, t + config.cap)
+						-- Wants to stay as it is; the slope limit moves it as little as it must.
+						kind[i], goal[i], free[i] = "skirt", t, true
 					end
 					low[i], high[i] = t - config.cap, t + config.cap
 				else
@@ -146,29 +348,12 @@ function M.targets(pads, height_at, config)
 		end
 	end
 
-	-- Limit the slope: a free column moves toward each neighbor until it is within
-	-- one block of it, never past the cap. The pads and the untouched ground
-	-- around them hold still, so the slope bends only in the skirt.
-	for _ = 1, config.relax_passes do
-		local changed = false
-		for z = bz0, bz1 do
-			for x = bx0, bx1 do
-				local i = index(x, z)
-				if free[i] then
-					local v = goal[i]
-					for _, n in ipairs({
-						x > bx0 and i - 1, x < bx1 and i + 1, z > bz0 and i - width, z < bz1 and i + width,
-					}) do
-						local g = n and goal[n]
-						if g then v = clamp(v, g - 1, g + 1) end
-					end
-					v = clamp(v, low[i], high[i])
-					if v ~= goal[i] then goal[i], changed = v, true end
-				end
-			end
-		end
-		if not changed then break end
-	end
+	-- Limit the slope (limit_slope): a skirt column ends within one block of each
+	-- neighbor where its cap range allows. The pads and the untouched ground around
+	-- them hold still, so the slope bends only in the skirt.
+	local hard = {}
+	for i, k in pairs(kind) do hard[i] = k ~= "skirt" end
+	limit_slope(goal, low, high, free, hard, width, bz1 - bz0 + 1)
 
 	for z = bz0, bz1 do
 		for x = bx0, bx1 do
