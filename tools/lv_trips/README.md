@@ -100,9 +100,9 @@ tools/lv_trips/run.sh Testlandia -2625,30,250 A1 --stages work --build tools/lv_
 ```
 
 The probe treats every villager as having a player near (a headless server has none, and
-mcl_mobs would freeze them all). `--far SECONDS` (needs `--spot`) keeps vanilla's rule instead, so
+mcl_mobs would freeze them all). `--far SECONDS` (needs `--spot` or `--jump`) keeps vanilla's rule instead, so
 villagers stand still as they do when the player is more than 48 nodes away, until SECONDS after the
-spot run starts, when a player "arrives" (a negative number: never; `0`: off, the default). Without `--spot` it is refused. Until the spot run starts (world load and setup) the villagers are frozen too. This is how #201 was
+spot run starts, when a player "arrives" (a negative number: never; `0`: off, the default). Without `--spot` or `--jump` it is refused; a negative number prints a note that the villagers stay frozen for the whole run. Until the spot run starts (world load and setup) the villagers are frozen too. This is how #201 was
 reproduced: `--far 20` with `--spot -1731.3,19.5,994.0:-1772,16,962 --goto -1720,22,994 --stages work` in
 Testlandia (village point `-1731,20,994`).
 
@@ -122,7 +122,7 @@ other villagers carry on as they like, so a run can start with a route cancelled
 tools/lv_trips/run.sh WORLD X,Y,Z LABEL --jump work:tavern [--far SECONDS] [--lag MS] [--settle S] [--watch S] [--scatter S]
 ```
 
-`--jump FROM:TO` (stage names, `sleep` is just after midnight) holds the FROM hour for `--settle`
+`--jump FROM:TO` (stage names, `sleep` is just after midnight; takes `--radius` but not `--stages` or `--rounds`) holds the FROM hour for `--settle`
 seconds (default 40) so the village is in its natural state, then sets the clock to the TO hour as
 `/time` does and watches every villager for `--watch` seconds (default 90). `--far SECONDS` keeps
 vanilla's freezing until SECONDS after the jump, `--lag MS` busy-waits once 5 s after it (a long server

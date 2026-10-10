@@ -558,10 +558,11 @@ local function start_route(self, target, path, arrived, route_field, route_id)
 	-- destination sits just past the door) would never run; close on arrival
 	-- instead (#60).
 	local trailing_door
-	for i = 2, #waypoints do
-		local door = wooden_door_at(waypoints[i].pos)
+	-- A villager standing in the door's own cell (i == 1) opens it from there.
+	for i = 1, #waypoints do
+		local door = (i > 1 or waypoints[2]) and wooden_door_at(waypoints[i].pos)
 		if door then
-			waypoints[i - 1].action = {type = "door", action = "open", target = vector.new(door)}
+			waypoints[math.max(i - 1, 1)].action = {type = "door", action = "open", target = vector.new(door)}
 			if waypoints[i + 1] then
 				if i + 1 == #waypoints then
 					trailing_door = vector.new(door)

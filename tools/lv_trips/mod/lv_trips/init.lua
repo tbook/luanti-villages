@@ -728,7 +728,6 @@ local function run_jump(list)
 				end
 				if not st.first_move and vector.distance(pos, st.start) >= 1 then st.first_move = t end
 				if logging then
-					local kind = current_route(v)
 					core.log("action", string.format("[lv_trips] jump t=%.1f id=%s pos=(%.1f,%.1f,%.1f) state=%s order=%s route=%s follow=%s wp=%s left=%d door=%s",
 						t, id, pos.x, pos.y, pos.z, tostring(v.state), tostring(v.order),
 						route and (route.status .. "/" .. tostring(route.reason)) or (planning and "planning" or "-"),

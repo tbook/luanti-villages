@@ -45,22 +45,31 @@ goto=
 build=
 far=0
 jump=
-settle=40
-watch=90
-lag=0
+settle=
+rounds_given=
+watch=
+lag=
 scatter=0
 scatter_wait=6
 mode_given=
 mod_dir=$repo_root
+# Strict numbers for values that reach the server conf: digits and one dot, nothing else
+# (a case pattern sees the whole value, so a newline cannot hide a line that matches).
+is_count() {
+	case $1 in
+		''|*[!0-9.]*|.*|*.|*.*.*) return 1 ;;
+	esac
+	return 0
+}
 # A number: optional sign, digits, optional single decimal part.
 num='-?[0-9]+(\.[0-9]+)?'
 while [ $# -gt 0 ]; do
 	case $1 in
 		--mode) mode=$2; mode_given=1; shift 2 ;;
-		--rounds) rounds=$2; shift 2 ;;
+		--rounds) is_count "$2" || { echo "--rounds wants a number, not '$2'" >&2; exit 2; }; rounds=$2; rounds_given=1; shift 2 ;;
 		--stages) stages=$2; shift 2 ;;
-		--radius) radius=$2; shift 2 ;;
-		--speed) speed=$2; shift 2 ;;
+		--radius) is_count "$2" || { echo "--radius wants a number, not '$2'" >&2; exit 2; }; radius=$2; shift 2 ;;
+		--speed) is_count "$2" || { echo "--speed wants a number, not '$2'" >&2; exit 2; }; speed=$2; shift 2 ;;
 		--spot)
 			if ! printf %s "$2" | grep -Eq "^$num(,$num){2}:$num(,$num){2}\$"; then
 				echo "--spot wants SX,SY,SZ:BX,BY,BZ (numbers), not '$2'" >&2; exit 2
@@ -73,19 +82,27 @@ while [ $# -gt 0 ]; do
 			goto=$(printf %s "$2" | tr ',' ';'); shift 2 ;;
 		--build) build=$2; shift 2 ;;
 		--far)
+			case $2 in *[!-0-9.]*|'') echo "--far wants SECONDS (a number), not '$2'" >&2; exit 2 ;; esac
 			if ! printf %s "$2" | grep -Eq "^$num\$"; then
 				echo "--far wants SECONDS (a number), not '$2'" >&2; exit 2
 			fi
-			far=$2; shift 2 ;;
+			far=$2
+			case $far in -*) echo "note: negative --far keeps villagers frozen for the whole run" >&2 ;; esac
+			shift 2 ;;
 		--jump)
-			if ! printf %s "$2" | grep -Eq '^[a-z_]+:[a-z_]+$'; then
-				echo "--jump wants FROM:TO (stage names), not '$2'" >&2; exit 2
+			stages_known="home work tavern church bell holiday_tavern night sleep"
+			from=${2%%:*}; to=${2#*:}
+			case $2 in *:*) ;; *) from=; to= ;; esac
+			case " $stages_known " in *" $from "*) ;; *) from= ;; esac
+			case " $stages_known " in *" $to "*) ;; *) to= ;; esac
+			if [ -z "$from" ] || [ -z "$to" ]; then
+				echo "--jump wants FROM:TO, two of: $stages_known (not '$2')" >&2; exit 2
 			fi
 			jump=$2; shift 2 ;;
-		--settle) settle=$2; shift 2 ;;
-		--watch) watch=$2; shift 2 ;;
-		--lag) lag=$2; shift 2 ;;
-		--scatter) scatter=1; scatter_wait=$2; shift 2 ;;
+		--settle) is_count "$2" || { echo "--settle wants SECONDS (a number), not '$2'" >&2; exit 2; }; settle=$2; shift 2 ;;
+		--watch) is_count "$2" || { echo "--watch wants SECONDS (a number), not '$2'" >&2; exit 2; }; watch=$2; shift 2 ;;
+		--lag) is_count "$2" || { echo "--lag wants MILLISECONDS (a number), not '$2'" >&2; exit 2; }; lag=$2; shift 2 ;;
+		--scatter) is_count "$2" || { echo "--scatter wants SECONDS (a number), not '$2'" >&2; exit 2; }; scatter=1; scatter_wait=$2; shift 2 ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
@@ -98,7 +115,11 @@ fi
 if [ -n "$build" ] && [ ! -f "$build" ]; then echo "--build file '$build' does not exist" >&2; exit 2; fi
 if [ -n "$jump" ]; then
 	if [ -n "$spot" ] || [ -n "$mode_given" ]; then echo "--jump is its own mode" >&2; exit 2; fi
+	if [ -n "$stages" ] || [ -n "$rounds_given" ]; then echo "--jump takes its stages from FROM:TO; drop --stages and --rounds" >&2; exit 2; fi
 	mode=jump
+	settle=${settle:-40}; watch=${watch:-90}; lag=${lag:-0}
+elif [ -n "$settle$watch$lag" ] || [ "$scatter" != 0 ]; then
+	echo "--settle, --watch, --lag and --scatter need --jump" >&2; exit 2
 fi
 if [ -n "$spot" ]; then
 	if [ -n "$mode_given" ]; then echo "--spot is its own mode; drop --mode" >&2; exit 2; fi
