@@ -178,8 +178,11 @@ assert(f.schematic_table[1].mts == stock, "restored after an error")
 local m = {schematic_table = {}}
 local seen = 0
 m.place_schematics = function(info) seen = seen + #info end
-assert(loomless.install(m, engine))
-m.place_schematics({{name = "small_house", pos = {x = 1, y = 1, z = 1}}})
-assert(seen == 1)
+local logs = 0
+local noisy = {settings = engine.settings, get_mapgen_setting = engine.get_mapgen_setting,
+	log = function() logs = logs + 1 end}
+assert(loomless.install(m, noisy))
+for _ = 1, 2 do m.place_schematics({{name = "small_house", pos = {x = 1, y = 1, z = 1}}}) end
+assert(seen == 2 and logs == 1, "missing entry: placed, logged once")
 assert(not loomless.install(nil) and not loomless.install({}), "nothing to wrap")
 print("loomless house tests passed")

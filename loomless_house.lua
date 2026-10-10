@@ -113,6 +113,7 @@ function M.install(settlements, engine)
 			if entry.name == name then return entry end
 		end
 	end
+	local warned = false
 	local wrapper
 	wrapper = function(info, ...)
 		local chance = M.chance(engine)
@@ -129,6 +130,12 @@ function M.install(settlements, engine)
 		local result
 		for _, building in ipairs(info) do
 			local entry = loomless(building) and entry_of(building.name)
+			if loomless(building) and not entry and not warned then
+				-- Placed as VoxeLibre would, with the stock entry.
+				warned = true
+				engine.log("warning", "[living_villages] no schematic_table entry for building 'small_house', "
+					.. "it keeps its loom")
+			end
 			local found = entry and entry.mts
 			local variant = found and cache[found]
 			if found and variant == nil then
