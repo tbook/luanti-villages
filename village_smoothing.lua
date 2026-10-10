@@ -6,11 +6,10 @@
 -- the holes and cliffs the smoothing leaves (village_holes.lua, #142, #155).
 --
 -- Each building gets a pad, its footprint plus a flat yard at the site's height.
--- Every column within `radius` of a pad is pulled toward an inverse-distance
--- blend of the nearby pads' heights, fading to nothing at the radius, then
--- limited to one block of difference from its neighbors so villagers can walk
--- it. The planning half (targets) is a pure function, so it is tested without
--- the engine.
+-- Every column within `radius` of a pad (the skirt) keeps its height unless the
+-- slope limit moves it, as little as it must, to leave no step over one block
+-- against a yard or the untouched ground, so villagers can walk it (#235). The
+-- planning half (targets) is a pure function, so it is tested without the engine.
 --
 -- Loading this has no side effects. The engine functions come in through `env`.
 local core = minetest
@@ -31,15 +30,7 @@ M.config = {
 	block = 16,
 }
 
-local function round(v) return math.floor(v + 0.5) end
-
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
-
--- 1 at distance 0, 0 at the radius, flat at both ends.
-local function fade(d, radius)
-	local s = clamp(d / radius, 0, 1)
-	return 1 - s * s * (3 - 2 * s)
-end
 
 -- Pads from a plan: {x0, z0, x1, z1} the footprint, {yx0 ...} the yard, y the
 -- floor (the schematic's bottom slice is the ground layer, so pos.y is the
@@ -66,9 +57,43 @@ local function distance(x, z, x0, z0, x1, z1)
 	return math.sqrt(dx * dx + dz * dz)
 end
 
--- Bucket-queue Dijkstra with unit steps over the free columns (see limit_slope).
-local function spread(seeds, floor_v, free, width, n, maxd)
-	maxd = maxd or math.huge
+-- Like `spread` but only from sources within `maxd` steps, by layers: a bucket
+-- queue gives a column to the highest source, and would lose a nearer, lower one
+-- when the higher one is too far to carry on.
+local function window(seeds, free, width, maxd)
+	local best, from, frontier = {}, {}, {}
+	for k = 1, #seeds, 3 do
+		local i, v = seeds[k], seeds[k + 1]
+		if not best[i] then frontier[#frontier + 1] = i end
+		if not best[i] or v > best[i] then best[i], from[i] = v, seeds[k + 2] end
+	end
+	for layer = 2, maxd do
+		local update, count = {}, 0
+		for _, i in ipairs(frontier) do
+			local v = best[i] - 1
+			local col = (i - 1) % width
+			for _, j in ipairs({col > 0 and i - 1 or 0, col < width - 1 and i + 1 or 0, i - width, i + width}) do
+				if free[j] and (not best[j] or v > best[j]) and (not update[j] or v > update[j]) then
+					if not update[j] then count = count + 1 end
+					update[j] = v
+				end
+			end
+		end
+		if count == 0 then break end
+		frontier = {}
+		for j, v in pairs(update) do
+			best[j], from[j] = v, layer
+			frontier[#frontier + 1] = j
+		end
+		table.sort(frontier)
+	end
+	return best, from
+end
+
+-- Bucket-queue Dijkstra with unit steps over the free columns (see limit_slope),
+-- from all sources, or only those within `maxd` steps.
+local function spread(seeds, floor_v, free, width, maxd)
+	if maxd then return window(seeds, free, width, maxd) end
 	-- seeds: flat list of {index, value, d}. Returns, for each free column, the
 	-- highest value of seed value - steps, and the steps of the first such seed.
 	local best, from, buckets, top_v = {}, {}, {}, -math.huge
@@ -101,7 +126,7 @@ local function spread(seeds, floor_v, free, width, n, maxd)
 				k = k + 2
 				if not best[i] then
 					best[i], from[i] = v, d
-					if v > floor_v and d < maxd then
+					if v > floor_v then
 						local col = (i - 1) % width
 						if col > 0 and free[i - 1] and not best[i - 1] then push(i - 1, v - 1, d + 1) end
 						if col < width - 1 and free[i + 1] and not best[i + 1] then push(i + 1, v - 1, d + 1) end
@@ -155,7 +180,7 @@ end
 
 -- Limits the slope (#235) of the free (skirt) columns of a grid `width` wide,
 -- indexed row by row: `goal` is every column's target (a free column's is a
--- blend), `low`/`high` a free column's cap range, `free` marks the columns that
+-- own height), `low`/`high` a free column's cap range, `free` marks the columns that
 -- may move. The rest (footprints, yards, untouched ground) never do. Each free
 -- column ends within one block of every neighbor wherever its cap range allows
 -- it, in three steps:
@@ -190,9 +215,9 @@ local function limit_slope(goal, low, high, free, hard, width, depth)
 	-- steps, and the steps to whatever set each end (0 for its own cap).
 	local function bounds(maxd)
 		local seeds, floor_v = seeds_of(1, nil, fixed, hard, low, high, open, width, n)
-		local fl, fl_d = spread(seeds, floor_v, open, width, n, maxd)
+		local fl, fl_d = spread(seeds, floor_v, open, width, maxd)
 		seeds, floor_v = seeds_of(-1, nil, fixed, hard, low, high, open, width, n)
-		local fu, fu_d = spread(seeds, floor_v, open, width, n, maxd)
+		local fu, fu_d = spread(seeds, floor_v, open, width, maxd)
 		local lower, upper, lower_d, upper_d = {}, {}, {}, {}
 		for i = 1, n do
 			if open[i] then
@@ -202,7 +227,7 @@ local function limit_slope(goal, low, high, free, hard, width, depth)
 		end
 		return lower, upper, lower_d, upper_d
 	end
-	local lower, upper, lower_d, upper_d = bounds(math.huge)
+	local lower, upper, lower_d, upper_d = bounds()
 	local crossed = {}
 	for i = 1, n do
 		if open[i] and lower[i] > upper[i] then crossed[#crossed + 1] = i end
@@ -238,15 +263,17 @@ local function limit_slope(goal, low, high, free, hard, width, depth)
 		if open[i] then hold[i] = clamp(goal[i], lower[i], upper[i]) end
 	end
 	local seeds, floor_v = seeds_of(-1, hold, fixed, hard, low, high, open, width, n)
-	local under = spread(seeds, floor_v, open, width, n)
+	local under = spread(seeds, floor_v, open, width)
 	seeds, floor_v = seeds_of(1, hold, fixed, hard, low, high, open, width, n)
-	local over = spread(seeds, floor_v, open, width, n)
+	local over = spread(seeds, floor_v, open, width)
 	for i = 1, n do
 		if open[i] then
 			goal[i] = clamp(math.floor((over[i] - under[i]) / 2), lower[i], upper[i])
 		end
 	end
 end
+
+M.spread = spread -- for the tests
 
 -- The pure planning half. `height_at(x, z)` gives a column's current terrain
 -- height, or nil to leave it alone (water, or outside what was read), and as a
@@ -287,20 +314,15 @@ function M.targets(pads, height_at, config)
 			if t then
 				local i = index(x, z)
 				was[i] = t
-				-- The pad whose footprint holds the column or is nearest, and the
-				-- blend of every pad within the radius of its yard.
-				local near, near_d, yard_hit, sum, weights, dmin = nil, math.huge, nil, 0, 0, math.huge
+				-- The pad whose footprint holds the column or is nearest, within the
+				-- radius of its yard.
+				local near, near_d, yard_hit = nil, math.huge, nil
 				for n, p in ipairs(pads) do
 					local d = distance(x, z, p.yx0, p.yz0, p.yx1, p.yz1)
 					if d < radius then
 						local fd = distance(x, z, p.x0, p.z0, p.x1, p.z1)
 						if fd < near_d then near, near_d = n, fd end
 						if d == 0 then yard_hit = true end
-						dmin = math.min(dmin, d)
-						if d > 0 then
-							local w = 1 / (d * d)
-							sum, weights = sum + w * p.y, weights + w
-						end
 					end
 				end
 				if near then
@@ -315,9 +337,8 @@ function M.targets(pads, height_at, config)
 						kind[i], free[i] = "yard", false
 						goal[i] = clamp(p.y, t - config.cap, t + config.cap)
 					else
-						kind[i], free[i] = "skirt", true
-						local blend = sum / weights
-						goal[i] = clamp(round(t + fade(dmin, radius) * (blend - t)), t - config.cap, t + config.cap)
+						-- Wants to stay as it is; the slope limit moves it as little as it must.
+						kind[i], goal[i], free[i] = "skirt", t, true
 					end
 					low[i], high[i] = t - config.cap, t + config.cap
 				else
@@ -327,9 +348,9 @@ function M.targets(pads, height_at, config)
 		end
 	end
 
-	-- Limit the slope: a free column moves toward each neighbor until it is within
-	-- one block of it, never past the cap. The pads and the untouched ground
-	-- around them hold still, so the slope bends only in the skirt.
+	-- Limit the slope (limit_slope): a skirt column ends within one block of each
+	-- neighbor where its cap range allows. The pads and the untouched ground around
+	-- them hold still, so the slope bends only in the skirt.
 	local hard = {}
 	for i, k in pairs(kind) do hard[i] = k ~= "skirt" end
 	limit_slope(goal, low, high, free, hard, width, bz1 - bz0 + 1)

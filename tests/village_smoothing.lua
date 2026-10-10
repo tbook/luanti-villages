@@ -207,6 +207,39 @@ do
 	end
 	assert(left == 0, left .. " skirt columns left off a yard they could match")
 
+	-- Mild ground (terraces one block apart, a ramp of 1 in 6) leaves no step over one block
+	-- anywhere, in the skirt or at its rim. The solve bends the slope where it must, and on
+	-- ground like this it never must (the untouched ground pins the rim, so any trouble would
+	-- show as a skirt-skirt step).
+	for _, mild in ipairs({
+		function(x) return 11 + math.floor(x / 6) end,
+		function(x, z) return 12 + math.floor((x + z) / 7) % 2 end,
+		function(x, z) return 9 + math.floor(z / 5) end,
+	}) do
+		local mt2 = smoothing.targets(pads, mild, cfg)
+		local skirt_steps = 0
+		for z = mt2.z0, mt2.z1 do for x = mt2.x0, mt2.x1 do
+			local a = mt2.at(x, z)
+			for _, d in ipairs({{1, 0}, {0, 1}}) do
+				local b = mt2.at(x + d[1], z + d[2])
+				if a and b and math.abs(a - b) > 1 and mt2.kind(x, z) == "skirt" and mt2.kind(x + d[1], z + d[2]) == "skirt" then
+					skirt_steps = skirt_steps + 1
+				end
+			end
+		end end
+		assert(skirt_steps == 0, "skirt-skirt steps on mild ground: " .. skirt_steps)
+		assert(mt2.violations == 0, "steps on mild ground: " .. mt2.violations)
+	end
+
+	-- A window of sources (spread with a step limit) keeps a lower source that is near when a higher
+	-- one is too far to carry on: columns 1..6 in a row, a source of 29 beside column 1 and one of 5
+	-- beside column 3, within 3 steps.
+	local free6 = {true, true, true, true, true, true}
+	local best, steps = smoothing.spread({1, 29, 1, 3, 5, 1}, 0, free6, 6, 3)
+	assert(best[1] == 29 and best[3] == 27 and steps[3] == 3, "the higher source holds column 3")
+	assert(best[4] == 4 and steps[4] == 2 and best[5] == 3 and steps[5] == 3, "the lower one still reaches columns 4 and 5")
+	assert(best[6] == nil, "and no further")
+
 	-- Cost: a 400 x 400 area (radius 150 round four pads) is planned in a few seconds at most.
 	local big = {}
 	for k, v in pairs(cfg) do big[k] = v end
