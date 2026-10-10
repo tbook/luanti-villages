@@ -695,6 +695,43 @@ local function run_jump(list)
 		states[villager_id(v)] = {entity = v, start = vec(v.object:get_pos()), plan_run = 0, plan_max = 0,
 			plan_since = nil, first_move = nil, ever_planned = false}
 	end
+	local began_trace = elapsed_real
+	-- Log who writes `state` and `order` (#230): the two fields move into a shadow table behind
+	-- the entity's metatable, so every assignment shows up with its caller.
+	for id, st in pairs(states) do
+		local v = st.entity
+		local shadow = {state = v.state, order = v.order}
+		local class = getmetatable(v)
+		rawset(v, "state", nil)
+		rawset(v, "order", nil)
+		setmetatable(v, {
+			__index = function(_, key)
+				if key == "state" or key == "order" then return shadow[key] end
+				if type(class) == "table" then
+					local index = class.__index
+					if type(index) == "function" then return index(v, key) end
+					if type(index) == "table" then return index[key] end
+				end
+			end,
+			__newindex = function(t, key, value)
+				if key == "state" or key == "order" then
+					if shadow[key] ~= value then
+						local callers = {}
+						for level = 2, 5 do
+							local info = debug.getinfo(level, "Sl")
+							if info then callers[#callers + 1] = info.short_src:match("[^/]*$") .. ":" .. info.currentline end
+						end
+						core.log("action", string.format("[lv_trips] write t=%.1f id=%s %s %s -> %s follow=%s by %s",
+							elapsed_real - began_trace, id, key, tostring(shadow[key]), tostring(value),
+							tostring(rawget(v, "_villages_follow") ~= nil), table.concat(callers, " < ")))
+					end
+					shadow[key] = value
+				else
+					rawset(t, key, value)
+				end
+			end,
+		})
+	end
 	if FAR.secs > 0 then FAR.until_us = core.get_us_time() + FAR.secs * 1e6 end
 	core.set_timeofday(to.tod)
 	log(string.format("jump %s -> %s at t=0 (villagers=%d far=%s lag=%s)", from.name, to.name, #list, tostring(FAR.secs), tostring(lag)))

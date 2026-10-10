@@ -225,6 +225,15 @@ function M.sit(self)
 	self._villages_seat_box = self.collisionbox
 	self.state = "stand"
 	self._target, self.current_target, self.waypoints, self.callback_arrived = nil, nil, nil, nil
+	-- Sitting ends the walk, which usually has not arrived (the chair is within reach
+	-- before the walk's last cell). The follower flag and a "travelling" tavern route
+	-- left behind looked like a lost walk once the meal was over, and navigation.lua
+	-- cancelled the route and held it back for 30 s (#230).
+	self._villages_follow, self._villages_follow_failed = nil, nil
+	local route = self._villages_tavern_route
+	if route and route.status == "travelling" then
+		self._villages_tavern_route = {status = "arrived", id = route.id, target = route.target}
+	end
 	self.collisionbox = table.copy(SEATED_BOX)
 	if self.child then
 		for i, value in ipairs(self.collisionbox) do self.collisionbox[i] = value * 0.5 end

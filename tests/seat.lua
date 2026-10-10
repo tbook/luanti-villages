@@ -136,8 +136,16 @@ end
 -- Arriving beside a free seat, a guest takes it: pinned down in the chair,
 -- facing the table, legs forward, and the chair held for it.
 local alice = villager("alice", {x = 1, y = -0.49, z = 1})
+-- She was walking the tavern route when she came within reach of the chair (#230).
+alice._villages_follow = {final = {x = 1, y = 0, z = 1}}
+alice._villages_tavern_route = {status = "travelling", id = 7, target = {x = 1, y = 0, z = 1}}
 def.do_custom(alice, 0.1)
 assert(alice._villages_tavern_arrived and alice._villages_seated, "sits at once beside the chair")
+-- Sitting ends the walk: a follower flag and a "travelling" route left behind read as a
+-- lost walk once she gets up, and cancelled the route (#230).
+assert(alice._villages_follow == nil, "the walk is over")
+assert(alice._villages_tavern_route.status == "arrived" and alice._villages_tavern_route.id == 7,
+	"the tavern route ended with it")
 local pos = alice.object:get_pos()
 assert(pos.x == 2 and pos.z == 0 and near(pos.y, -(0.585 - 0.108)), "down in the chair")
 assert(near(alice.target_yaw, -math.pi / 2), "faces +x, toward the table")
