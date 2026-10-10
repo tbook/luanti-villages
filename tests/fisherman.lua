@@ -710,6 +710,15 @@ do
 	assert(fisherman._villages_fish_session.phase == "wait")
 	assert(fisherman._villages_fish_bobber, "the cast/wait transition must spawn a bobber")
 	assert(#spawned_bobbers == 1)
+	-- #227: the sprite (16 px, centred, float rows 2-13 of the png) rests on
+	-- the surface of the source at water.y (top at +0.5): centre above it, the
+	-- stem's foot (6 px down) under it, the head clear of it by a little.
+	local bobber_y = spawned_bobbers[1].pos.y
+	local px = 0.3 / 16
+	assert(bobber_y > water.y + 0.5 and bobber_y < water.y + 0.5 + 0.2,
+		"the bobber must float slightly above the surface, got " .. bobber_y)
+	assert(bobber_y - 6 * px < water.y + 0.5, "the stem must reach into the water")
+	assert(bobber_y + 6 * px > water.y + 0.5 + 0.05, "the float must show above the water")
 
 	now = fisherman._villages_fish_session.phase_ends_at
 	def.do_custom(fisherman, 0.1)
