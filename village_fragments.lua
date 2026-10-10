@@ -10,6 +10,7 @@
 -- Loading this has no side effects. Everything takes the engine table as an
 -- optional last argument (default `minetest`) so tests can stub it.
 local core = minetest
+local terrain = dofile(core.get_modpath("living_villages") .. "/village_terrain.lua")
 
 local M = {}
 
@@ -143,6 +144,14 @@ end
 -- clipped, snow}: fills started, nodes removed, fills that hit the cap, and
 -- snow layers removed. A layer above the VoxelManip
 -- region (the top of the zone plus the cap height) is not seen.
+-- Known limit: like trees, stalks and their vines are removed near ruined portals and
+-- outposts too, where the smoothing leaves the ground alone; clear_trees does not know
+-- the structures.
+-- Bamboo, cactus and sugar cane inside the zone go too (`growth`), as they would
+-- otherwise be read as ground by the smoothing and buried or left under new
+-- blocks (#224), and so do vines hanging on a removed node, with the vines
+-- under them (`vines`, #225; a vine on a standing node stays), and so does the top half of a two-high plant left
+-- on a removed leaf (`plant_tops`: its bottom half was under the leaves).
 function M.clear_trees(zone, config, engine)
 	engine = engine or core
 	config = config or M.config
@@ -154,7 +163,7 @@ function M.clear_trees(zone, config, engine)
 		lo.x, lo.y, lo.z = math.min(lo.x, box.minp.x), math.min(lo.y, box.minp.y), math.min(lo.z, box.minp.z)
 		hi.x, hi.y, hi.z = math.max(hi.x, box.maxp.x), math.max(hi.y, box.maxp.y), math.max(hi.z, box.maxp.z)
 	end
-	local stats = {seeds = 0, removed = 0, clipped = 0, snow = 0}
+	local stats = {seeds = 0, removed = 0, clipped = 0, snow = 0, growth = 0, vines = 0, plant_tops = 0}
 	if not lo then return stats end
 	local region_min = {x = lo.x - radius, y = lo.y - height, z = lo.z - radius}
 	local region_max = {x = hi.x + radius, y = hi.y + height, z = hi.z + radius}
@@ -186,6 +195,41 @@ function M.clear_trees(zone, config, engine)
 			local name = engine.get_name_from_content_id(id)
 			known = name:find("^mcl_core:snow") ~= nil and name ~= "mcl_core:snowblock"
 			snow_of[id] = known
+		end
+		return known
+	end
+	-- The top half of a two-high plant (VoxeLibre's double_plant group is 2 on it) that
+	-- stands on a removed node: a tree's leaves grew over its bottom half, and without them
+	-- the top floats.
+	local top_of = {}
+	local function is_plant_top(id)
+		local known = top_of[id]
+		if known == nil then
+			local name = engine.get_name_from_content_id(id)
+			local def = engine.registered_nodes[name]
+			known = (def and def.groups and (def.groups.double_plant or 0) == 2) or false
+			top_of[id] = known
+		end
+		return known
+	end
+	-- Stalks that stand in a column, and the vines that climb on trees.
+	local stalk_of, vine_of = {}, {}
+	local function is_stalk(id)
+		local known = stalk_of[id]
+		if known == nil then
+			local name = engine.get_name_from_content_id(id)
+			known = terrain.is_growth(name, engine.registered_nodes[name])
+			stalk_of[id] = known
+		end
+		return known
+	end
+	local function is_vine(id)
+		local known = vine_of[id]
+		if known == nil then
+			local name = engine.get_name_from_content_id(id)
+			local def = engine.registered_nodes[name]
+			known = name == "mcl_core:vine" or (def and def.groups and (def.groups.vines or 0) > 0) or false
+			vine_of[id] = known
 		end
 		return known
 	end
@@ -228,33 +272,83 @@ function M.clear_trees(zone, config, engine)
 		return nodes, capped
 	end
 
+	local gone = {} -- tree nodes removed, for the vines that hung on them
 	for z = lo.z, hi.z do
 		for y = lo.y, hi.y do
 			for x = lo.x, hi.x do
 				if x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z
-						and in_zone(x, y, z) and is_tree(data[va:index(x, y, z)]) then
-					stats.seeds = stats.seeds + 1
-					local nodes, capped = fill(x, y, z)
-					if capped then stats.clipped = stats.clipped + 1 end
-					for _, n in ipairs(nodes) do
-						if not capped or in_zone(n[1], n[2], n[3]) then
-							data[va:index(n[1], n[2], n[3])] = air
-							stats.removed = stats.removed + 1
-							if n[2] + 1 <= emax.y then
-								local above = va:index(n[1], n[2] + 1, n[3])
-								if is_snow_layer(data[above]) then
-									data[above] = air
-									stats.snow = stats.snow + 1
+						and in_zone(x, y, z) then
+					local index = va:index(x, y, z)
+					if is_tree(data[index]) then
+						stats.seeds = stats.seeds + 1
+						local nodes, capped = fill(x, y, z)
+						if capped then stats.clipped = stats.clipped + 1 end
+						for _, n in ipairs(nodes) do
+							if not capped or in_zone(n[1], n[2], n[3]) then
+								data[va:index(n[1], n[2], n[3])] = air
+								stats.removed = stats.removed + 1
+								gone[#gone + 1] = n
+								if n[2] + 1 <= emax.y then
+									local above = va:index(n[1], n[2] + 1, n[3])
+									if is_snow_layer(data[above]) then
+										data[above] = air
+										stats.snow = stats.snow + 1
+									elseif is_plant_top(data[above]) then
+										data[above] = air
+										stats.plant_tops = stats.plant_tops + 1
+									end
 								end
 							end
 						end
+					elseif is_stalk(data[index]) then
+						data[index] = air
+						stats.growth = stats.growth + 1
 					end
 				end
 			end
 		end
 	end
 
-	if stats.removed > 0 then
+	-- A vine whose support was removed (the node its param2 points at: a trunk, a leaf, or
+	-- the vine above it) would be left in the air: a vine drops only when something changes
+	-- beside it, and a write like this one sends no update. A vine on a standing node (a
+	-- cliff, a leaf outside the fill) stays. Without param2 data any neighbouring vine goes.
+	local param2 = vm.get_param2_data and vm:get_param2_data() or nil
+	local toward = {[0] = {0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
+	local queue, head = {}, 1
+	for _, n in ipairs(gone) do queue[#queue + 1] = n end
+	while head <= #queue do
+		local n = queue[head]
+		head = head + 1
+		for _, d in pairs(toward) do
+			local x, y, z = n[1] + d[1], n[2] + d[2], n[3] + d[3]
+			if x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z then
+				local index = va:index(x, y, z)
+				if is_vine(data[index]) then
+					local attached = true
+					if param2 then
+						local t = toward[param2[index] % 8]
+						attached = t ~= nil and x + t[1] == n[1] and y + t[2] == n[2] and z + t[3] == n[3]
+						-- VoxeLibre also lets a vine hang under a vine of the same param2 when there
+						-- is nothing beside it (mcl_core.check_vines_supported).
+						if not attached and t and t[2] == 0 and d[2] == -1 and n[4] ~= nil
+								and param2[index] == n[4] then
+							local sx, sy, sz = x + t[1], y + t[2], z + t[3]
+							attached = sx < emin.x or sx > emax.x or sz < emin.z or sz > emax.z
+								or data[va:index(sx, sy, sz)] == air
+						end
+					end
+					if attached then
+						data[index] = air
+						stats.vines = stats.vines + 1
+						queue[#queue + 1] = {x, y, z, param2 and param2[index] or nil}
+					end
+				end
+			end
+		end
+	end
+
+	if stats.removed > 0 or stats.growth > 0 or stats.vines > 0 or stats.plant_tops > 0 then
 		vm:set_data(data)
 		vm:write_to_map(true)
 	end

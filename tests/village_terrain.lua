@@ -4,7 +4,9 @@ local function vec(x, y, z) return {x = x, y = y, z = z} end
 
 -- Node ids for a few materials.
 local names = {"air", "mcl_core:stone", "mcl_core:dirt", "mcl_core:dirt_with_grass", "mcl_core:water_source",
-	"mcl_core:tree", "mcl_core:leaves", "mcl_core:sand", "mcl_flowers:tallgrass", "mcl_core:snow", "mcl_core:cactus"}
+	"mcl_core:tree", "mcl_core:leaves", "mcl_core:sand", "mcl_flowers:tallgrass", "mcl_core:snow", "mcl_core:cactus",
+	"mcl_bamboo:bamboo", "mcl_bamboo:bamboo_plank", "mcl_farming:sweet_berry_bush_3", "mcl_flowers:peony", "mcl_flowers:peony_top",
+	"mcl_core:deadbush", "mcl_core:reeds"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
 local ignore_id = 99
@@ -16,6 +18,11 @@ local registered = {
 	["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
 	["mcl_flowers:tallgrass"] = {walkable = false}, ["mcl_core:snow"] = {walkable = true},
 	["mcl_core:cactus"] = {walkable = true},
+	["mcl_bamboo:bamboo"] = {walkable = true, groups = {plant = 1}},
+	["mcl_bamboo:bamboo_plank"] = {walkable = true, groups = {wood = 1}},
+	["mcl_farming:sweet_berry_bush_3"] = {walkable = false, groups = {plant = 1}},
+	["mcl_flowers:peony"] = {walkable = false, groups = {plant = 1}}, ["mcl_flowers:peony_top"] = {walkable = false},
+	["mcl_core:deadbush"] = {walkable = false}, ["mcl_core:reeds"] = {walkable = true},
 }
 
 -- A fake map: flat grass at y=10, a hill (top 14) at x=3..4, a shaft down to a
@@ -45,6 +52,7 @@ local function node(x, y, z)
 		if y > 14 then return "air" end
 	end
 	if x == 9 and y >= 11 and y <= 13 then return "mcl_core:cactus" end
+	if x == 11 and y >= 11 and y <= 14 then return "mcl_bamboo:bamboo" end
 	if x == 1 and y == 11 then return "mcl_flowers:tallgrass" end
 	if x == 2 and y == 11 then return "mcl_core:snow" end
 	if x == 5 then
@@ -149,6 +157,11 @@ assert(tree.base_y == 10 and tree.base_name == "mcl_core:dirt_with_grass", "base
 local cactus = lookup(9, 0)
 assert(cactus.ground_y == 13 and cactus.base_y == 10 and not cactus.base_liquid, "base skips a cactus")
 assert(pond.ground_y == 10 and pond.ground_liquid, "ground of a pond is its water")
+-- A bamboo stalk (4 high, on grass at 10): its top is the column top, but not the ground,
+-- and the grass under it is the surface (find_surface would refuse it, we do not, #224).
+local bamboo = lookup(11, 0)
+assert(bamboo.y == 14 and bamboo.base_y == 10 and bamboo.base_name == "mcl_core:dirt_with_grass", "base skips bamboo")
+assert(bamboo.surface_y == 10, "grass under bamboo is the surface: a stalk is open space above it")
 local tuft = lookup(1, 0)
 assert(tuft.y == 10 and tuft.surface_y == 10, "a plant is not solid and is open space above the surface")
 local snow = lookup(2, 0)
@@ -193,6 +206,14 @@ assert(over(16, 0).surface_y == 14 and not over(16, 0).overhang, "a gap of 3 is 
 assert(over(17, 0).overhang, "air to the bottom of the area counts")
 assert(not over(19, 0).overhang, "ordinary ground")
 assert(not over(14, 1).overhang, "the neighbouring row is ordinary ground")
+-- Growth on a slab does not hide the surface or the overhang (#209 with #224).
+put(14, 15, 15, "mcl_core:dirt"); put(14, 17, 19, "mcl_bamboo:bamboo")
+over = assert(terrain.heights({minp = vec(14, 0, 0), maxp = vec(19, 20, 1)}, surface))
+assert(over(14, 0).surface_y == 16 and over(14, 0).base_y == 16 and over(14, 0).overhang, "a slab with a stalk on it is still an overhang")
+-- A stalk on a thick ledge over a cave: the ledge is ground, not an overhang.
+put(15, 19, 20, "mcl_bamboo:bamboo")
+over = assert(terrain.heights({minp = vec(14, 0, 0), maxp = vec(19, 20, 1)}, surface))
+assert(over(15, 0).surface_y == 18 and over(15, 0).base_y == 18 and not over(15, 0).overhang, "a stalk on a ledge: the ledge is ground")
 for x = 14, 18 do put(x, 0, 20, nil) end
 
 -- fill_below does not stop over air above ground lower than 20 (#209), and a
@@ -253,6 +274,76 @@ assert(node(8, 10, 0) == "mcl_core:dirt_with_grass" and node(8, 9, 0) == "mcl_co
 terrain.set_column(3, 0, 14, 10, "mcl_core:dirt_with_grass", nil, engine)
 assert(node(3, 14, 0) == "air" and node(3, 11, 0) == "air" and node(3, 10, 0) == "mcl_core:dirt_with_grass", "hill cut")
 assert(node(3, 9, 0) == "mcl_core:stone", "ground left alone below")
+
+-- Growth (#214, #224).
+local function def(name) return registered[name] end
+assert(terrain.is_growth("mcl_bamboo:bamboo", def("mcl_bamboo:bamboo")) and terrain.is_growth("mcl_core:cactus", def("mcl_core:cactus"))
+	and terrain.is_growth("mcl_core:reeds", def("mcl_core:reeds")), "stalks are growth")
+assert(not terrain.is_growth("mcl_bamboo:bamboo_plank", def("mcl_bamboo:bamboo_plank")), "a bamboo building block is not")
+assert(not terrain.is_growth("mcl_core:tree", def("mcl_core:tree")), "and a trunk is a tree, not a stalk")
+assert(terrain.is_decor("mcl_farming:sweet_berry_bush_3", engine))
+assert(not terrain.is_decor("mcl_bamboo:bamboo", engine) and not terrain.is_decor("mcl_core:stone", engine))
+
+-- fill_below goes through a stalk to the ground it stands on (x = 30, ground at 5, stalk 6..9).
+put(30, 6, 9, "mcl_bamboo:bamboo"); put(30, 0, 5, "mcl_core:stone"); put(30, 10, 20, "air")
+terrain.fill_below(30, 0, 12, nil, engine)
+for y = 6, 11 do assert(node(30, y, 0) == "mcl_core:dirt", "stalk replaced by fill at " .. y .. ": " .. node(30, y, 0)) end
+assert(node(30, 5, 0) == "mcl_core:stone", "ground kept")
+-- set_column with a fill target above the top of the stalk (#224): no stalk under the block.
+put(30, 6, 9, "mcl_bamboo:bamboo"); put(30, 10, 20, "air")
+terrain.set_column(30, 0, 9, 12, "mcl_core:dirt_with_grass", nil, engine)
+for y = 6, 11 do assert(node(30, y, 0) == "mcl_core:dirt", "no stalk under the new surface at " .. y) end
+assert(node(30, 12, 0) == "mcl_core:dirt_with_grass")
+-- A target inside the stalk: the part over it is cleared, the part under it is filled over.
+put(30, 6, 9, "mcl_bamboo:bamboo"); put(30, 10, 20, "air")
+terrain.set_column(30, 0, 9, 7, "mcl_core:dirt_with_grass", nil, engine)
+assert(node(30, 7, 0) == "mcl_core:dirt_with_grass" and node(30, 6, 0) == "mcl_core:dirt" and node(30, 8, 0) == "air"
+	and node(30, 9, 0) == "air", "stalk cut at the surface")
+-- Lowered below the stalk's foot: all of it goes.
+put(30, 6, 9, "mcl_bamboo:bamboo"); put(30, 7, 7, "mcl_bamboo:bamboo")
+terrain.set_column(30, 0, 9, 4, "mcl_core:dirt_with_grass", nil, engine)
+for y = 5, 9 do assert(node(30, y, 0) == "air", "stalk removed from a lowered column at " .. y) end
+put(30, 0, 20, nil)
+
+-- take_decor / put_decor: a plant goes to the new surface; sand does not carry it.
+local function reset(x) put(x, 0, 5, "mcl_core:stone"); put(x, 6, 20, "air") end
+reset(31); put(31, 6, 6, "mcl_farming:sweet_berry_bush_3")
+local bush, top = terrain.take_decor(31, 0, 5, engine)
+assert(bush and bush.name == "mcl_farming:sweet_berry_bush_3" and top == nil)
+terrain.set_column(31, 0, 6, 9, "mcl_core:dirt_with_grass", nil, engine)
+terrain.put_decor(31, 0, 9, bush, top, "mcl_core:dirt_with_grass", engine)
+assert(node(31, 6, 0) == "mcl_core:dirt" and node(31, 9, 0) == "mcl_core:dirt_with_grass"
+	and node(31, 10, 0) == "mcl_farming:sweet_berry_bush_3", "bush re-seated on the raised surface")
+reset(32); put(32, 6, 6, "mcl_farming:sweet_berry_bush_3")
+bush, top = terrain.take_decor(32, 0, 5, engine)
+terrain.set_column(32, 0, 6, 9, "mcl_core:sand", "mcl_core:sandstone", engine)
+terrain.put_decor(32, 0, 9, bush, top, "mcl_core:sand", engine)
+assert(node(32, 10, 0) == "air", "a bush is not put on sand")
+reset(33); put(33, 6, 6, "mcl_core:deadbush")
+bush, top = terrain.take_decor(33, 0, 5, engine)
+terrain.put_decor(33, 0, 9, bush, top, "mcl_core:sand", engine)
+assert(node(33, 10, 0) == "mcl_core:deadbush", "a dead bush is")
+-- Both halves of a two-high plant.
+reset(34); put(34, 6, 6, "mcl_flowers:peony"); put(34, 7, 7, "mcl_flowers:peony_top")
+bush, top = terrain.take_decor(34, 0, 5, engine)
+assert(bush.name == "mcl_flowers:peony" and top.name == "mcl_flowers:peony_top")
+terrain.put_decor(34, 0, 8, bush, top, "mcl_core:dirt_with_grass", engine)
+assert(node(34, 9, 0) == "mcl_flowers:peony" and node(34, 10, 0) == "mcl_flowers:peony_top")
+-- Things that are not plants beside a plant are left alone: a torch over it, a sign.
+registered["mcl_torches:torch"] = {walkable = false}
+registered["signs:sign"] = {walkable = false}
+reset(36); put(36, 6, 6, "mcl_farming:sweet_berry_bush_3"); put(36, 8, 8, "mcl_torches:torch")
+bush, top = terrain.take_decor(36, 0, 5, engine)
+terrain.put_decor(36, 0, 6, bush, top, "mcl_core:dirt_with_grass", engine)
+assert(node(36, 8, 0) == "mcl_torches:torch" and node(36, 7, 0) == "mcl_farming:sweet_berry_bush_3", "a torch is left alone")
+reset(37); put(37, 6, 6, "signs:sign")
+assert(terrain.take_decor(37, 0, 5, engine) == nil, "a sign is not a plant")
+terrain.put_decor(37, 0, 5, nil, nil, "mcl_core:dirt_with_grass", engine)
+assert(node(37, 6, 0) == "signs:sign", "and stays")
+-- put_decor clears a stalk left standing over the surface, and a stray plant half.
+reset(35); put(35, 6, 9, "mcl_bamboo:bamboo"); put(35, 10, 10, "mcl_flowers:peony_top")
+terrain.put_decor(35, 0, 5, nil, nil, "mcl_core:dirt_with_grass", engine)
+assert(node(35, 6, 0) == "air" and node(35, 9, 0) == "air", "stalk over the surface cleared")
 
 -- Installer.
 local function new_env(missing)

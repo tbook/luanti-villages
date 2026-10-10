@@ -104,8 +104,10 @@ assert(stats.filled > 0 and map[key(1, 10, 1)] == "mcl_core:sand" and map[key(1,
 -- terraform on a fake map: flat ground at 14 and a structure block at (8,16,1).
 -- The structure and its neighbors are kept.
 local ids = {air = 1, ["mcl_core:dirt_with_grass"] = 2, struct = 3, ["mcl_core:dirt"] = 4,
-	["mcl_core:tree"] = 5, ["mcl_core:cactus"] = 6}
-local names = {"air", "mcl_core:dirt_with_grass", "struct", "mcl_core:dirt", "mcl_core:tree", "mcl_core:cactus"}
+	["mcl_core:tree"] = 5, ["mcl_core:cactus"] = 6, ["mcl_bamboo:bamboo"] = 7, ["mcl_farming:sweet_berry_bush_3"] = 8,
+	["mcl_core:water_source"] = 9, ["mcl_core:leaves"] = 10}
+local names = {"air", "mcl_core:dirt_with_grass", "struct", "mcl_core:dirt", "mcl_core:tree", "mcl_core:cactus",
+	"mcl_bamboo:bamboo", "mcl_farming:sweet_berry_bush_3", "mcl_core:water_source", "mcl_core:leaves"}
 local IGNORE = 99
 local world = {}
 local function at(x, y, z)
@@ -116,6 +118,10 @@ local function at(x, y, z)
 	-- A 5-high trunk and a 3-high cactus on the flat ground in the holes' reach.
 	if x == 26 and z == 5 and y >= 15 and y <= 19 then return "mcl_core:tree" end
 	if x == 26 and z == 9 and y >= 15 and y <= 17 then return "mcl_core:cactus" end
+	-- Bamboo stalks (15..18) and sweet berry bushes (15) on the flat ground, in the
+	-- footprints of the first pad (cut to 10) and of a third one at 20 (filled).
+	if (x == 81 and z == 1 or x == 2 and z == 3) and y >= 15 and y <= 18 then return "mcl_bamboo:bamboo" end
+	if (x == 82 and z == 2 or x == 2 and z == 2) and y == 15 then return "mcl_farming:sweet_berry_bush_3" end
 	-- Blocks under the shaft floor are not generated yet.
 	if x >= 13 and x <= 14 and z >= 0 and z <= 2 and y < -20 then return "ignore" end
 	-- A shaft in the gap beyond the smoothing, down to a floor at -8.
@@ -134,6 +140,11 @@ local fake = {
 		air = {walkable = false}, ["mcl_core:dirt_with_grass"] = {walkable = true},
 		struct = {walkable = true, is_ground_content = false, groups = {}},
 		["mcl_core:tree"] = {walkable = true, groups = {tree = 1}}, ["mcl_core:cactus"] = {walkable = true},
+		["mcl_bamboo:bamboo"] = {walkable = true, groups = {plant = 1}},
+		["mcl_farming:sweet_berry_bush_3"] = {walkable = false, groups = {plant = 1}},
+		["mcl_core:dirt"] = {walkable = true},
+		["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
+		["mcl_core:leaves"] = {walkable = true, groups = {leaves = 1}},
 	},
 	get_name_from_content_id = function(id) return names[id] or "ignore" end,
 	pos_to_string = function(p) return ("(%d,%d,%d)"):format(p.x, p.y, p.z) end,
@@ -169,14 +180,40 @@ local env = {
 -- the real ground at 14, at x=-6; a normal hill (top 18) at x=-6, z=2 is still cut.
 for y = 15, 40 do world["-6,"..y..",1"] = "air" end
 for y = 30, 31 do world["-6,"..y..",1"] = "mcl_core:dirt_with_grass" end
+for y = 15, 40 do world["-6,"..y..",4"] = "air" end
+for y = 30, 31 do world["-6,"..y..",4"] = "mcl_core:dirt_with_grass" end
+for y = 32, 34 do world["-6,"..y..",4"] = "mcl_bamboo:bamboo" end
+for y = -30, 12 do world["4," .. y .. ",5"] = "mcl_core:dirt" end
+world["4,14,5"], world["4,13,5"], world["4,15,5"] = "mcl_core:water_source", "mcl_core:water_source", "mcl_core:leaves"
 for y = 15, 17 do world["-6,"..y..",2"] = "mcl_core:dirt" end
 world["-6,18,2"] = "mcl_core:dirt_with_grass"
-assert(smoothing.terraform(plan_of({0, 0, 10, "mcl_core:dirt_with_grass"}, {40, 0, 14, "mcl_core:dirt_with_grass"}), nil, env) == true and not fell,
+assert(smoothing.terraform(plan_of({0, 0, 10, "mcl_core:dirt_with_grass"}, {40, 0, 14, "mcl_core:dirt_with_grass"}, {80, 0, 20, "mcl_core:dirt_with_grass"}), nil, env) == true and not fell,
 	"smooths without waiting")
 assert(loads > 0)
 assert(world["8,16,1"] == nil, "structure block not removed")
 assert(world["8,14,1"] == nil and world["8,15,1"] == nil, "ground beside the structure untouched")
 assert(world["1,10,1"] == "mcl_core:dirt_with_grass" and world["1,14,1"] == "air", "footprint cut to the pad")
+-- Growth on a column the smoothing moves (#214, #224). The clearing of trees is stubbed
+-- out here, so the smoothing alone must cope. A 4-high bamboo stalk on ground 14 under a
+-- pad at 20: the ground is read under the stalk, so the fill reaches 20 with no stalk left
+-- inside it or over it; a berry bush on a raised column stands on the new surface.
+for y = 15, 19 do assert(at(81, y, 1) == "mcl_core:dirt", "no stalk inside the fill at y=" .. y .. ": " .. at(81, y, 1)) end
+assert(at(81, 20, 1) == "mcl_core:dirt_with_grass" and at(81, 21, 1) == "air", "surface at the pad, nothing over it")
+assert(at(82, 20, 2) == "mcl_core:dirt_with_grass" and at(82, 21, 2) == "mcl_farming:sweet_berry_bush_3", "bush re-seated on the raised ground")
+assert(at(82, 15, 2) == "mcl_core:dirt", "the old bush spot is fill")
+-- Cut to 10: the stalk is gone above the surface and the bush stands on it.
+for y = 11, 18 do assert(at(2, y, 3) == "air", "stalk removed from the cut column at y=" .. y) end
+assert(at(2, 10, 3) == "mcl_core:dirt_with_grass")
+assert(at(2, 10, 2) == "mcl_core:dirt_with_grass" and at(2, 11, 2) == "mcl_farming:sweet_berry_bush_3", "bush moved down with the cut")
+assert(at(2, 15, 2) == "air", "no bush left at the old height")
+-- A slab with a stalk on it (x=-6, z=4: slab 30..31 over air, bamboo 32..34) is an overhang
+-- too, and a pond under leaves is water, not ground (x=4, z=5 in the yard).
+for y = 15, 40 do
+	local want = (y == 30 or y == 31) and "mcl_core:dirt_with_grass" or (y >= 32 and y <= 34) and "mcl_bamboo:bamboo" or "air"
+	assert(world["-6," .. y .. ",4"] == want, "stalk slab column changed at y=" .. y .. ": " .. tostring(world["-6," .. y .. ",4"]))
+end
+assert(world["4,14,5"] == "mcl_core:water_source" and world["4,15,5"] == "mcl_core:leaves", "pond under leaves left alone")
+for y = 0, 14 do assert(world["-6," .. y .. ",4"] == nil, "ground under the stalk slab written at y=" .. y) end
 -- The whole overhang column is as nature made it: slab at 30..31, air 15..29 and above 31,
 -- and the ground (14 and below) untouched.
 for y = 15, 40 do
