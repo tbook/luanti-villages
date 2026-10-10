@@ -350,6 +350,71 @@ for _, waypoint in ipairs(door_entity.waypoints) do
 	if waypoint.action and waypoint.action.action == "open" then opens_door = true end
 end
 assert(opens_door)
+
+-- A route that starts on the cell in front of the door keeps that cell's open
+-- action: the start waypoint is dropped as "already there", and with it the
+-- action that opens the door, so the villager walked into the closed door and
+-- stood there (#202).
+local at_door_pos = {x = 2.4, y = 0, z = 0}
+local door_actions = {}
+local at_door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return at_door_pos end,
+		set_velocity = function() end,
+		get_velocity = function() return vector.zero() end,
+		get_yaw = function() return 0 end,
+	},
+	do_pathfind_action = function(_, action) table.insert(door_actions, action) end,
+}
+assert(door_def.gopath(at_door_entity, at_door_entity._bed, nil, true))
+settle()
+local door_in_front = at_door_entity.current_target.action and at_door_entity.current_target.action.action == "open"
+assert(door_in_front, "a route starting in front of a door must still open it")
+-- The follower works that door as its step once on the cell's centre.
+local follower_def = {check_gowp = function() end}
+dofile("follower.lua").install(follower_def)
+at_door_pos = {x = 2, y = 0, z = 0}
+follower_def.check_gowp(at_door_entity, 0.1)
+assert(#door_actions == 1 and door_actions[1].action == "open" and door_actions[1].target.x == 1,
+	"the follower must open the door at the start cell")
+
+-- The same with the door cell itself as the destination.
+local to_door_actions = {}
+local to_door_pos = {x = 2.4, y = 0, z = 0}
+local to_door_entity = {
+	state = "stand",
+	object = {
+		get_pos = function() return to_door_pos end,
+		set_velocity = function() end,
+		get_velocity = function() return vector.zero() end,
+		get_yaw = function() return 0 end,
+	},
+	do_pathfind_action = function(_, action) table.insert(to_door_actions, action) end,
+}
+assert(door_def.gopath(to_door_entity, {x = 1, y = 0, z = 0}, nil, true))
+settle()
+assert(to_door_entity.current_target.action and to_door_entity.current_target.action.action == "open",
+	"a route to the door cell from the cell in front of it must open the door")
+to_door_pos = {x = 2, y = 0, z = 0}
+follower_def.check_gowp(to_door_entity, 0.1)
+assert(#to_door_actions == 1 and to_door_actions[1].action == "open")
+
+-- A villager standing in the door's own cell, with the door shut, opens it
+-- before leaving across the leaf.
+local in_door_actions = {}
+local in_door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 1, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+	do_pathfind_action = function(_, action) table.insert(in_door_actions, action) end,
+}
+assert(door_def.gopath(in_door_entity, in_door_entity._bed, nil, true))
+settle()
+assert(in_door_entity.current_target.action and in_door_entity.current_target.action.action == "open"
+	and in_door_entity.current_target.action.target.x == 1, "a route starting in the door's cell must open it")
 minetest.get_node_or_nil = door_node
 wooden_door = false
 
