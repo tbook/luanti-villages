@@ -375,6 +375,8 @@ local function join(self, pos)
 		self._villages_well = state
 	end
 	local well = state.well
+	-- The stay is over wherever the villager has got to: not another walk back.
+	if state.leave_at and now() >= state.leave_at then return finish(self) end
 	occupy(well, self._id)
 	if self.state == "gowp" then
 		hold_spot(self, state)
@@ -388,10 +390,10 @@ local function join(self, pos)
 	if about_well(pos, well, reach) then
 		if not state.arrived then
 			state.arrived, state.failures = true, nil
-			state.leave_at = now() + STAY_MIN + math.random() * (STAY_MAX - STAY_MIN)
+			-- Set once: being pushed out and walking back does not extend the stay.
+			state.leave_at = state.leave_at or now() + STAY_MIN + math.random() * (STAY_MAX - STAY_MIN)
 			release_spot(state)
 		end
-		if now() >= state.leave_at then return finish(self) end
 		-- Legs about the water, on the level of the ground: not up the steps
 		-- and onto the rim.
 		self._villages_wander_anchor = {pos = well.center, radius = GATHER_RADIUS, max_y = well.stand_y}

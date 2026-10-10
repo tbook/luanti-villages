@@ -4,6 +4,7 @@
 local core = minetest
 
 local census = {}
+local wells = dofile(core.get_modpath("lv_probe") .. "/wells.lua")
 
 local STATIONS = {
 	"mcl_composters:composter", "mcl_barrels:barrel_closed", "mcl_fletching_table:fletching_table",
@@ -52,10 +53,13 @@ function census.run(area, emit, done)
 	local center = {x = (minp.x + maxp.x) / 2, y = (minp.y + maxp.y) / 2, z = (minp.z + maxp.z) / 2}
 	local radius = math.max(maxp.x - minp.x, maxp.z - minp.z, maxp.y - minp.y)
 	load_cells()
+	-- lv_probe_census_putter (#11): hold the morning Putter stage this many seconds, then work time.
+	local putter = tonumber(core.settings:get("lv_probe_census_putter")) or 0
+	local finish_watch = putter > 0 and wells.available() and wells.watch(minp, maxp) or nil
 	local waited = 0
 	local timeline, last = {}, {}
 	local function tick()
-		core.set_timeofday(0.33)
+		core.set_timeofday(waited < putter and 0.24 or 0.33)
 		waited = waited + 10
 		-- What each villager held at each step, so a change shows when it happened.
 		for _, object in ipairs(core.get_objects_inside_radius(center, radius)) do
@@ -106,7 +110,8 @@ function census.run(area, emit, done)
 				claimant = claim ~= "" and by_id[claim] and by_id[claim].profession or nil,
 			}
 		end
-		emit({type = "census", seconds = seconds, villagers = villagers, stations = stations, timeline = timeline})
+		emit({type = "census", seconds = seconds, villagers = villagers, stations = stations, timeline = timeline,
+			wells = finish_watch and finish_watch() or nil})
 		done()
 	end
 	core.after(10, tick)

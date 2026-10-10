@@ -404,10 +404,21 @@ pushed.pos.x, pushed.pos.z = gopaths[1].target.x, gopaths[1].target.z
 pushed.state = "stand"
 tick(pushed)
 assert(pushed._villages_wander_anchor)
+local due = pushed._villages_well.leave_at
 pushed.pos.x = site.center.x + well.GATHER_RADIUS + 5
 local walks = #gopaths
 tick(pushed)
 assert(#gopaths == walks + 1 and pushed._villages_wander_anchor == nil, "a straying villager walks back")
+pushed.pos.x, pushed.pos.z = gopaths[#gopaths].target.x, gopaths[#gopaths].target.z
+pushed.state = "stand"
+now = now + 1
+tick(pushed)
+assert(pushed._villages_well.leave_at == due, "walking back does not extend the stay")
+-- Pushed out with its time up, it goes rather than walking back.
+pushed.pos.x = site.center.x + well.GATHER_RADIUS + 5
+now = due + 1
+tick(pushed)
+assert(pushed._villages_well == nil, "a villager out of reach whose stay is over just leaves")
 
 -- The well removed while it is attended: the visit is dropped.
 setup()

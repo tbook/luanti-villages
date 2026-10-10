@@ -81,6 +81,18 @@ claimant's profession), `approach` and `standable`: counts of the cardinal appro
 a villager's profession or jobsite: `t`, `id` (first 6 characters), `what`, `pos`, `bed`). The census
 steps every 10 s, so `t` is a multiple of 10.
 
+## Well watch (#11)
+
+```sh
+LV_PROBE_CENSUS=300 LV_PROBE_CENSUS_PUTTER=240 tools/lv_probe/run.sh 2001 --chunk -112,-992 --with-mod
+```
+
+`LV_PROBE_CENSUS_PUTTER=SECONDS` (with a census) holds the morning Putter stage for the first SECONDS of the
+census, then work time, and adds `wells` to the census line (`wells.lua`): the wells `well.lua` found, villagers
+that set off for one (`villagers_bound`), arrived and left, `stays` (seconds from first arrival to leaving),
+`max_arrived` and `max_near` (most at a well at once), and `rim` (samples of villagers seen above the ground level
+within 3.4 nodes of a well's water: on its steps; the walls are closer than 2.2).
+
 ## Plant census (#214, #224)
 
 Every result has `natural.plants` and `after.plants` (`plants.lua`): counts over the village area of
