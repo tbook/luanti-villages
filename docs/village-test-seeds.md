@@ -117,16 +117,29 @@ The smoothing log line reports `N walls of 6+, tallest M`: adjacent target heigh
 and before the hole filling, that differ by 6 or more with a footprint or yard column on at least one
 side (`config.wall`). Probe runs with `--with-mod`, walls (tallest):
 
-| Case | Seed | Walls |
-|------|------|-------|
-| tower | 2002 | 6 (11) |
-| snow-steep | 2006 | 2 (6) |
-| mountain-edge | 2007 | 4 (20) |
-| hillside | 2014 | 35 (21) |
-| cliff | 2026 | 4 (42) |
+| Case | Seed | Walls before (#236) | Walls after (#235) |
+|------|------|---------------------|--------------------|
+| tower | 2002 | 6 (11) | 0 (0) |
+| snow-steep | 2006 | 2 (6) | 1 (6) |
+| mountain-edge | 2007 | 4 (20) | 4 (20) |
+| hillside | 2014 | 35 (21) | 14 (17) |
+| cliff | 2026 | 4 (42) | 4 (42) |
+| Testlandia | 18442661806533097198 | 16 (17) | 2 (7) |
 
-Only 6 of the 2014 walls are cap-limited yards; the rest are natural cliffs between two pads or the
-sweep of #235. The probe's `Step` column is not a measure of these (#219).
+What is left after #235 is cap-limited yards and natural cliffs between two pads (2026: yards at 52
+and 10, 2007: 13 and -7); no skirt column is left off a yard it could have matched. Steps over 1 block
+in the targets (`violations` in the log line), before and after:
+
+| Case | Seed | Steps before | Steps after | Cut / filled before | Cut / filled after |
+|------|------|--------------|-------------|---------------------|--------------------|
+| tower | 2002 | 370 | 322 | 1753 / 1729 | 1597 / 1870 |
+| snow-steep | 2006 | 95 | 95 | 891 / 2293 | 1030 / 2202 |
+| mountain-edge | 2007 | 101 | 100 | 888 / 1945 | 966 / 1912 |
+| hillside | 2014 | 546 | 567 | 1850 / 3225 | 1927 / 3367 |
+| cliff | 2026 | 422 | 338 | 899 / 3068 | 1016 / 3898 |
+| Testlandia | 18442661806533097198 | 334 | 356 | 1162 / 2637 | 1222 / 2786 |
+
+The probe's `Step` column is not a measure of these (#219).
 
 ### Village yield
 
