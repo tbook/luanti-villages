@@ -573,6 +573,12 @@ if not dofile(core.get_modpath("living_villages") .. "/ground_layer.lua").instal
 	core.log("warning", "[living_villages] ground layer not installed: settlements.place_schematics "
 		.. "or settlements.schematic_table is missing; sand villages keep dirt under buildings")
 end
+-- Outside ground_layer: each swaps its own variant in per building and restores what it
+-- found, so the two compose whichever wraps the other.
+if not dofile(core.get_modpath("living_villages") .. "/loomless_house.lua").install(rawget(_G, "settlements")) then
+	core.log("warning", "[living_villages] loomless houses not installed: settlements.place_schematics "
+		.. "or settlements.schematic_table is missing; every small house keeps its loom")
+end
 dofile(core.get_modpath("living_villages") .. "/village_index.lua")
 
 -- After church_site.lua: the planner reserves the church itself and replaces its wrapper.
