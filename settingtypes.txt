@@ -50,3 +50,7 @@ living_villages_child_grow_days (Child growth time, game days) float 12 0.1 100
 # the house's position and the world seed. 0 builds every house as stock, 1
 # builds none with a loom. Existing villages are unchanged.
 living_villages_loomless_house_chance (Share of small houses without a loom) float 0.5 0 1
+
+# On the morning stage some idle villagers walk to the village well and stand
+# about it for a while (#11). Atmosphere only.
+living_villages_well_hangout (Villagers gather at the well) bool true

@@ -289,4 +289,23 @@ for _ = 1, 20 do
 	assert(leg and leg.target.x <= 8 + 1e-9, "a villager outside the radius is not led farther out")
 end
 
+-- An anchor's max_y keeps legs off a step up (the well's rim, #11): without it
+-- some legs climb the block, with it none does.
+local function climbs(max_y)
+	local climbed = false
+	math.randomseed(9)
+	for _ = 1, 60 do
+		reset()
+		fill(2, 0, -10, 3, 0, 10, "mcl_core:stone")
+		local anchored = villager(0, 0, math.random() * 6.28)
+		anchored._villages_wander_anchor = {pos = {x = 0, y = 0, z = 0}, radius = 6, max_y = max_y}
+		step(anchored)
+		local leg = anchored._villages_wander
+		if leg and leg.target.y > 0 then climbed = true end
+	end
+	return climbed
+end
+assert(climbs(nil), "legs climb a step with no height limit")
+assert(not climbs(0), "an anchor's max_y keeps legs on the level")
+
 print("wander tests passed")

@@ -36,6 +36,7 @@ their jobsite lose it, so vanilla demotes them.
 | `pulpit.lua` | The `living_villages:pulpit` node, a lectern clone that is no profession's jobsite |
 | `church.lua` | The holiday church service: villagers take pews or stand at the back, and the cleric stands at the pulpit |
 | `bell.lua` | The holiday bell gathering: villagers walk to the village bell and drift about it in anchored `wander.lua` legs |
+| `well.lua` | Morning at the well (#11): finds wells by shape (a walled 2x2 of `mcl_core:water_source` on a plinth, standing cells on the level below; one cached scan per 16-node grid cell, not per tick), and in the Putter stage lets some idle adults walk there (cap 3 at once, one roll per day, `living_villages_well_hangout`) and drift about it in anchored `wander.lua` legs (`max_y` keeps them off the rim) for 25-50 s. Gives a well up after a failed walk like the church |
 | `church_site.lua` | Makes the church the first building a new village places, so most villages have one |
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `belltower_schematic.lua` | Raises newly generated belltowers one block (#150): stock bottom layer is open air round four posts, so the tower digs a pit and the bell looks sunk. Adds a floor layer under the stock one, by editing the stock schematic in memory |

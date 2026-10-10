@@ -10,7 +10,9 @@
 -- A villager with an anchor, {pos = ..., radius = ...} in _villages_wander_anchor
 -- (the bell gathering, #127), keeps its legs within that many nodes of pos: a
 -- leg stops where the next step would take it farther out. One already outside
--- the radius is not held to it and its legs lead back in.
+-- the radius is not held to it and its legs lead back in. An anchor with max_y
+-- also keeps the legs from climbing above that level (the well's rim, #11); a
+-- villager already higher is not held to it.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 
@@ -65,6 +67,7 @@ local function clear_run(start, yaw, max_length, anchor)
 			if not (common.has_floor(down) and common.is_clear_node(down)) then break end
 			if common.is_body_clear(down) then here = down end
 		end
+		if anchor and anchor.max_y and here.y > math.max(anchor.max_y, start.y) then break end
 		previous = here
 		if common.is_standing_space(here) then reached, target = distance, here end
 	end

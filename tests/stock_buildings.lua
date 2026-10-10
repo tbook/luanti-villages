@@ -280,6 +280,47 @@ local function test_building(name, rotation, doors_open, roads, slope)
 		end
 	end
 
+	-- The stock well's gathering places (#11): the ground-level cells beside the well
+	-- that well.lua has villagers stand at, from every side. The well must also be
+	-- found as a well by shape, whatever the rotation.
+	if name == "well" then
+		local corner
+		for x = ORIGIN, ORIGIN + size.x - 1 do
+			for y = 1, size.y - 1 do
+				for z = ORIGIN, ORIGIN + size.z - 1 do
+					local pos = {x = x, y = y, z = z}
+					if world.get(pos).name == "mcl_core:water_source"
+						and (not corner or x < corner.x or (x == corner.x and z < corner.z)) then
+						corner = pos
+					end
+				end
+			end
+		end
+		local found = corner and dofile("well.lua").examine(corner)
+		if not found then
+			table.insert(unexpected, prefix .. ": the well is not recognized as a well")
+		else
+			for cx = ORIGIN - 6, ORIGIN + size.x + 5 do
+				for cz = ORIGIN - 6, ORIGIN + size.z + 5 do
+					local cell = {x = cx, y = found.stand_y, z = cz}
+					local distance = math.sqrt((cx - found.center.x) ^ 2 + (cz - found.center.z) ^ 2)
+					if distance >= 2.5 and distance <= 4.5 and common.is_standing_space(cell) then
+						for _, direction in ipairs(DIRECTIONS) do
+							local id = ("%s well place %s from %s"):format(prefix, cell_string(cell), direction)
+							local cells, reason = route(world, def, outdoors(direction), cell, nil,
+								"_villages_goto_route", HOME)
+							if cells then
+								record(id, check_route(world, cells, cell))
+							else
+								record(id, false, reason)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	-- From a chair. A villager sitting in one is at the chair's node, half a
 	-- node up (#156), so its feet are not over a floor cell and the planner has
 	-- to find its own way down.
