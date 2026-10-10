@@ -119,7 +119,7 @@ end
 -- Seeds for the bounds (sign 1: lower, -1: upper) or the smoothing: each free
 -- column's own value (`own[i]`, at 0 steps) and each reachable fixed neighbor's
 -- (at 1 step). Own values go first so a bucket stays sorted by steps.
-local function seeds_of(sign, own, fixed, low, high, free, width, n)
+local function seeds_of(sign, own, fixed, hard, low, high, free, width, n)
 	local seeds, floor_v = {}, math.huge
 	local function add(i, v, d)
 		seeds[#seeds + 1], seeds[#seeds + 2], seeds[#seeds + 3] = i, v, d
@@ -141,13 +141,13 @@ local function seeds_of(sign, own, fixed, low, high, free, width, n)
 			local lo, hi = low[i] - 1, high[i] + 1
 			local g
 			g = col > 0 and fixed[i - 1]
-			if g and g >= lo and g <= hi then add(i, sign * g - 1, 1) end
+			if g and (hard[i - 1] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
 			g = col < width - 1 and fixed[i + 1]
-			if g and g >= lo and g <= hi then add(i, sign * g - 1, 1) end
+			if g and (hard[i + 1] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
 			g = fixed[i - width]
-			if g and g >= lo and g <= hi then add(i, sign * g - 1, 1) end
+			if g and (hard[i - width] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
 			g = fixed[i + width]
-			if g and g >= lo and g <= hi then add(i, sign * g - 1, 1) end
+			if g and (hard[i + width] or g >= lo and g <= hi) then add(i, sign * g - 1, 1) end
 		end
 	end
 	return seeds, floor_v
@@ -162,9 +162,10 @@ end
 --   1. Bounds. A fixed column of height g, d steps away through free columns,
 --      allows [g - d, g + d]. Two bucket-queue passes (Dijkstra with unit steps,
 --      `spread`) give each free column the highest lower and lowest upper bound
---      over all fixed columns, cut down by its own cap range. A fixed neighbor
---      the cap range cannot come within one block of is no source: it would only
---      drag the column to the cap.
+--      over all fixed columns, cut down by its own cap range. A neighbor of the
+--      untouched ground that the cap range cannot come within one block of is no
+--      source (a pit beside the skirt would only drag it to the cap); a pad's
+--      column always is, and pulls as far as the cap lets it.
 --   2. Conflicts. Where the bounds cross, the sources cannot all be met (a yard
 --      and a cliff past the cap, two pads at odds). The nearest ones win: the
 --      column takes the bounds from the fixed columns within 16, 8, 4, 2, 1
@@ -177,7 +178,7 @@ end
 --      which takes off mounds and fills dips, whatever order the neighbors come
 --      in. The mean stays in the bounds.
 
-local function limit_slope(goal, low, high, free, width, depth)
+local function limit_slope(goal, low, high, free, hard, width, depth)
 	local n = width * depth
 	local fixed, open = {}, {}
 	for i = 1, n do
@@ -188,9 +189,9 @@ local function limit_slope(goal, low, high, free, width, depth)
 	-- Each free column's cap range cut down by the fixed columns within `maxd`
 	-- steps, and the steps to whatever set each end (0 for its own cap).
 	local function bounds(maxd)
-		local seeds, floor_v = seeds_of(1, nil, fixed, low, high, open, width, n)
+		local seeds, floor_v = seeds_of(1, nil, fixed, hard, low, high, open, width, n)
 		local fl, fl_d = spread(seeds, floor_v, open, width, n, maxd)
-		seeds, floor_v = seeds_of(-1, nil, fixed, low, high, open, width, n)
+		seeds, floor_v = seeds_of(-1, nil, fixed, hard, low, high, open, width, n)
 		local fu, fu_d = spread(seeds, floor_v, open, width, n, maxd)
 		local lower, upper, lower_d, upper_d = {}, {}, {}, {}
 		for i = 1, n do
@@ -236,9 +237,9 @@ local function limit_slope(goal, low, high, free, width, depth)
 	for i = 1, n do
 		if open[i] then hold[i] = clamp(goal[i], lower[i], upper[i]) end
 	end
-	local seeds, floor_v = seeds_of(-1, hold, fixed, low, high, open, width, n)
+	local seeds, floor_v = seeds_of(-1, hold, fixed, hard, low, high, open, width, n)
 	local under = spread(seeds, floor_v, open, width, n)
-	seeds, floor_v = seeds_of(1, hold, fixed, low, high, open, width, n)
+	seeds, floor_v = seeds_of(1, hold, fixed, hard, low, high, open, width, n)
 	local over = spread(seeds, floor_v, open, width, n)
 	for i = 1, n do
 		if open[i] then
@@ -329,7 +330,9 @@ function M.targets(pads, height_at, config)
 	-- Limit the slope: a free column moves toward each neighbor until it is within
 	-- one block of it, never past the cap. The pads and the untouched ground
 	-- around them hold still, so the slope bends only in the skirt.
-	limit_slope(goal, low, high, free, width, bz1 - bz0 + 1)
+	local hard = {}
+	for i, k in pairs(kind) do hard[i] = k ~= "skirt" end
+	limit_slope(goal, low, high, free, hard, width, bz1 - bz0 + 1)
 
 	for z = bz0, bz1 do
 		for x = bx0, bx1 do
