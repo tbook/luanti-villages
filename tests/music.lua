@@ -3,6 +3,7 @@ local time = 15600 / 24000
 local now, day, holiday = 0, 4, true
 local disc, played, stopped = nil, {}, {}
 local players = {}
+local logs = {}
 local node = "mcl_jukebox:jukebox"
 
 minetest = {
@@ -34,6 +35,7 @@ minetest = {
 		for k, v in pairs(changes) do minetest.registered_nodes[name][k] = v end
 	end,
 	sound_stop = function(handle) table.insert(stopped, handle) end,
+	log = function(level, msg) table.insert(logs, msg) end,
 	get_connected_players = function()
 		local list = {}
 		for name, pos in pairs(players) do
@@ -154,19 +156,55 @@ minetest.registered_nodes["mcl_jukebox:jukebox"].on_rightclick(jukebox, nil, nil
 tick(); tick()
 check(#played == 0 and not music.is_playing(jukebox), "no second copy of a player's disc")
 
--- Digging the jukebox ends the music with no keeper about.
+-- An unloaded block is unknown, not gone: keep playing, no second start.
 day = 18
 disc = nil
+players.ann = {x = 5, y = 2, z = 3}
+tick()
+check(music.is_playing(jukebox) and #played == 1, "plays the next holiday")
+node = nil
+tick(); tick_alone()
+check(#stopped == 0 and music.is_playing(jukebox), "unloaded block keeps the music")
+node = "mcl_jukebox:jukebox"
+tick(); tick_alone()
+check(#played == 1 and #stopped == 0, "loaded again: same handle, no second start")
+players.bob = {x = 3, y = 2, z = 3}
+tick()
+check(#played == 2 and played[2].spec.to_player == "bob", "a newcomer still gets it after the gap")
+
+-- A player puts a disc in while the keeper's default track plays.
+minetest.registered_nodes["mcl_jukebox:jukebox"].on_rightclick(jukebox, nil, nil, "mcl_jukebox:record_far")
+tick(); tick_alone()
+check(#stopped == 2 and not music.is_playing(jukebox), "keeper's sounds stop for the player's disc")
+tick(); tick()
+check(#played == 2 and not music.is_playing(jukebox), "no double playback")
+players.bob = nil
+
+-- Digging the jukebox ends the music with no keeper about.
+day = 19
+disc = nil
+played, stopped = {}, {}
 tick()
 check(music.is_playing(jukebox) and #played == 1, "plays the next holiday")
 node = "air"
 tick_alone()
 check(#stopped == 1 and not music.is_playing(jukebox), "stops when the jukebox is gone")
 node = "mcl_jukebox:jukebox"
-day = 19
 tick()
-check(#played == 2, "plays again once restored")
+check(#played == 1, "not restarted the same day")
+day = 20
+tick()
+check(#played == 2 and music.is_playing(jukebox), "plays again on the next holiday")
 time = 17600 / 24000
 tick_alone()
 check(#stopped == 2, "stops at close")
+
+-- No records at all: one warning, no music.
+time = 15600 / 24000
+day = 21
+local saved = mcl_jukebox.registered_records
+mcl_jukebox.registered_records = {}
+tick(); day = 22; tick()
+check(#logs == 1 and logs[1]:find("%[living_villages%]") and not music.is_playing(jukebox), "one warning")
+mcl_jukebox.registered_records = saved
 print("music tests passed")

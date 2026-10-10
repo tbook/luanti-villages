@@ -46,11 +46,19 @@ local function disc_sound(pos)
 end
 
 -- The day's record when the jukebox holds none, or nil if there are no records.
+-- The rotation shifts when discs are added. A restart forgets the day state
+-- below, so a disc a player put in earlier may overlap the keeper's copy.
+local warned_records = false
 local function default_sound()
-	if not (mcl_jukebox and mcl_jukebox.registered_records) then return end
 	local names = {}
-	for name in pairs(mcl_jukebox.registered_records) do names[#names + 1] = name end
-	if #names == 0 then return end
+	for name in pairs(mcl_jukebox and mcl_jukebox.registered_records or {}) do names[#names + 1] = name end
+	if #names == 0 then
+		if not warned_records then
+			warned_records = true
+			core.log("warning", "[living_villages] mcl_jukebox.registered_records is missing or empty; no tavern music")
+		end
+		return
+	end
 	table.sort(names)
 	return mcl_jukebox.registered_records[names[core.get_day_count() % #names + 1]][5]
 end
@@ -102,11 +110,11 @@ local function check_playing()
 		local node = core.get_node_or_nil(current.pos)
 		local _, record
 		if node and node.name == JUKEBOX then _, record = disc_sound(current.pos) end
-		if not in_window() or not node or node.name ~= JUKEBOX or record ~= current.record then
+		if not in_window() or (node and (node.name ~= JUKEBOX or record ~= current.record)) then
 			stop(current.pos)
-		else
+		elseif node then
 			sync_listeners(current)
-		end
+		end -- else the block is unloaded: unknown, keep state
 	end
 end
 
