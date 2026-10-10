@@ -5,9 +5,10 @@ minetest = {get_modpath = function() return "." end}
 local names = {"air", "mcl_core:stone", "mcl_core:tree", "mcl_core:leaves", "mcl_core:water_source",
 	"mcl_flowers:tallgrass", "mcl_core:bedrock", "mcl_core:cobble", "mcl_nether:obsidian_x",
 	"mcl_portals:portal_frame", "mcl_chests:chest", "mcl_core:dirt", "mcl_core:vine_x", "mcl_fences:fence", "mcl_core:snow", "mcl_core:snow_3", "mcl_core:snowblock",
-	"mcl_bamboo:bamboo", "mcl_core:cactus", "mcl_core:vine", "mcl_bamboo:bamboo_plank", "mcl_flowers:double_fern_top", "mcl_flowers:double_fern"}
+	"mcl_bamboo:bamboo", "mcl_core:cactus", "mcl_core:vine", "mcl_bamboo:bamboo_plank", "mcl_flowers:double_fern_top", "mcl_flowers:double_fern", "mcl_cocoas:cocoa_3", "ignore"}
 local ids = {}
 for i, n in ipairs(names) do ids[n] = i end
+names[99] = "ignore"; ids.ignore = 99
 local registered = {
 	["air"] = {},
 	["mcl_core:stone"] = {is_ground_content = true},
@@ -28,6 +29,7 @@ local registered = {
 	["mcl_core:cactus"] = {walkable = true}, ["mcl_core:vine"] = {walkable = false},
 	["mcl_flowers:double_fern_top"] = {walkable = false, groups = {plant = 1, double_plant = 2}},
 	["mcl_flowers:double_fern"] = {walkable = false, groups = {plant = 1, double_plant = 1}},
+	["mcl_cocoas:cocoa_3"] = {walkable = true, groups = {cocoa = 3, attached_node_facedir = 1}},
 }
 
 VoxelArea = {new = function(_, e)
@@ -94,6 +96,7 @@ end
 -- A tree: a trunk at (x, z) from y=1 to 5, leaves around y=5..6 within 2.
 local function tree(x, z, height)
 	height = height or 5
+	put(x, 0, z, "mcl_core:stone") -- the ground the trunk stands on
 	for y = 1, height do put(x, y, z, "mcl_core:tree") end
 	for dx = -2, 2 do for dz = -2, 2 do
 		for y = height, height + 1 do
@@ -230,7 +233,7 @@ assert(stats.clipped >= 1 and stats.removed <= fragments.config.cap_nodes, "defa
 
 -- A tree that strays past the sideways limit is clipped to the zone.
 map = {}
-for i = 0, 20 do put(i, 3, 0, "mcl_core:tree") end -- one trunk line 20 long
+for i = 0, 20 do put(i, 3, 0, "mcl_core:tree"); put(i, 2, 0, "mcl_core:stone") end -- one trunk line 20 long
 stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
 assert(stats.clipped == 1 and at(0, 3, 0) == nil and at(1, 3, 0) == nil
 	and at(2, 3, 0) == "mcl_core:tree" and at(20, 3, 0) == "mcl_core:tree", "only the zone part of a runaway tree goes")
@@ -317,5 +320,142 @@ put(10, 1, 10, "mcl_flowers:double_fern"); put(10, 2, 10, "mcl_flowers:double_fe
 stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
 assert(stats.plant_tops == 2, "two floating tops removed, got " .. stats.plant_tops)
 assert(at(0, 7, 0) == nil and at(-2, 7, 0) == nil and at(10, 2, 10) == "mcl_flowers:double_fern_top", "the whole fern stays")
+
+-- Floating remains of trees (#232). A tall tree is a capped fill, which clips to the zone and
+-- leaves the part above it standing in the air: trunk with no ground, canopy with no trunk.
+local function tall(x, z, height, size)
+	size = size or 1
+	for dx = 0, size - 1 do for dz = 0, size - 1 do
+		put(x + dx, 0, z + dz, "mcl_core:stone")
+		for y = 1, height do put(x + dx, y, z + dz, "mcl_core:tree") end
+	end end
+	for dx = -3, size + 2 do for dz = -3, size + 2 do
+		for y = height, height + 1 do
+			if not at(x + dx, y, z + dz) then put(x + dx, y, z + dz, "mcl_core:leaves") end
+		end
+	end end
+end
+local tight = {cap_nodes = 60, cap_radius = 10, cap_height = 40, orphan_margin = 12, leaf_reach = 6}
+
+map = {}
+tall(0, 0, 30)
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(stats.clipped == 1, "the tall tree hit the cap")
+assert(count("mcl_core:tree") == 0 and count("mcl_core:leaves") == 0,
+	"the trunk above the zone and its canopy go, left " .. count("mcl_core:tree") .. " trunk and " .. count("mcl_core:leaves") .. " leaves")
+assert(stats.floating > 0 and stats.orphans > 0, "counted as floating trunk and orphaned leaves")
+assert(at(0, 0, 0) == "mcl_core:stone", "the ground stays")
+
+-- A giant jungle tree: a 2x2 trunk.
+map = {}
+tall(0, 0, 30, 2)
+stats = fragments.clear_trees({box(-1, 0, -1, 2, 10, 2)}, tight, engine())
+assert(count("mcl_core:tree") == 0 and count("mcl_core:leaves") == 0, "a 2x2 trunk goes too")
+
+-- A canopy with no trunk at all (nothing connects it to the zone) goes within the margin
+-- and stays beyond it; the same canopy over a standing trunk stays.
+map = {}
+for dx = 0, 4 do for dz = 0, 4 do put(9 + dx, 20, dz, "mcl_core:leaves") end end -- up to 12 beyond the zone edge
+put(14, 20, 0, "mcl_core:leaves") -- 13 beyond it
+for dx = 0, 4 do for dz = 0, 4 do put(40 + dx, 20, dz, "mcl_core:leaves") end end -- far beyond
+tall(-9, 0, 20) -- standing tree 8 beyond the zone, trunk reaching its canopy
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(9, 20, 0) == nil and at(13, 20, 4) == nil and stats.orphans == 25 and at(14, 20, 0) == "mcl_core:leaves", "the canopy in the margin goes, got " .. stats.orphans)
+assert(at(40, 20, 0) == "mcl_core:leaves", "an orphaned canopy beyond the margin is not touched")
+assert(at(-9, 20, 0) == "mcl_core:tree" and at(-9, 21, 0) == "mcl_core:leaves", "a tree with its trunk stays")
+
+-- Leaves held by a trunk piece 6 away stay, 7 away go.
+map = {}
+put(8, 0, 0, "mcl_core:stone"); for y = 1, 20 do put(8, y, 0, "mcl_core:tree") end
+put(2, 14, 0, "mcl_core:leaves") -- 6 away from the trunk
+put(1, 14, 0, "mcl_core:leaves") -- 7 away
+put(1, 14, 0, "mcl_core:leaves")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(2, 14, 0) == "mcl_core:leaves" and at(1, 14, 0) == nil, "the decay distance is 6")
+
+-- A trunk standing on the ground in the margin is not floating, whatever is cut next to it.
+map = {}
+tree(6, 0)
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 5 and stats.floating == 0 and stats.orphans == 0, "a natural tree beside the zone is untouched")
+
+-- Cocoa pods: on a removed trunk they go; on a standing trunk they stay.
+map = {}
+param2 = {}
+tree(0, 0)
+put(0, 3, 1, "mcl_cocoas:cocoa_3"); param2["0,3,1"] = 2 -- faces -z: on the trunk at (0, 3, 0)
+tree(8, 0)
+put(8, 3, 1, "mcl_cocoas:cocoa_3"); param2["8,3,1"] = 2
+put(9, 3, 3, "mcl_cocoas:cocoa_3"); param2["9,3,3"] = 0 -- loose pod: faces +z onto air
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(0, 3, 1) == nil and at(9, 3, 3) == nil and stats.cocoa == 2, "pods without a trunk go, got " .. stats.cocoa)
+assert(at(8, 3, 1) == "mcl_cocoas:cocoa_3", "a pod on a standing trunk stays")
+param2 = {}
+
+-- A vine hanging from an orphaned leaf goes with it; one on a standing stone stays.
+map = {}
+param2 = {}
+for dx = 0, 2 do put(dx + 4, 20, 0, "mcl_core:leaves") end
+for y = 17, 19 do put(5, y, 0, "mcl_core:vine") end -- param2 0: support above
+put(4, 10, 0, "mcl_core:vine"); param2["4,10,0"] = 2; put(5, 10, 0, "mcl_core:stone")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:leaves") == 0 and count("mcl_core:vine") == 1 and at(4, 10, 0) == "mcl_core:vine",
+	"the hanging vines go with the leaves, the vine on stone stays")
+param2 = {}
+
+-- A vine that was never supported (mapgen leaves some) goes within the margin, with the one
+-- hanging under it; beyond the margin and on a standing stone it stays.
+map = {}
+param2 = {}
+put(5, 8, 0, "mcl_core:vine"); put(5, 7, 0, "mcl_core:vine") -- p2 0, air above
+put(6, 3, 0, "mcl_core:vine"); param2["6,3,0"] = 2; put(7, 3, 0, "mcl_core:stone")
+put(40, 8, 0, "mcl_core:vine")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(5, 8, 0) == nil and at(5, 7, 0) == nil and stats.vines == 2, "unsupported vines go, got " .. stats.vines)
+assert(at(6, 3, 0) == "mcl_core:vine" and at(40, 8, 0) == "mcl_core:vine", "supported and distant vines stay")
+param2 = {}
+
+-- Structures and unloaded nodes (#232). A log beam over air is a floating trunk piece, but
+-- one that touches a structure node (cobble here) belongs to the structure and stays.
+map = {}
+for x = 5, 9 do put(x, 6, 0, "mcl_core:tree") end -- a beam in the margin, nothing under it
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 0 and stats.floating == 5, "a log beam in the air is floating")
+map = {}
+for x = 5, 9 do put(x, 6, 0, "mcl_core:tree") end
+put(5, 6, 1, "mcl_core:cobble") -- a post of the structure beside one end
+put(5, 5, 1, "mcl_core:cobble")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 5 and stats.floating == 0, "a beam that touches a structure stays")
+-- Leaves beside a structure stay too.
+map = {}
+put(6, 12, 0, "mcl_core:leaves"); put(7, 12, 0, "mcl_core:cobble")
+put(5, 12, 5, "mcl_core:leaves")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(6, 12, 0) == "mcl_core:leaves" and at(5, 12, 5) == nil, "orphan leaves touching a structure stay, others go")
+
+-- A node that was not loaded: leaves within its reach may be held by a trunk there.
+map = {}
+put(5, 12, 0, "mcl_core:leaves")
+put(11, 18, 6, "ignore") -- a corner of the leaf's reach
+put(9, 12, 0, "mcl_core:leaves")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(5, 12, 0) == "mcl_core:leaves", "leaves next to unloaded nodes are kept")
+assert(at(9, 12, 0) == nil, "leaves with all their reach loaded go")
+-- A trunk piece beside an unloaded node is held.
+map = {}
+for y = 6, 8 do put(6, y, 0, "mcl_core:tree") end
+put(7, 7, 0, "ignore")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(count("mcl_core:tree") == 3 and stats.floating == 0, "a piece next to an unloaded node is held")
+
+-- A vine with param2 6 or 7 has no direction; VoxeLibre drops it.
+map = {}
+param2 = {}
+put(4, 5, 0, "mcl_core:vine"); param2["4,5,0"] = 6
+put(5, 5, 0, "mcl_core:vine"); param2["5,5,0"] = 7; put(5, 6, 0, "mcl_core:stone")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
+assert(at(4, 5, 0) == nil and at(5, 5, 0) == nil, "vines with param2 6 and 7 go")
+param2 = {}
 
 print("village_fragments: ok")
