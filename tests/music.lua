@@ -2,6 +2,7 @@
 local time = 15600 / 24000
 local now, day, holiday = 0, 4, true
 local disc, played, stopped = nil, {}, {}
+local players = {}
 local node = "mcl_jukebox:jukebox"
 
 minetest = {
@@ -33,7 +34,17 @@ minetest = {
 		for k, v in pairs(changes) do minetest.registered_nodes[name][k] = v end
 	end,
 	sound_stop = function(handle) table.insert(stopped, handle) end,
+	get_connected_players = function()
+		local list = {}
+		for name, pos in pairs(players) do
+			list[#list + 1] = {get_player_name = function() return name end, get_pos = function() return pos end}
+		end
+		return list
+	end,
 }
+vector = {distance = function(a, b)
+	return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2)
+end}
 mcl_jukebox = {registered_records = {
 	["mcl_jukebox:record_13"] = {"Evil", "Sound", "13", "img", "mcl_jukebox_track_1"},
 	["mcl_jukebox:record_far"] = {"Far", "Jordach", "far", "img", "mcl_jukebox_track_4"},
@@ -64,13 +75,48 @@ local function tick_alone()
 	music.check()
 end
 
+-- No disc: the day's default record starts, but nothing is played with nobody near.
 tick()
-check(#played == 0 and not music.is_playing(jukebox), "no disc, no music")
+check(music.is_playing(jukebox) and #played == 0, "empty jukebox starts, nobody near, no sound")
+players.far = {x = 100, y = 2, z = 3}
+tick()
+check(#played == 0, "a distant player hears nothing")
+-- A player who walks in later gets the track, once.
+players.ann = {x = 5, y = 2, z = 3}
+tick(); tick()
+check(#played == 1 and played[1].name == "mcl_jukebox_track_1", "default record (day 4 of 2) plays")
+check(played[1].spec.to_player == "ann" and played[1].spec.pos.x == 1, "positional, to the one player")
+check(played[1].spec.max_hear_distance == 24, "hear distance")
+players.bob = {x = 1, y = 2, z = 20}
+tick()
+check(#played == 2 and played[2].spec.to_player == "bob", "second player gets their own")
+-- Going just out of range keeps the handle; going well out stops it and re-entry restarts.
+players.ann = {x = 28, y = 2, z = 3}
+tick()
+check(#stopped == 0 and #played == 2, "margin keeps the handle")
+players.ann = {x = 40, y = 2, z = 3}
+tick()
+check(stopped[1] == 1, "stopped for the player who left")
+players.ann = {x = 5, y = 2, z = 3}
+tick()
+check(#played == 3, "restarted on return")
+players.bob = nil
+tick()
+check(stopped[2] == 2, "forgotten when a player leaves the game")
+stopped = {}
+-- A disc the keeper replaced by a player's removal/insert ends it.
+time = 17600 / 24000
+tick_alone()
+check(#stopped == 1 and not music.is_playing(jukebox), "stops at close")
+time = 15600 / 24000
+players = {}
+played, stopped = {}, {}
 
+day = 5
+players.ann = {x = 5, y = 2, z = 3}
 disc = "mcl_jukebox:record_1"
 tick()
 check(#played == 1 and played[1].name == "mcl_jukebox_track_1", "aliased disc plays its sound")
-check(played[1].spec.pos == jukebox and not played[1].spec.to_player, "played at the jukebox for everyone")
 tick(); tick()
 check(#played == 1, "plays once")
 
@@ -81,44 +127,46 @@ time = 15600 / 24000
 tick()
 check(#played == 1, "not restarted the same day")
 
-day = 5
+day = 15
 disc = "mcl_jukebox:record_far"
 tick()
 check(#played == 2 and music.is_playing(jukebox), "plays again the next holiday")
 disc = nil
 tick_alone()
 check(#stopped == 2 and not music.is_playing(jukebox), "stops when a player takes the disc")
+played, stopped = {}, {}
 
-day = 6
+day = 16
 disc = "mcl_jukebox:record_far"
 holiday = false
 tick()
-check(#played == 2, "silent on an ordinary day")
+check(#played == 0, "silent on an ordinary day")
 holiday = true
 time = 15000 / 24000
 tick()
-check(#played == 2, "silent before dinner")
+check(#played == 0, "silent before dinner")
 
 -- A disc a player put in during dinner is already playing to them.
-day = 7
+day = 17
 disc = nil
 time = 15600 / 24000
 minetest.registered_nodes["mcl_jukebox:jukebox"].on_rightclick(jukebox, nil, nil, "mcl_jukebox:record_far")
 tick(); tick()
-check(#played == 2 and not music.is_playing(jukebox), "no second copy of a player's disc")
+check(#played == 0 and not music.is_playing(jukebox), "no second copy of a player's disc")
 
 -- Digging the jukebox ends the music with no keeper about.
-day = 8
+day = 18
+disc = nil
 tick()
-check(music.is_playing(jukebox), "plays the next holiday")
+check(music.is_playing(jukebox) and #played == 1, "plays the next holiday")
 node = "air"
 tick_alone()
-check(#stopped == 3 and not music.is_playing(jukebox), "stops when the jukebox is gone")
+check(#stopped == 1 and not music.is_playing(jukebox), "stops when the jukebox is gone")
 node = "mcl_jukebox:jukebox"
-day = 9
+day = 19
 tick()
-check(#played == 4, "plays again once restored")
+check(#played == 2, "plays again once restored")
 time = 17600 / 24000
 tick_alone()
-check(#stopped == 4, "stops at close")
+check(#stopped == 2, "stops at close")
 print("music tests passed")
