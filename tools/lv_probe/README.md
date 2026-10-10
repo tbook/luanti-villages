@@ -90,6 +90,14 @@ Every result has `natural.plants` and `after.plants` (`plants.lua`): counts over
 also counts natural slopes), `growth`, `plants`, `vines`, `vines_unsupported`, and `samples` (up to 8
 positions per count).
 
+## Tree remains census (#232)
+
+Every result has `natural.remains` and `after.remains` (`remains.lua`), over the village area: `cocoa` and
+`cocoa_loose` (pods, and those with no trunk on the node they face), `vines` and `vines_loose` (vines that
+`mcl_core.check_vines_supported` would drop), `leaves` and `leaves_orphan` (leaves with no trunk within 6 nodes, which
+VoxeLibre decays only when a trunk beside them is dug), `orphan_clusters`, `orphan_high` (orphans 4 or more above the
+highest solid node under them) and `samples`. Trunks are looked up 6 nodes beyond the area.
+
 ## What it reports
 
 One JSON line per site, and `report.sh` prints the main columns.
