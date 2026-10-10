@@ -128,12 +128,7 @@ local function release_spot(bell)
 end
 
 local function stop_walking(self)
-	if self.state == "gowp" then
-		-- The same stop navigation.lua uses when it cancels a trip.
-		self.state = "stand"
-		self._target, self.current_target, self.waypoints, self.callback_arrived = nil, nil, nil, nil
-		self.object:set_velocity(vector.zero())
-	end
+	common.stop_walk(self)
 end
 
 -- The Bell stage for an adult with nothing else holding it.
