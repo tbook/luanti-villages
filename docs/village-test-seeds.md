@@ -148,7 +148,12 @@ back and the total up by 5 to 50%, so the rim stays pinned. On ground the cap le
 
 Earthwork. The skirt keeps its own height unless the slope limit moves it (an earlier version drew
 it toward a blend of the pads' heights, which built a plateau up to the cap round cap-limited yards:
-2026 filled 3898 columns). Filling still grows on 2026 (3068 -> 3539) because the ramps from cap-limited
+2026 filled 3898 columns). A ramp appears only where the natural ground differs from the yard's
+height, and where the ground already matches the pad at the yard edge it stays as it is (and is cut
+less than the old blend did). The one visible change on typical terrain is a 45-degree bank hugging
+the yard edge where flat ground is 4 to 8 blocks off the pad level (ground 16 against a pad at 10:
+10 10 11 12 13 14 15 16 16), where the old blend gave a rounded rise over the whole radius. The
+flatter apron the blend left round each yard on bumpy ground is gone. Filling still grows on 2026 (3068 -> 3539) because the ramps from cap-limited
 yards up to the ground below them are now complete; everywhere else cut and fill both fall.
 
 The probe's `Step` column is not a measure of these (#219).

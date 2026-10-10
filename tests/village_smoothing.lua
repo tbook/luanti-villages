@@ -207,10 +207,21 @@ do
 	end
 	assert(left == 0, left .. " skirt columns left off a yard they could match")
 
+	-- Cliff foot (the 2026 geometry): flat ground at 3 under a pad at 10, so the yard is
+	-- capped at 8. The skirt ramps down from the yard a block at a time and then is the
+	-- ground itself: no shelf at the yard's level (a blend toward the pad's height held the
+	-- skirt up to the cap round the whole foot).
+	local foot = smoothing.targets(pads, flat(3), cfg)
+	assert(foot.at(-2, 1) == 8 and foot.kind(-2, 1) == "yard")
+	local ramp = {}
+	for x = -3, -10, -1 do ramp[#ramp + 1] = foot.at(x, 1) end
+	assert(table.concat(ramp, " ") == "7 6 5 4 3 3 3 3", "ramp then ground, got " .. table.concat(ramp, " "))
+	assert(foot.at(1, -9) == 3 and foot.at(1, -8) == 3 and foot.at(1, 12) == 3, "ground beyond the ramp on the other sides")
+
 	-- Mild ground (terraces one block apart, a ramp of 1 in 6) leaves no step over one block
-	-- anywhere, in the skirt or at its rim. The solve bends the slope where it must, and on
-	-- ground like this it never must (the untouched ground pins the rim, so any trouble would
-	-- show as a skirt-skirt step).
+	-- anywhere, in the skirt or at its rim. A guard against over-bending, not evidence for
+	-- the trade-off: the solve bends the slope where it must, and on ground like this it
+	-- never must.
 	for _, mild in ipairs({
 		function(x) return 11 + math.floor(x / 6) end,
 		function(x, z) return 12 + math.floor((x + z) / 7) % 2 end,

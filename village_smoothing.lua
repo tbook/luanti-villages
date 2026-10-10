@@ -179,7 +179,7 @@ local function seeds_of(sign, own, fixed, hard, low, high, free, width, n)
 end
 
 -- Limits the slope (#235) of the free (skirt) columns of a grid `width` wide,
--- indexed row by row: `goal` is every column's target (a free column's is a
+-- indexed row by row: `goal` is every column's target (a free column's is its
 -- own height), `low`/`high` a free column's cap range, `free` marks the columns that
 -- may move. The rest (footprints, yards, untouched ground) never do. Each free
 -- column ends within one block of every neighbor wherever its cap range allows
