@@ -20,6 +20,7 @@
 --   lv_trips_spot    "sx,sy,sz;bx,by,bz": mode "spot" teleports the villager that owns the bed at
 --                    b to the start s at the `home` hour and logs it every step (see README)
 --   lv_trips_goto    "gx;gy;gz": spot mode sends that villager to g instead of letting it choose
+--   lv_trips_jump    "FROM:TO" stage names: mode "jump" (see run_jump); lv_trips_settle, _watch, _lag tune it
 --   lv_trips_far     SECONDS villagers stay suspended (vanilla's player-in-range test, no player near)
 --                    after the spot run starts; negative: always (see README)
 local core = minetest
@@ -61,6 +62,8 @@ local STAGES = {
 	{name = "holiday_tavern", tod = 0.62, holiday = true, managed = true},
 	-- Only for --spot: late evening, when every villager's schedule says home.
 	{name = "night", tod = 0.79, managed = true},
+	-- Only for --jump: just after midnight, where an admin advancing the clock lands (#203).
+	{name = "sleep", tod = 0.01, managed = true},
 }
 
 local round_info = {} -- the stage, variant and round being run
@@ -449,6 +452,7 @@ end
 
 local driver
 local elapsed_real = 0
+local max_dtime = 0
 local function wait(seconds)
 	local until_time = elapsed_real + seconds
 	while elapsed_real < until_time do coroutine.yield() end
@@ -630,6 +634,124 @@ local function run_spot(list)
 	snapshot()
 end
 
+-- A stage change under every villager at once (#202, #203): hold the FROM stage's hour
+-- for SETTLE seconds so the village is in its natural state, then set the clock to the TO
+-- stage's hour (as an admin's `/time` does) and watch all villagers for WATCH seconds. Logs
+-- `[lv_trips] jump t=... id pos state route` every second per villager and writes one
+-- `jump` record per villager: how long it sat in route status `planning` (longest run),
+-- when it first moved 1 node from where it stood at the jump, how far from its goal it ended.
+-- lv_trips_lag MS busy-waits once, 5 s after the jump, to look at the follower's timer.
+-- The doors in the cell a villager stands in or beside, with their open/closed state
+-- (param2 bit 2 is "open" for VoxeLibre's doors; the name carries _b/_t and _a/_b).
+local function door_note(pos)
+	local notes = {}
+	local feet = vector.round({x = pos.x, y = pos.y + 0.5, z = pos.z})
+	for _, d in ipairs({{0, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}) do
+		local at = {x = feet.x + d[1], y = feet.y + d[2], z = feet.z + d[3]}
+		local node = core.get_node_or_nil(at)
+		if node and core.get_item_group(node.name, "door") > 0 then
+			table.insert(notes, string.format("%d,%d,%d:%s:%d", d[1], d[2], d[3], node.name:gsub("^mcl_doors:", ""), node.param2))
+		end
+	end
+	return #notes > 0 and table.concat(notes, "|") or "-"
+end
+
+local function run_jump(list)
+	local from_name, to_name = setting("jump", ""):match("^([%w_]+):([%w_]+)$")
+	local from, to
+	for _, stage in ipairs(STAGES) do
+		if stage.name == from_name then from = stage end
+		if stage.name == to_name then to = stage end
+	end
+	if not from or not to then error("lv_trips_jump must be FROM:TO stage names") end
+	local SETTLE, WATCH = tonumber(setting("settle", 40)), tonumber(setting("watch", 90))
+	local lag = tonumber(setting("lag", 0)) or 0
+	silence_engine = false
+	holiday = from.holiday and true or false
+	round_info = {stage = from, variant = "A", round = 1, village = LABEL}
+	trips = {}
+	for _, v in ipairs(list) do release_seat(v) end
+	wait(11)
+	for _, v in ipairs(list) do reset_villager(v) end
+	core.set_timeofday(from.tod)
+	wait(SETTLE)
+	-- lv_trips_scatter 1: put every villager beside another's bed first and let it start a
+	-- trip from there (lv_trips_scatter_wait seconds), so the jump lands mid-trip.
+	if setting("scatter", "0") == "1" then
+		local used = {}
+		for index, v in ipairs(list) do
+			local source = list[(index + 3) % #list + 1]
+			local cell = source._bed and stand_near(source._bed, used)
+			if cell then v.object:set_pos({x = cell.x, y = cell.y - 0.45, z = cell.z}) end
+		end
+		wait(tonumber(setting("scatter_wait", 6)))
+	end
+	holiday = to.holiday and true or false
+	round_info = {stage = to, variant = "A", round = 1, village = LABEL}
+	local states = {}
+	for _, v in ipairs(list) do
+		core.log("action", string.format("[lv_trips] villager %s bed=%s jobsite=%s", villager_id(v),
+			v._bed and core.pos_to_string(v._bed) or "-", v._jobsite and core.pos_to_string(v._jobsite) or "-"))
+		states[villager_id(v)] = {entity = v, start = vec(v.object:get_pos()), plan_run = 0, plan_max = 0,
+			plan_since = nil, first_move = nil, ever_planned = false}
+	end
+	if FAR.secs > 0 then FAR.until_us = core.get_us_time() + FAR.secs * 1e6 end
+	core.set_timeofday(to.tod)
+	log(string.format("jump %s -> %s at t=0 (villagers=%d far=%s lag=%s)", from.name, to.name, #list, tostring(FAR.secs), tostring(lag)))
+	local began, last_logged, lagged = elapsed_real, -1, false
+	max_dtime = 0
+	while elapsed_real - began < WATCH do
+		coroutine.yield()
+		local t = elapsed_real - began
+		if lag > 0 and not lagged and t >= 5 then
+			lagged = true
+			local stop = core.get_us_time() + lag * 1000
+			while core.get_us_time() < stop do end
+		end
+		local logging = elapsed_real - last_logged >= 1
+		if logging then last_logged = elapsed_real end
+		for id, st in pairs(states) do
+			local v = st.entity
+			local pos = v.object:get_pos()
+			if pos then
+				local _, route = current_route(v)
+				local planning = false
+				for _, field in pairs(ROUTE_FIELDS) do
+					if v[field] and v[field].status == "planning" then planning = true end
+				end
+				if planning then
+					st.ever_planned = true
+					st.plan_since = st.plan_since or elapsed_real
+					st.plan_max = math.max(st.plan_max, elapsed_real - st.plan_since)
+				else
+					st.plan_since = nil
+				end
+				if not st.first_move and vector.distance(pos, st.start) >= 1 then st.first_move = t end
+				if logging then
+					local kind = current_route(v)
+					core.log("action", string.format("[lv_trips] jump t=%.1f id=%s pos=(%.1f,%.1f,%.1f) state=%s order=%s route=%s follow=%s wp=%s left=%d door=%s",
+						t, id, pos.x, pos.y, pos.z, tostring(v.state), tostring(v.order),
+						route and (route.status .. "/" .. tostring(route.reason)) or (planning and "planning" or "-"),
+						tostring(v._villages_follow ~= nil),
+						v.current_target and v.current_target.pos and core.pos_to_string(v.current_target.pos, 1) or "-",
+						v.waypoints and #v.waypoints or 0, door_note(pos)))
+				end
+			end
+		end
+	end
+	for id, st in pairs(states) do
+		local v = st.entity
+		local pos = v.object:get_pos()
+		emit({
+			type = "jump", village = LABEL, villager = id, from = from.name, to = to.name,
+			far = FAR.secs, lag = lag, start = st.start, final = vec(pos), planned = st.ever_planned,
+			planning_max_s = round1(st.plan_max), first_move_s = st.first_move and round1(st.first_move) or nil,
+			bed_dist = pos and v._bed and round1(vector.distance(pos, v._bed)) or nil,
+			state = v.state, max_dtime = round1(max_dtime),
+		})
+	end
+end
+
 local function finish()
 	emit({type = "done", village = LABEL})
 	out:close()
@@ -666,6 +788,7 @@ local function main()
 	if #list > 0 then
 		if MODE == "day" then run_days(list)
 		elseif MODE == "spot" then run_spot(list)
+		elseif MODE == "jump" then run_jump(list)
 		else run_trials(list) end
 	end
 	finish()
@@ -673,6 +796,7 @@ end
 
 core.register_globalstep(function(dtime)
 	elapsed_real = elapsed_real + dtime
+	if dtime > max_dtime then max_dtime = dtime end
 	if not driver then
 		-- Wait for the world to be up before starting.
 		if elapsed_real < 3 then return end

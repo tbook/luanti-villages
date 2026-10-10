@@ -33,11 +33,16 @@ rejected("goto without spot", "--goto 1,2,3", "need --spot")
 rejected("build without spot", "--build tests/lv_trips_args.lua", "need --spot")
 rejected("far without spot", "--far 20", "--far needs --spot")
 rejected("far letters", good .. " --far soon", "--far wants")
+rejected("jump with spot", good .. " --jump work:tavern", "--jump is its own mode")
+rejected("jump with a number", "--jump 1:2", "--jump wants")
+rejected("far still needs spot or jump", "--far 20", "--far needs --spot or --jump")
 rejected("missing build file", good .. " --build no/such/file.lua", "does not exist")
 
 -- Accepted numbers get past argument checks, to the missing world.
 local ok = run(good .. " --goto -1.5,2,3.25 --far 20 --build tests/lv_trips_args.lua")
 check("good arguments reach the world lookup", ok:find("no world NoSuchWorld", 1, true))
+local jump = run("--jump work:tavern --far 60 --lag 4000 --scatter 8")
+check("jump arguments reach the world lookup", jump:find("no world NoSuchWorld", 1, true))
 
 local choose = dofile("tools/lv_trips/mod/lv_trips/stages.lua")
 local stages = {{name = "home"}, {name = "work"}, {name = "night"}}

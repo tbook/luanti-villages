@@ -350,6 +350,22 @@ for _, waypoint in ipairs(door_entity.waypoints) do
 	if waypoint.action and waypoint.action.action == "open" then opens_door = true end
 end
 assert(opens_door)
+
+-- A route that starts on the cell in front of the door keeps that cell's open
+-- action: the start waypoint is dropped as "already there", and with it the
+-- action that opens the door, so the villager walked into the closed door and
+-- stood there (#202).
+local at_door_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 2, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(door_def.gopath(at_door_entity, at_door_entity._bed, nil, true))
+settle()
+local door_in_front = at_door_entity.current_target.action and at_door_entity.current_target.action.action == "open"
+assert(door_in_front, "a route starting in front of a door must still open it")
 minetest.get_node_or_nil = door_node
 wooden_door = false
 

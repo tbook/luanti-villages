@@ -7,6 +7,7 @@
 #                         [--stages home,work,...] [--radius R] [--speed S]
 #                         [--mod-dir PATH] [--spot SX,SY,SZ:BX,BY,BZ]
 #                         [--goto GX,GY,GZ] [--build FILE.lua] [--far SECONDS]
+#                         [--jump FROM:TO [--settle S] [--watch S] [--lag MS] [--scatter SECONDS]]
 #
 # WORLD is a directory name under the user's worlds directory, X,Y,Z a point in
 # the village (a villager's position will do) and LABEL names the run and its
@@ -43,6 +44,12 @@ spot=
 goto=
 build=
 far=0
+jump=
+settle=40
+watch=90
+lag=0
+scatter=0
+scatter_wait=6
 mode_given=
 mod_dir=$repo_root
 # A number: optional sign, digits, optional single decimal part.
@@ -70,6 +77,15 @@ while [ $# -gt 0 ]; do
 				echo "--far wants SECONDS (a number), not '$2'" >&2; exit 2
 			fi
 			far=$2; shift 2 ;;
+		--jump)
+			if ! printf %s "$2" | grep -Eq '^[a-z_]+:[a-z_]+$'; then
+				echo "--jump wants FROM:TO (stage names), not '$2'" >&2; exit 2
+			fi
+			jump=$2; shift 2 ;;
+		--settle) settle=$2; shift 2 ;;
+		--watch) watch=$2; shift 2 ;;
+		--lag) lag=$2; shift 2 ;;
+		--scatter) scatter=1; scatter_wait=$2; shift 2 ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
@@ -77,9 +93,13 @@ done
 
 if [ -z "$spot" ]; then
 	if [ -n "$goto" ] || [ -n "$build" ]; then echo "--goto and --build need --spot" >&2; exit 2; fi
-	if [ "$far" != 0 ]; then echo "--far needs --spot" >&2; exit 2; fi
+	if [ "$far" != 0 ] && [ -z "$jump" ]; then echo "--far needs --spot or --jump" >&2; exit 2; fi
 fi
 if [ -n "$build" ] && [ ! -f "$build" ]; then echo "--build file '$build' does not exist" >&2; exit 2; fi
+if [ -n "$jump" ]; then
+	if [ -n "$spot" ] || [ -n "$mode_given" ]; then echo "--jump is its own mode" >&2; exit 2; fi
+	mode=jump
+fi
 if [ -n "$spot" ]; then
 	if [ -n "$mode_given" ]; then echo "--spot is its own mode; drop --mode" >&2; exit 2; fi
 	mode=spot
@@ -133,6 +153,12 @@ lv_trips_label = $label
 lv_trips_spot = $spot
 lv_trips_goto = $goto
 lv_trips_far = $far
+lv_trips_jump = $jump
+lv_trips_settle = $settle
+lv_trips_watch = $watch
+lv_trips_lag = $lag
+lv_trips_scatter = $scatter
+lv_trips_scatter_wait = $scatter_wait
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports

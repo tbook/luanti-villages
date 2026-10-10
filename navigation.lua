@@ -587,7 +587,9 @@ local function start_route(self, target, path, arrived, route_field, route_id)
 		end
 	end
 	local current = table.remove(waypoints, 1)
-	while current and pos and vector.distance(pos, current.pos) < 0.5 do
+	-- A start waypoint that opens a door stays: dropped as "already there", it
+	-- took the open action with it and the villager walked into the shut door (#202).
+	while current and pos and not current.action and vector.distance(pos, current.pos) < 0.5 do
 		current = table.remove(waypoints, 1)
 	end
 	if not current then return false end
