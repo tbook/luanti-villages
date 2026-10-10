@@ -111,6 +111,42 @@ the change), and Orphans and Steps>1 by about 10%.
 | desert | 8 / 8 | 325 / 315 | 38 / 38 |
 | mesa | 12 / 12 | 107 / 97 | 0 / 0 |
 
+### Overhang slabs in the metrics (#219)
+
+Since #219 the probe measures a column under an overhang slab (the mod's `is_overhang`: a solid
+run at most 6 thick over at least 4 air) at the ground under it, when that ground continues the
+terrain around it (see the probe README). The two tables above are **raw**: the slab top counted
+as ground. Below, each cell is `raw / corrected` from the same run, so one world gives both. They
+are single runs after the change, on `origin/main` at 9cb8f75 (the layout can differ from the
+tables above by a house, and the mod-run column differs from the #155 table for that reason).
+
+| Case | Vanilla Step | Steps>1 | Traps | With mod Step | Steps>1 | Traps |
+|------|--------------|---------|-------|---------------|---------|-------|
+| cliff | 84 / 84 | 1374 / 1249 | 0 / 0 | 84 / 85 | 2407 / 2271 | 5 / 5 |
+| hillside | 77 / 78 | 1172 / 1148 | 0 / 0 | 80 / 80 | 1886 / 1908 | 0 / 0 |
+| tower | 58 / 58 | 1416 / 1406 | 246 / 246 | 23 / 23 | 1769 / 1769 | 72 / 72 |
+| mountain-edge | 83 / 85 | 250 / 228 | 63 / 63 | 83 / 83 | 272 / 238 | 17 / 17 |
+| pit | 44 / 44 | 114 / 114 | 10 / 10 | 9 / 9 | 18 / 18 | 5 / 5 |
+| forest | 17 / 17 | 208 / 207 | 40 / 42 | 14 / 14 | 436 / 437 | 5 / 8 |
+| jungle | 20 / 15 | 780 / 628 | 7 / 14 | 20 / 13 | 478 / 137 | 0 / 0 |
+| portal | 14 / 17 | 406 / 381 | 16 / 16 | 22 / 22 | 352 / 348 | 0 / 0 |
+| portal-outpost | 35 / 34 | 655 / 666 | 26 / 35 | 35 / 35 | 467 / 470 | 9 / 9 |
+| outpost | 20 / 20 | 307 / 324 | 3 / 10 | 20 / 20 | 489 / 504 | 1 / 5 |
+| flat | 3 / 3 | 8 / 8 | 5 / 5 | 10 / 17 | 140 / 142 | 7 / 7 |
+| flat-small | 1 / 1 | 0 / 0 | 0 / 0 | 12 / 12 | 122 / 124 | 0 / 0 |
+| snow-flat | 2 / 2 | 2 / 2 | 0 / 0 | 13 / 13 | 93 / 93 | 0 / 0 |
+| snow-steep | 80 / 81 | 958 / 883 | 6 / 7 | 80 / 81 | 1078 / 997 | 72 / 72 |
+| desert | 12 / 12 | 134 / 133 | 0 / 0 | 8 / 8 | 315 / 316 | 38 / 38 |
+| mesa | 9 / 10 | 20 / 22 | 9 / 10 | 12 / 14 | 99 / 103 | 0 / 0 |
+| Testlandia (seed 18442661806533097198, chunk -912, 2448) | | | | 56 / 53 | 1239 / 1201 | 2 / 4 |
+
+The correction is small almost everywhere and not always downward: a column is lowered only when
+the ground under its slab is nearer the surrounding ground than the slab top is, so a cave roof
+at village level stays ground, and a bed under water is never ground. The remaining odd cells are
+single columns, for example `flat` with mod, where one lowered column turns a step of 10 into 17.
+The jungle case moved most (steps>1 478 to 137): its canopy-height ledges. `overhang_columns`,
+`overhang_lowered` and `overhang_unknown` in `natural` and `after` count the slab columns.
+
 ### Village yield
 
 The sites VoxeLibre tried on seeds 2001 to 2030, 14 per seed, nearest the origin within 2400

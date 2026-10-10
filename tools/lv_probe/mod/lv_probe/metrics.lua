@@ -3,7 +3,10 @@
 -- them the ground heights it reads from the map.
 --
 -- A "ground map" is {[x] = {[z] = y}} holding the height of the topmost
--- walkable node in a column, ignoring trees; unknown columns are nil.
+-- walkable node in a column, ignoring trees; unknown columns are nil. Where
+-- that node is only the top of an overhang slab, init.lua keeps two maps: the
+-- raw one (the slab top) and the corrected one (the ground under the slab,
+-- see levels and resolve, #219). Every function here takes either.
 local M = {}
 
 -- Two buildings count as neighbors when their positions are this close in x/z.
@@ -46,6 +49,103 @@ function M.floor_heights(info)
 	end
 	if #info == 0 then return nil end
 	return {min = low, max = high, range = high - low, neighbor_diff = neighbor_diff}
+end
+
+-- Probe node kinds (init.lua kind_of) that count as solid when judging an
+-- overhang, as village_terrain.heights does: any solid or liquid node.
+local SOLID = {ground = true, leaves = true, trunk = true, water = true, ignore = true}
+
+-- The heights a column might be walked at, top first: its topmost walkable
+-- node at `top`, then, while the node above is the top of an overhang slab
+-- (`is_overhang`, the mod's village_terrain.is_overhang: a solid run of at most
+-- 6 over at least 4 air), the topmost walkable node under that slab, and so on
+-- for a slab on a slab. `kind(y)` is the probe's node kind at y; `ymin` the
+-- lowest y scanned. A slab with no ground under it inside the scan contributes
+-- nothing, so a column that is only such a slab has no levels. A column with
+-- one level is not under a slab.
+function M.levels(top, ymin, kind, is_overhang)
+	local function class(y)
+		local k = kind(y)
+		return SOLID[k] and "solid" or k == "air" and "air" or "other"
+	end
+	local levels, y = {}, top
+	while true do
+		if not is_overhang(y, class, ymin) then
+			levels[#levels + 1] = y
+			return levels
+		end
+		local under = y
+		while under >= ymin and class(under) == "solid" do under = under - 1 end
+		local wet = false
+		while under >= ymin and kind(under) ~= "ground" do
+			wet = wet or kind(under) == "water"
+			under = under - 1
+		end
+		if under < ymin then return levels end
+		-- A bed under water is not somewhere to walk: the slab stays the ground.
+		if wet then
+			levels[#levels + 1] = y
+			return levels
+		end
+		levels[#levels + 1] = y
+		y = under
+	end
+end
+
+-- Which level of each column is its ground (#219). The mod's overhang rule alone
+-- also matches the roof of a cave or ledge that villagers do walk on, and
+-- skipping that makes a hollow of the ground around it. So a column with
+-- several levels takes the one nearest the ground of the columns around it
+-- (columns with one level, within RESOLVE_RADII in turn, at least 3 of them),
+-- else nearest `ref`, the village's floor height; a tie keeps the higher.
+-- `levels` is {[x] = {[z] = list from M.levels}}. Returns the ground map and the
+-- number of columns that took a level other than the top.
+M.RESOLVE_RADII = {2, 4, 6, 10}
+function M.resolve(levels, ref)
+	local ground, lowered = {}, 0
+	local function certain(x, z)
+		local column = levels[x] and levels[x][z]
+		return column and #column == 1 and column[1] or nil
+	end
+	for x, column in pairs(levels) do
+		ground[x] = {}
+		for z, list in pairs(column) do
+			local choice = list[1]
+			if #list > 1 then
+				local target = ref
+				for _, r in ipairs(M.RESOLVE_RADII) do
+					local around = {}
+					for dx = -r, r do
+						for dz = -r, r do
+							local y = certain(x + dx, z + dz)
+							if y then around[#around + 1] = y end
+						end
+					end
+					if #around >= 3 then
+						table.sort(around)
+						target = around[math.ceil(#around / 2)]
+						break
+					end
+				end
+				if target then
+					for _, y in ipairs(list) do
+						if math.abs(y - target) < math.abs(choice - target) then choice = y end
+					end
+				end
+			end
+			ground[x][z] = choice -- nil for a column that is only a slab over the void
+			if choice and choice ~= list[1] then lowered = lowered + 1 end
+		end
+	end
+	return ground, lowered
+end
+
+-- The village's reference floor: the median building floor height.
+function M.median_floor(info)
+	local ys = {}
+	for _, building in ipairs(info) do ys[#ys + 1] = building.pos.y end
+	table.sort(ys)
+	return ys[math.ceil(#ys / 2)]
 end
 
 local DIRECTIONS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
@@ -137,7 +237,7 @@ function M.traps(ground, wet, footprints, floors, anchor)
 		end
 	end
 	-- Group the unreachable columns into regions.
-	local seen, columns, regions = {}, 0, 0
+	local seen, columns, regions, samples = {}, 0, 0, {}
 	for x, column in pairs(ground) do
 		for z in pairs(column) do
 			local key = x .. "," .. z
@@ -161,11 +261,12 @@ function M.traps(ground, wet, footprints, floors, anchor)
 				end
 				if not border then
 					columns, regions = columns + #region, regions + 1
+					if #samples < 8 then samples[#samples + 1] = {x = x, z = z, size = #region} end
 				end
 			end
 		end
 	end
-	return {columns = columns, regions = regions}
+	return {columns = columns, regions = regions, samples = samples}
 end
 
 -- How far each footprint's floor sits above (fill) or below (cut) the natural

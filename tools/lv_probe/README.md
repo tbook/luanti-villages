@@ -113,4 +113,29 @@ node in a column that is not a tree or leaves, so a ruined portal or an outpost 
 (`structures` says when one is near). #141 and #142 may sharpen the definitions of
 `traps` and `orphans`; if they do, change `metrics.lua` and the baselines in the catalog together.
 
+### Overhang slabs (#219)
+
+Since #219 a column whose topmost walkable node is the top of an overhang slab is measured at
+the ground under the slab when that is where a villager walks. A slab is the mod's definition
+(`village_terrain.is_overhang`, #209): a solid run at most 6 thick with at least 4 air nodes
+directly under it. `run.sh` copies `village_terrain.lua` from the checkout it is in into the probe
+mod and the probe calls that function, so the two cannot drift apart.
+
+The mod's rule alone also matches the roof of a cave or ledge that villagers do walk on (applied
+alone it moved the forest case from 5 to 138 traps), so `metrics.levels` lists the heights a
+column might be walked at (the top, then the ground under each slab; a bed under water is not
+one) and `metrics.resolve` takes the level nearest the ground of the columns around it (the
+median of the columns without a slab within 2, 4, 6 then 10 blocks, at least 3 of them), else
+nearest the median building floor. A column that is only a slab over the void has no ground.
+
+The corrected maps feed `steps`, `pit_depth`, `heights`, `traps` and `fill_cut`. The old numbers,
+with the slab top as ground, stay beside them so earlier tables remain comparable:
+`after.steps_raw`, `after.traps_raw`, `natural.pit_depth_raw`, `natural.heights_raw`,
+`natural.fill_cut_raw` (and the same `_raw` fields in `after`), and `report.sh` prints `step_raw`,
+`steps>1_raw` and `traps_raw`. `overhang_columns` counts the slab columns, `overhang_lowered` those
+that took the ground under the slab and `overhang_unknown` those with no ground under it.
+`after.traps.samples` lists up to 8 trapped regions (`x,z n=columns y=corrected/raw` and the node
+names down the column) to see what a trap is. Tables before #219 are raw; the catalog gives both.
+`census` and `orphans` are not affected.
+
 `tests/lv_probe_metrics.lua` covers the pure functions in `metrics.lua`.

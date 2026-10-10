@@ -16,6 +16,7 @@ local core = minetest
 local modpath = core.get_modpath("lv_probe")
 local metrics = dofile(modpath .. "/metrics.lua")
 local index = dofile(modpath .. "/village_index.lua")
+local terrain_rules = dofile(modpath .. "/village_terrain.lua") -- copied in by run.sh; is_overhang (#219)
 local census = dofile(modpath .. "/census.lua")
 local plants = dofile(modpath .. "/plants.lua")
 
@@ -69,7 +70,7 @@ local function area_of(info)
 		y1, y2 = math.min(y1, building.pos.y), math.max(y2, building.pos.y)
 	end
 	return {x1 = x1 - MARGIN, z1 = z1 - MARGIN, x2 = x2 + MARGIN, z2 = z2 + MARGIN,
-		y1 = y1 - BELOW, y2 = y2 + ABOVE}, footprints
+		y1 = y1 - BELOW, y2 = y2 + ABOVE, ref_y = metrics.median_floor(info)}, footprints
 end
 
 -- Node classes for the plant census (plants.lua, #214).
@@ -106,7 +107,8 @@ local function scan_terrain(area)
 		{x = area.x2, y = area.y2, z = area.z2})
 	local va = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
 	local data = vm:get_data()
-	local ground, wet = {}, {}
+	local ground, ground_raw, wet = {}, {}, {}
+	local overhang_columns, overhang_unknown = 0, 0
 	local leaves, trunks, canopy_columns, unknown = {}, {}, 0, 0
 	local columns, clipped = 0, 0
 	-- What the ground is made of (#151): node names in the top CENSUS_DEPTH
@@ -114,7 +116,7 @@ local function scan_terrain(area)
 	local census, census_dirt = {}, {} -- dirt by depth below the ground top
 	local dirt_tops = {}
 	for x = area.x1, area.x2 do
-		ground[x] = {}
+		ground[x], ground_raw[x] = {}, {}
 		for z = area.z1, area.z2 do
 			columns = columns + 1
 			local top = kind_of(data[va:index(x, area.y2, z)])
@@ -138,7 +140,15 @@ local function scan_terrain(area)
 						if d == "0" and #dirt_tops < 400 then dirt_tops[#dirt_tops + 1] = x .. "," .. found .. "," .. z end
 					end
 				end
-				ground[x][z] = found
+				ground_raw[x][z] = found
+				-- Where the ground might be if this is an overhang slab (#219); resolved below.
+				local list = metrics.levels(found, area.y1,
+					function(y) return kind_of(data[va:index(x, y, z)]) end, terrain_rules.is_overhang)
+				if #list ~= 1 then
+					overhang_columns = overhang_columns + 1
+					if #list == 0 then overhang_unknown = overhang_unknown + 1 end
+				end
+				ground[x][z] = list
 				if sees_water then wet[x .. "," .. z] = true end
 			else
 				unknown = unknown + 1
@@ -146,9 +156,12 @@ local function scan_terrain(area)
 			if covered then canopy_columns = canopy_columns + 1 end
 		end
 	end
+	local lowered
+	ground, lowered = metrics.resolve(ground, area.ref_y)
 	local plant_counts = plants.count(data, va, {x1 = area.x1, x2 = area.x2, z1 = area.z1, z2 = area.z2, y1 = emin.y, y2 = emax.y}, plant_kind,
 		function(x, y, z) return core.get_name_from_content_id(data[va:index(x, y, z)]) end, vm:get_param2_data())
-	return {plants = plant_counts, dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, wet = wet, leaves = leaves, trunks = trunks,
+	return {plants = plant_counts, dirt_tops = dirt_tops, census = census, census_dirt = census_dirt, ground = ground, ground_raw = ground_raw,
+		overhang_columns = overhang_columns, overhang_lowered = lowered, overhang_unknown = overhang_unknown, wet = wet, leaves = leaves, trunks = trunks,
 		columns = columns, unknown = unknown, canopy_columns = canopy_columns, clipped = clipped}
 end
 
@@ -213,6 +226,9 @@ local function terrain_report(terrain, info, footprints)
 	local report = {
 		heights = metrics.height_range(terrain.ground),
 		steps = metrics.steps(terrain.ground, footprints),
+		steps_raw = metrics.steps(terrain.ground_raw, footprints),
+		overhang_columns = terrain.overhang_columns, overhang_lowered = terrain.overhang_lowered,
+		overhang_unknown = terrain.overhang_unknown,
 		dirt_tops = terrain.dirt_tops, census = terrain.census, census_dirt = terrain.census_dirt,
 		unknown_columns = terrain.unknown,
 		plants = terrain.plants,
@@ -222,6 +238,8 @@ local function terrain_report(terrain, info, footprints)
 		leaf_nodes = #terrain.leaves,
 	}
 	report.pit_depth, report.pit_at = metrics.pit_depth(terrain.ground)
+	report.pit_depth_raw, report.pit_at_raw = metrics.pit_depth(terrain.ground_raw)
+	report.heights_raw = metrics.height_range(terrain.ground_raw)
 	return report
 end
 
@@ -276,10 +294,30 @@ local function finish_site(site, outcome)
 		result.floors = metrics.floor_heights(info)
 		result.natural = site.natural
 		result.natural.fill_cut = metrics.fill_and_cut(info, footprints, site.natural_ground)
+		result.natural.fill_cut_raw = metrics.fill_and_cut(info, footprints, site.natural_ground_raw)
 		result.after = terrain_report(after, info, footprints)
 		result.terraformed_plants = site.terraformed
 		result.after.traps = metrics.traps(after.ground, after.wet, footprints, floors,
 			anchor_of(info, footprints))
+		result.after.traps_raw = metrics.traps(after.ground_raw, after.wet, footprints, floors,
+			anchor_of(info, footprints))
+		-- Where the trapped regions are, as "x,z size corrected/raw ground height".
+		local sampled = {}
+		for _, s in ipairs(result.after.traps.samples) do
+			local raw_y = after.ground_raw[s.x][s.z]
+			local profile, last, count = {}, nil, 0
+			for y = raw_y + 3, math.max(raw_y - 30, site.area.y1), -1 do
+				local name = core.get_node({x = s.x, y = y, z = s.z}).name:gsub("^mcl_[a-z_]*:", "")
+				if name == last then count = count + 1 else
+					if last then profile[#profile + 1] = last .. "x" .. count end
+					last, count = name, 1
+				end
+			end
+			profile[#profile + 1] = (last or "?") .. "x" .. count
+			sampled[#sampled + 1] = string.format("%d,%d n=%d y=%s/%s %s", s.x, s.z, s.size,
+				tostring(after.ground[s.x][s.z]), tostring(raw_y), table.concat(profile, " "))
+		end
+		result.after.traps.samples = sampled
 		result.after.orphan_leaves = orphan_leaves(after)
 		result.structures = structures_near(site.area, footprints)
 		result.footprints = footprints
@@ -336,7 +374,7 @@ local function wrap_pipeline()
 		site.info = info
 		site.area, site.footprints = area_of(info)
 		local natural = read_terrain(site.area)
-		site.natural_ground = natural.ground
+		site.natural_ground, site.natural_ground_raw = natural.ground, natural.ground_raw
 		site.natural = terrain_report(natural, info, site.footprints)
 		return info
 	end
