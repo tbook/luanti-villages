@@ -40,6 +40,7 @@ their jobsite lose it, so vanilla demotes them.
 | `church_schematic.lua` | Furnishes newly generated churches with a pulpit and chairs, by editing the stock schematic in memory |
 | `belltower_schematic.lua` | Raises newly generated belltowers one block (#150): stock bottom layer is open air round four posts, so the tower digs a pit and the bell looks sunk. Adds a floor layer under the stock one, by editing the stock schematic in memory |
 | `paths.lua` | Natural paths (#12): counts villager steps per grass block, turns heavily walked ones into `mcl_core:grass_path`, and reverts faded ones. The thresholds are settings, still to be tuned on real villages |
+| `loomless_house.lua` | About half the small houses are generated without their loom (#223), chosen per building by a hash of position and world seed (`living_villages_loomless_house_chance`). A per-building `settlements.place_schematics` wrapper like `ground_layer.lua`, composes with it in either order |
 | `library_schematic.lua` | Furnishes newly generated libraries with a lectern, the librarian's jobsite, by editing the stock schematic in memory (#152) |
 | `floor_guard.lua` | Undoes Luanti 5.17's collision snapping a villager through its floor after a long server step |
 | `diagnostic.lua` | Read-only Lookup Tool inspector for privileged players |

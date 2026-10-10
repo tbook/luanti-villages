@@ -30,7 +30,7 @@ local cell_string, check_route = check.cell_string, check.check_route
 
 local BUILDINGS = {
 	"belltower", "blacksmith", "butcher", "church", "farm", "lamp", "large_house",
-	"library", "medium_house", "small_house", "tavern", "well",
+	"library", "medium_house", "small_house", "small_house_loomless", "tavern", "well",
 }
 local DIRECTIONS, ORIGIN, MARGIN = scene.DIRECTIONS, scene.ORIGIN, scene.MARGIN
 -- The time of day each kind of trip is scheduled for (common.lua's SCHEDULE).

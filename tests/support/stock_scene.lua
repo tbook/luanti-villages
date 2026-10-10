@@ -23,7 +23,8 @@ local FURNISHERS = {
 -- Returns {world, size, rise, prefix, beds, outdoors}. slope is 1 for a basin,
 -- -1 for a plateau, nil for flat.
 function M.build(name, rotation, doors_open, roads, slope)
-	local fixture = dofile("tests/fixtures/buildings/" .. name .. ".lua")
+	-- "small_house_loomless" is the small house furnished without its loom (#223).
+	local fixture = dofile("tests/fixtures/buildings/" .. name:gsub("_loomless$", "") .. ".lua")
 	local world = stock_world.new()
 	stock_world.install(world)
 	local furnish = {}
@@ -34,6 +35,7 @@ function M.build(name, rotation, doors_open, roads, slope)
 			furnish[module] = dofile(file)
 		end
 	end
+	if name:find("_loomless$") then furnish.loomless = dofile("loomless_house.lua").remove_loom end
 	local size = world.place(fixture, ORIGIN, ORIGIN, furnish, rotation)
 	if doors_open then world.open_doors() end
 	if roads then

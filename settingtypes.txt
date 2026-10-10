@@ -43,3 +43,10 @@ living_villages_route_max_nodes (Route planner node cap) int 4096 256 32768
 # 86400 / time_speed seconds; with time_speed 0 (frozen clock) the default
 # of 72 (1200 s) is used, so children still age.
 living_villages_child_grow_days (Child growth time, game days) float 12 0.1 100
+
+# Share of newly generated small houses (the shepherd's hut) built without
+# their loom (#223). A loomless house has a bed and no workstation, so its
+# villager starts unemployed and takes another free job. The choice is fixed by
+# the house's position and the world seed. 0 builds every house as stock, 1
+# builds none with a loom. Existing villages are unchanged.
+living_villages_loomless_house_chance (Share of small houses without a loom) float 0.5 0 1
