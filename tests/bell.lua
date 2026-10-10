@@ -149,6 +149,14 @@ assert(leaver._villages_wander_anchor)
 time = 14000 / 24000
 tick(leaver)
 assert(leaver._villages_wander_anchor == nil and leaver._villages_bell == nil, "the Tavern stage releases the villager")
+-- Stopped mid-walk, the follower's flag goes with the state (#230).
+time = 11000 / 24000
+local walker = villager(12, -1)
+tick(walker)
+walker.state, walker._villages_follow = "gowp", {final = {x = 0, y = 0, z = 0}}
+time = 14000 / 24000
+tick(walker)
+assert(walker.state == "stand" and walker._villages_follow == nil, "the walk to the bell ends with its flag")
 time = 11000 / 24000
 
 -- Pushed out long after the original walk budget has run out: a fresh one.

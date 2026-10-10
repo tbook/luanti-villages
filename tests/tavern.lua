@@ -176,9 +176,11 @@ local dave = villager("dave", {x = 100, y = 0, z = 0}, {_bed = {x = 30, y = 0, z
 def.do_custom(dave, 0.1)
 assert(dave._villages_tavern_target and dave.state == "gowp")
 dave._villages_tavern_route = {status = "travelling"}
+dave._villages_follow = {final = jukebox}
 time = 17100 / 24000
 def.do_custom(dave, 0.1)
 assert(dave._villages_tavern_target == nil and dave.state == "stand", "abandons the trip")
+assert(dave._villages_follow == nil, "and the follower's flag with it (#230)")
 local common = dofile("common.lua")
 assert(common.schedule_stage(nil, dave) == "home" and common.is_home_time(dave), "and heads home")
 assert(common.get_activity() == "tavern" and common.as_villager(dave, common.get_activity) == "sleep",
