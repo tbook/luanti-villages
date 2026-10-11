@@ -147,8 +147,8 @@ do
 	end
 	assert(sizes[2] and sizes[3], "both pairs and trios occur")
 	for _, v in ipairs(group) do
+		tick(v)
 		if v._villages_talk then
-			tick(v)
 			local ox, oz, n = 0, 0, 0
 			for _, m in ipairs(v._villages_talk.group.members) do
 				if m ~= v then ox, oz, n = ox + m.pos.x, oz + m.pos.z, n + 1 end
