@@ -187,7 +187,7 @@ built village instead of the census: work 6 min, tavern 1, putter 1, work 2, a p
 nodes away for 1 (the freeze), work 1. The moon phase is pinned so the clock jumps cannot flip a
 holiday, and villagers and sheep are treated as having a player near (the 48 node rule is kept for the
 pretend player). `LV_PROBE_FLOCK_EXTRA=N` adds N synthetic shepherds, each with a loom of its own;
-`lv_probe_flock_nobed = true` (through `LV_PROBE_CONF_EXTRA`) clears every shepherd's bed each second, as a villager that has not claimed one yet; `LV_PROBE_FLOCK_PHASES`-like days are picked with `lv_probe_flock_phases = night|night2|holiday|work` (also through `LV_PROBE_CONF_EXTRA`); `LV_PROBE_CONF_EXTRA` appends settings lines (e.g. `living_villages_flock_size = 0` for a baseline).
+`lv_probe_flock_nobed = true` (through `LV_PROBE_CONF_EXTRA`) clears every shepherd's bed each second, as a villager that has not claimed one yet; `LV_PROBE_FLOCK_PHASES`-like days are picked with `lv_probe_flock_phases = night|night2|holiday|work|fieldtavern|fieldsleep` (also through `LV_PROBE_CONF_EXTRA`); `LV_PROBE_CONF_EXTRA` appends settings lines (e.g. `living_villages_flock_size = 0` for a baseline).
 The `"type":"flock"` line has `samples` (every 5 s: each shepherd's stage, position, state and its
 flock's sorted distances), `frozen` (how far each shepherd and sheep moved while frozen), `cost`
 (calls and milliseconds of the villager and sheep `do_custom` wrappers), `peak` and `hazards`

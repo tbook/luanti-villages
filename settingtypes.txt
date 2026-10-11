@@ -58,11 +58,13 @@ living_villages_loomless_house_chance (Share of small houses without a loom) flo
 living_villages_flock_size (Sheep per shepherd) int 5 0 5
 # How far beyond the village's farthest building a shepherd leads its flock in the work
 # stage (#249). Out in the field it walks to a spot 15 to this many nodes past the farthest
-# door or bed (measured from the bell, scanned once), stands 20-30 s, then walks about 10 nodes
-# on, and so on (at the normal walking pace). Always within 46 of its bed and 90 of its loom:
-# where those leave no room it grazes as far as they allow, or among the buildings. Villagers
-# no player is within 48 nodes of stand still, so a shepherd far out waits for a player to
-# walk out. 0 keeps every stop in the village (within 20 of the bell).
+# door or bed (measured from the bell, scanned once; a player's house counts), stands 20-30 s,
+# then walks about 10 nodes on, and so on, at the normal walking pace. A value under 20 counts
+# as 20. Always within 90 of its loom (not bounded by its bed: far_trips.lua keeps vanilla from
+# sending it home); where that leaves no room it grazes as far as it allows, or among the
+# buildings. Villagers no player is within 48 nodes of stand still, so a shepherd far out waits
+# for a player to walk out. 0 keeps every stop in the village (within 20 of the bell).
+# Before #249 this was the distance from the bell: an old value now means a margin.
 living_villages_flock_range (Shepherd grazing range) int 30 0 60
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.

@@ -56,12 +56,12 @@ local AREA_RADIUS, AREA_MIN_RADIUS = 20, 8
 -- FIELD_LINGER seconds at each. After a field stop fails, the next one is near (the old village
 -- stops). mcl_mobs freezes a mob no player is within 48 of, so a stop much farther is seen only
 -- if the player walks out. The pace is the normal walk: the follower has no slower one.
-local RANGE_SETTING, DEFAULT_RANGE, FIELD_CLEAR = "living_villages_flock_range", 30, 15
+local RANGE_SETTING, DEFAULT_RANGE, FIELD_CLEAR, FIELD_MIN_RANGE = "living_villages_flock_range", 30, 15, 20
 local FIELD_STEP_MIN, FIELD_STEP_MAX = 8, 12
 local FIELD_LINGER_MIN, FIELD_LINGER_MAX = 20, 30
-local BUILDING_SCAN, BUILDING_SCAN_HEIGHT = 56, 16
+local BUILDING_SCAN, BUILDING_SCAN_HEIGHT = 56, 32
 local tune = {field = true}
--- Bell cell key -> distance of its village's farthest door or bed, or false for none found.
+-- Bell cell key -> distance of its village's farthest door or bed, or the scan under way.
 local reach_cache = {}
 local LOOM_RADIUS = 12
 local STOP_MIN_RADIUS = 5
@@ -72,8 +72,9 @@ local LINGER_MIN, LINGER_MAX, LINGER_RADIUS = 15, 40, 3
 local ARRIVE = 4
 local STOP_BASE, STOP_PER_NODE = 30, 3
 local MAX_FAILURES = 3
--- Vanilla sends a villager home past 50 nodes from its bed (do_activity).
-local BED_REACH = 46
+-- Vanilla sends a villager home past 50 nodes from its bed (do_activity), but far_trips.lua
+-- (#216) hides the bed from that test in daylight while a villager has an errand, and a
+-- herding shepherd (it has a claimed loom) always has: the bed bounds nothing here.
 local AREA_RETRY = 30
 -- Solid within ROOF_HEIGHT above the shepherd's feet (past its own head) is a roof; a tree
 -- canopy is higher. A change of roof must hold for ROOF_TICKS ticks to count.
@@ -109,24 +110,44 @@ local function flock_range()
 end
 
 -- How far from the bell (flat) the village's farthest building is, by the doors and beds within
--- BUILDING_SCAN of it: one scan per bell, cached (a village generated before this mod has no
--- stored plan, so the nodes are the one source every village has). nil when none is found.
-local function farthest_building(center)
+-- BUILDING_SCAN of it (a player's house counts as one). Village generated before this mod has
+-- no stored plan, so the nodes are the one source every village has. The box is scanned a
+-- slab of SLAB nodes' height per call (a whole box is over 100 ms), one call a herd tick;
+-- the result is cached per bell, but only a finished scan that found a building in a loaded
+-- area (probed at four points of the box). Returns the reach, or nil with `more` true while
+-- the scan goes on, and false when it found nothing or the area is not loaded (tried again
+-- at the next area lookup).
+local SLAB = 8
+local function scan_buildings(center)
 	local k = center.x .. "," .. center.y .. "," .. center.z
-	local reach = reach_cache[k]
-	if reach == nil then
-		reach = false
-		local found = core.find_nodes_in_area(
-			{x = center.x - BUILDING_SCAN, y = center.y - BUILDING_SCAN_HEIGHT, z = center.z - BUILDING_SCAN},
-			{x = center.x + BUILDING_SCAN, y = center.y + BUILDING_SCAN_HEIGHT, z = center.z + BUILDING_SCAN},
-			{"group:door", "group:bed"})
-		for _, p in ipairs(found or {}) do
-			local d = flat(p, center)
-			if d <= BUILDING_SCAN and d > (reach or 0) then reach = d end
+	local entry = reach_cache[k]
+	if type(entry) == "number" then return entry end
+	if not entry then
+		for _, d in ipairs({{1, 1}, {1, -1}, {-1, 1}, {-1, -1}}) do
+			local probe = {x = center.x + d[1] * BUILDING_SCAN * 0.7, y = center.y, z = center.z + d[2] * BUILDING_SCAN * 0.7}
+			if not core.get_node_or_nil(probe) then return nil, false end
 		end
-		reach_cache[k] = reach
+		entry = {y = center.y - BUILDING_SCAN_HEIGHT, ms = 0}
+		reach_cache[k] = entry
 	end
-	return reach or nil
+	local started = os.clock()
+	local top = math.min(entry.y + SLAB - 1, center.y + BUILDING_SCAN_HEIGHT)
+	local found = core.find_nodes_in_area(
+		{x = center.x - BUILDING_SCAN, y = entry.y, z = center.z - BUILDING_SCAN},
+		{x = center.x + BUILDING_SCAN, y = top, z = center.z + BUILDING_SCAN},
+		{"group:door", "group:bed"})
+	for _, p in ipairs(found or {}) do
+		local d = flat(p, center)
+		if d <= BUILDING_SCAN and d > (entry.reach or 0) then entry.reach = d end
+	end
+	entry.ms = entry.ms + (os.clock() - started) * 1000
+	entry.y = top + 1
+	if entry.y <= center.y + BUILDING_SCAN_HEIGHT then return nil, true end
+	reach_cache[k] = entry.reach or nil
+	core.log("action", string.format("[living_villages] building scan about (%d,%d,%d): reach %s, %.1f ms in %d slabs",
+		center.x, center.y, center.z, tostring(entry.reach and math.floor(entry.reach)), entry.ms,
+		math.ceil((2 * BUILDING_SCAN_HEIGHT + 1) / SLAB)))
+	return entry.reach, false
 end
 
 local function valid_sheep(ent)
@@ -370,15 +391,13 @@ end
 
 -- Where the shepherd grazes: about the nearest bell, or else about its loom. The radius
 -- keeps it within 100 nodes of its loom (validate_jobsite drops a jobsite farther than
--- that) and, when it has a bed (vanilla gives one only at night, so a shepherd may have
--- none), within vanilla's 50 of the bed (do_activity's wandered_too_far). Returns the
--- area, or nil and the reason there is none.
+-- that); the bed does not bound it (far_trips.lua, above). Returns the area, or nil and
+-- the reason there is none.
 local function find_area(self, bell)
 	local loom, bed = self._jobsite, self._bed
 	if not loom then return nil, "no loom" end
 	local function room(center)
 		local radius = LOOM_REACH - vector.distance(center, loom)
-		if bed then radius = math.min(radius, BED_REACH - vector.distance(center, bed)) end
 		return radius
 	end
 	local why
@@ -387,16 +406,9 @@ local function find_area(self, bell)
 		local center = bell.center_of(site)
 		local radius = math.min(AREA_RADIUS, room(center))
 		if radius >= AREA_MIN_RADIUS then
-			local area = {center = center, radius = radius, bed_known = bed ~= nil}
-			-- The field band: as far beyond the farthest building as the range and the bounds
-			-- allow; none (near stops only) when they leave less than a few blocks of clearance.
-			local range, reach = flock_range(), farthest_building(center) or AREA_RADIUS
-			local hi = math.min(reach + range, room(center))
-			if range > 0 and hi >= reach + 5 then
-				area.field_lo, area.field_hi = math.min(reach + math.min(FIELD_CLEAR, range), hi - 5), hi
-				area.reach = reach
-			end
-			return area
+			-- The field band comes when the building scan is done (set_band, from herd_tick).
+			return {center = center, radius = radius, bed_known = bed ~= nil, room = room(center),
+				scanning = tune.field and flock_range() > 0}
 		end
 		why = string.format("the bell at (%d,%d,%d) leaves radius %d", site.x, site.y, site.z, radius)
 	else
@@ -419,6 +431,24 @@ local function solid_ground(cell)
 		if cells.can_stand({x = cell.x + d[1], y = cell.y, z = cell.z + d[2]}) then open = open + 1 end
 	end
 	return open >= 2
+end
+
+-- The field band: as far beyond the farthest building as the range and the bounds allow; none
+-- (near stops only) when they leave less than 5 blocks of clearance. A range under
+-- FIELD_MIN_RANGE counts as that (a band at least 5 wide); 0 is off.
+local function set_band(area)
+	local reach, more = scan_buildings(area.center)
+	if more then return end
+	area.scanning = false
+	if not reach then return end
+	local hi = math.min(reach + math.max(flock_range(), FIELD_MIN_RANGE), area.room)
+	if hi >= reach + 5 then
+		area.field_lo, area.field_hi = math.min(reach + FIELD_CLEAR, hi - 5), hi
+		area.reach = reach
+	end
+	core.log("action", string.format("[living_villages] field band about (%d,%d,%d): %s", area.center.x, area.center.y,
+		area.center.z, area.field_lo and string.format("%d-%d from the bell (buildings reach %d)", area.field_lo, area.field_hi, reach)
+		or "none (" .. (reach and "no room" or "no buildings found") .. ")"))
 end
 
 local function pick_stop(area, pos)
@@ -468,8 +498,10 @@ end
 
 local function fail_stop(self, session, herd, why)
 	local route = self._villages_goto_route
-	core.log("action", string.format("[living_villages] shepherd %s: grazing stop failed (%d): %s, route %s/%s",
-		tostring(self._id), herd.failures + 1, why or "?", route and tostring(route.status) or "-", route and tostring(route.reason) or "-"))
+	local report = route and route.planner
+	core.log("action", string.format("[living_villages] shepherd %s: grazing stop failed (%d): %s, route %s/%s, planner %s after %s nodes",
+		tostring(self._id), herd.failures + 1, why or "?", route and tostring(route.status) or "-", route and tostring(route.reason) or "-",
+		report and tostring(report.status) or "-", report and tostring(report.searched) or "-"))
 	herd.stop, herd.walking, herd.linger_until = nil, false, nil
 	herd.skip_far = herd.field_stop
 	herd.failures = herd.failures + 1
@@ -505,13 +537,17 @@ local function herd_tick(self, session, pos, bell)
 			return
 		end
 		session.no_area_logged = nil
-		core.log("action", string.format("[living_villages] shepherd %s grazes about (%d,%d,%d), radius %d%s%s",
+		core.log("action", string.format("[living_villages] shepherd %s grazes about (%d,%d,%d), radius %d%s",
 			tostring(self._id), area.center.x, area.center.y, area.center.z, area.radius,
-			self._bed and "" or " (no bed yet)",
-			area.field_lo and string.format(", field %d-%d from the bell (buildings reach %d)", area.field_lo, area.field_hi, area.reach) or ", no field band"))
+			self._bed and "" or " (no bed yet)"))
 		herd = {phase = "out", since = now, area = area, failures = 0}
 		session.herd = herd
 		if self.order == "work" then self.order = nil end
+	end
+	-- The first seconds of a village are spent on the building scan, a slab a second.
+	if herd.area.scanning then
+		set_band(herd.area)
+		if herd.area.scanning then return end
 	end
 	if herd.phase == "loom" then
 		if now - herd.since < HERD_LOOM then return end

@@ -585,14 +585,11 @@ remote._jobsite = {x = 65, y = 0, z = 0}
 nodes[key(remote._jobsite)] = "mcl_loom:loom"
 metas[key(remote._jobsite)] = {villager = remote._id}
 tick(remote, 5)
-assert(#gopaths == 0, "no grazing stops where the loom would be dropped")
--- Tried again every 30 s: without the bed it can graze about the loom.
+assert(#gopaths >= 1 and flat(gopaths[1].target, remote._jobsite) <= 13,
+	"a bell where the loom would be dropped is passed over: it grazes about the loom")
 remote._bed = nil
-tick(remote, 35)
-assert(#gopaths >= 1, "and when the bed is gone it grazes about the loom (within 90 of it)")
-assert(flat(gopaths[1].target, remote._jobsite) <= 13)
 
--- 13. No bell: it grazes about the loom. A bell too near vanilla's limit is passed over.
+-- 13. No bell: it grazes about the loom. A bell 45 from the bed is used (the bed bounds nothing).
 reset(); gopaths = {}; time = 10000 / 24000
 local h = shepherd(0, 0)
 tick(h, 3)
@@ -601,8 +598,7 @@ reset(); gopaths = {}
 nodes[key({x = 45, y = 5, z = 0})] = "mcl_bells:bell"
 local far_home = shepherd(0, 0)
 tick(far_home, 3)
-assert(#gopaths == 1 and flat(gopaths[1].target, far_home._jobsite) <= 13,
-	"a bell near vanilla's 50 node limit is passed over")
+assert(#gopaths == 1 and flat(gopaths[1].target, {x = 45, z = 0}) <= 21, "a bell 45 from the bed is used")
 
 -- 14. Trading holds the herd.
 reset(); gopaths = {}
@@ -614,12 +610,12 @@ assert(#gopaths == 0, "no herding while someone is trading")
 -- building (measured from the bell), about 10 apart, 20-30 s at each; within the bed's and
 -- loom's reach. flock.tune.field turns it off (the old village stops).
 flock.tune.field = true
-local function fresh(bed_x, door_x)
+local function fresh(bed_x, door_x, loom_x)
 	reset(); gopaths = {}; time = 10000 / 24000; now = now + 700
 	for k in pairs(flock.reach_cache) do flock.reach_cache[k] = nil end
 	nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
 	nodes[key({x = 15 + (door_x or 10), y = 0, z = 0})] = "mcl_doors:door"
-	local s = shepherd(0, 0)
+	local s = shepherd(loom_x or 0, 0)
 	s._bed = {x = bed_x or 15, y = 0, z = 0}
 	return s
 end
@@ -650,12 +646,24 @@ for i = 1, 6 do
 	end
 	previous = t
 end
--- The farthest building decides: a door 30 away puts the stops at 45-60 (the bed on the bell
--- leaves 46, so as far as that allows: 41-46).
+-- The farthest building decides: a door 30 away puts the stops 45-60 from the bell.
 rover = fresh(nil, 30)
 local t = next_stop(rover)
 local d = flat(t, center)
-assert(d >= 40 and d <= 47, "bounds cap the band: " .. d)
+assert(d >= 44 and d <= 61, "a farther door moves the band out: " .. d)
+-- The bed bounds nothing (the far-trips rule hides it from vanilla's 50 on an errand): a bed
+-- 70 from the bell, and stops more than 50 from it.
+local past_vanilla = 0
+for i = 1, 10 do
+	rover = fresh(-30)
+	local stop = next_stop(rover)
+	assert(flat(stop, center) >= 24, "a field stop " .. i)
+	if flat(stop, rover._bed) > 50 then past_vanilla = past_vanilla + 1 end
+end
+assert(past_vanilla > 0, "some stops are past vanilla's 50 from the bed")
+-- The loom does: one 73 from the bell leaves 17, no clearance past a door at 10: near stops.
+rover = fresh(nil, nil, -58)
+for i = 1, 4 do assert(flat(next_stop(rover), center) <= 21, "loom too far: stop " .. i .. " is near") end
 -- Standing 20-30 s, not the 15-40 of a village stop.
 rover = fresh()
 local field_stop = next_stop(rover)
@@ -669,32 +677,54 @@ tick(rover, 18)
 assert(#gopaths == before, "still standing after 18 s")
 tick(rover, 14)
 assert(#gopaths == before + 1, "off to the next after 30 s")
--- The scan is cached per bell.
+-- The scan is cached per bell, and goes a slab at a time (9 slabs of 8 over +-32).
 local scans = 0
 local real_find = minetest.find_nodes_in_area
-minetest.find_nodes_in_area = function(...) scans = scans + 1; return real_find(...) end
+minetest.find_nodes_in_area = function(minp, maxp, names, ...)
+	if names[1] == "group:door" then
+		scans = scans + 1
+		assert(maxp.y - minp.y < 8, "a slab, not the whole box")
+	end
+	return real_find(minp, maxp, names, ...)
+end
 rover = fresh()
 next_stop(rover); next_stop(rover); next_stop(rover)
-local first_scans = scans
-assert(first_scans <= 2, "one scan (plus the bell search) per bell: " .. first_scans)
+assert(scans == 9, "one scan of 9 slabs per bell: " .. scans)
 session = flock.sessions[rover]
 session.area = nil; session.herd = nil; next_stop(rover)
+assert(scans == 9, "a second area lookup does not scan again: " .. scans)
 minetest.find_nodes_in_area = real_find
--- The setting caps the margin: range 20 puts the stops 15-20 beyond the door (25-30).
-settings.living_villages_flock_range = "20"
-rover = fresh()
-for i = 1, 4 do
-	local dd = flat(next_stop(rover), center)
-	assert(dd >= 24 and dd <= 31, "range 20: stop " .. i .. ": " .. dd)
+-- The setting caps the margin: range 20 puts the stops 15-20 beyond the door (25-30); a range
+-- under 20 counts as 20, and a larger one widens the band.
+for _, range in ipairs({"20", "10"}) do
+	settings.living_villages_flock_range = range
+	rover = fresh()
+	for i = 1, 4 do
+		local dd = flat(next_stop(rover), center)
+		assert(dd >= 24 and dd <= 31, "range " .. range .. ": stop " .. i .. ": " .. dd)
+	end
 end
+settings.living_villages_flock_range = "40"
+rover = fresh()
+local widest = 0
+for i = 1, 12 do widest = math.max(widest, flat(next_stop(rover), center)) end
+assert(widest > 35, "range 40 reaches past 35: " .. widest)
 -- 0 keeps every stop in the village.
 settings.living_villages_flock_range = "0"
 rover = fresh()
 for i = 1, 4 do assert(flat(next_stop(rover), center) <= 21, "range 0: stop " .. i .. " stays in the village") end
 settings.living_villages_flock_range = nil
--- No room: a bed 25 from the bell leaves 21, no clearance beyond a door at 10: near stops.
-rover = fresh(-10)
-for i = 1, 4 do assert(flat(next_stop(rover), center) <= 21, "no room: stop " .. i .. " is near") end
+-- No building found, or the area not loaded: near stops, and nothing is cached.
+rover = fresh(nil, 10)
+for k, v in pairs(nodes) do if v == "mcl_doors:door" then nodes[k] = nil end end
+for i = 1, 3 do assert(flat(next_stop(rover), center) <= 21, "no building: stop " .. i .. " is near") end
+assert(next(flock.reach_cache) == nil, "an empty scan is not cached")
+rover = fresh()
+local real_node = minetest.get_node_or_nil
+minetest.get_node_or_nil = function(pos) if flat(pos, center) > 30 then return nil end return real_node(pos) end
+for i = 1, 3 do assert(flat(next_stop(rover), center) <= 21, "unloaded: stop " .. i .. " is near") end
+assert(next(flock.reach_cache) == nil, "an unloaded scan is not cached")
+minetest.get_node_or_nil = real_node
 -- No field spot (nothing to stand on beyond 22 of the bell): near ones too.
 rover = fresh()
 for k in pairs(nodes) do
@@ -721,6 +751,7 @@ rover.gopath = function(s, target)
 	s.state = "gowp"
 	return true
 end
+tick(rover, 9) -- the building scan
 tick(rover, 2)
 assert(tries[1] == true and tries[2] == false, "after a refused field stop the next is near")
 -- Failures in a row send it to the loom; a stop that arrives clears the count.
@@ -734,6 +765,7 @@ rover.gopath = function(s, target)
 	if ok then s.state = "gowp"; table.insert(gopaths, {target = target}) end
 	return ok
 end
+tick(rover, 9)
 tick(rover, 3)
 assert(attempts == 3 and rover.state == "gowp", "two refusals, then a stop")
 rover.pos.x, rover.pos.z, rover.state = gopaths[1].target.x, gopaths[1].target.z, "stand"
@@ -744,6 +776,7 @@ assert(attempts >= 5 and flock.sessions[rover].herd.phase == "out" and activity_
 	"scattered failures do not send it to the loom")
 rover = fresh()
 rover.gopath = function() attempts = attempts + 1; return false end
+tick(rover, 9)
 tick(rover, 4)
 assert(flock.sessions[rover].herd.phase == "loom", "three in a row do")
 -- A stage change while out in the field ends the herd.
