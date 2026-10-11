@@ -779,6 +779,31 @@ rover.gopath = function() attempts = attempts + 1; return false end
 tick(rover, 9)
 tick(rover, 4)
 assert(flock.sessions[rover].herd.phase == "loom", "three in a row do")
+-- The return margin: 10 game minutes before the work stage ends (15500 ticks) a shepherd out at a
+-- field stop heads for the loom (vanilla's walk, so the herd answers no "herd" activity) and starts
+-- no new stop; a herd is not started then either.
+rover = fresh()
+local field_at = next_stop(rover)
+rover.pos.x, rover.pos.z, rover.state = field_at.x, field_at.z, "stand"
+tick(rover, 2)
+assert(flock.sessions[rover].herd.field_stop, "out at a field stop")
+local walks = #gopaths
+time = 15400 / 24000
+tick(rover, 1)
+assert(flock.sessions[rover].herd.phase == "loom" and not flock.sessions[rover].herd.field_stop,
+	"ten minutes before the end it goes back to the loom")
+assert(activity_of(rover) ~= "herd", "and vanilla sends it there")
+now = now + 120
+tick(rover, 120)
+assert(#gopaths == walks and flock.sessions[rover].herd.phase == "loom", "no new stop, the loom phase does not end")
+time = 15600 / 24000
+tick(rover, 2)
+assert(flock.sessions[rover].herd == nil, "nothing is left of the herd at the stage end")
+rover = fresh()
+time = 15400 / 24000
+tick(rover, 12)
+assert(#gopaths == 0 and flock.sessions[rover].herd == nil, "no herd is started in the last minutes")
+time = 10000 / 24000
 -- A stage change while out in the field ends the herd.
 rover = fresh()
 next_stop(rover)

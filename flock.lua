@@ -61,6 +61,10 @@ local FIELD_STEP_MIN, FIELD_STEP_MAX = 8, 12
 local FIELD_LINGER_MIN, FIELD_LINGER_MAX = 20, 30
 local BUILDING_SCAN, BUILDING_SCAN_HEIGHT = 56, 32
 local tune = {field = true}
+-- The last 10 game minutes (1000 ticks to the hour) of the work stage: no new stop, and a shepherd
+-- out in the field goes back to the loom, so it is in the village when the tavern, home and
+-- sleep stages begin (a trip home from 60-75 out is not one the planner always finds, #252).
+local RETURN_TICKS = 1000 / 6
 -- Bell cell key -> distance of its village's farthest door or bed, or the scan under way.
 local reach_cache = {}
 local LOOM_RADIUS = 12
@@ -488,9 +492,15 @@ local function end_herd(self, session)
 	session.herd = nil
 end
 
+-- Whether the work stage ends within RETURN_TICKS (by the villager's own timetable).
+local function winding_down(self)
+	local tod = (core.get_timeofday() + RETURN_TICKS / 24000) % 1
+	return common.schedule_stage(tod, self) ~= "work"
+end
+
 local function begin_loom(self, session, herd)
 	if herd.walking and self.state == "gowp" then common.stop_walk(self) end
-	herd.walking, herd.stop, herd.linger_until = false, nil, nil
+	herd.walking, herd.stop, herd.linger_until, herd.field_stop = false, nil, nil, nil
 	if herd.anchor and self._villages_wander_anchor == herd.anchor then self._villages_wander_anchor = nil end
 	herd.anchor = nil
 	herd.phase, herd.since = "loom", session.clock
@@ -516,7 +526,7 @@ local function herd_tick(self, session, pos, bell)
 	local now = session.clock
 	local herd = session.herd
 	if not herd then
-		if now < (session.area_check or 0) then return end
+		if now < (session.area_check or 0) or winding_down(self) then return end
 		-- Looked up again every AREA_TTL seconds (a bell may be built or taken down) and when
 		-- a bed turns up (it bounds the radius); a shepherd with none grazes without one.
 		local area = session.area
@@ -548,6 +558,15 @@ local function herd_tick(self, session, pos, bell)
 	if herd.area.scanning then
 		set_band(herd.area)
 		if herd.area.scanning then return end
+	end
+	if winding_down(self) then
+		if herd.phase == "out" then
+			local loom = self._jobsite
+			core.log("action", string.format("[living_villages] shepherd %s heads for its loom at the end of the work stage, %s from it",
+				tostring(self._id), loom and string.format("%.0f", flat(pos, loom)) or "?"))
+			begin_loom(self, session, herd)
+		end
+		return
 	end
 	if herd.phase == "loom" then
 		if now - herd.since < HERD_LOOM then return end
