@@ -18,6 +18,7 @@
 # default tools/lv_probe/results/), LV_PROBE_PORT (first port to try; a free one
 # is used, never one a running game holds), LV_PROBE_LIMIT (seconds before giving up;
 # default 3600, or with a census sites x (census seconds + 120) + 600 if larger),
+# LV_PROBE_CENSUS_PUTTER (seconds of the census held at the Putter stage first, with a well watch, #11),
 # LV_PROBE_CENSUS (whole seconds of jobsite census per village, #217; needs --with-mod).
 set -eu
 
@@ -116,6 +117,7 @@ lv_probe_sites = $sites
 lv_probe_radius = $radius
 lv_probe_chunk = $chunk
 lv_probe_census = $census
+lv_probe_census_putter = ${LV_PROBE_CENSUS_PUTTER:-0}
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
