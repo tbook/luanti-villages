@@ -303,9 +303,11 @@ day = day + 1
 for _, entity in ipairs(entities) do entity.removed = true end
 local hunger, saturation = {}, {}
 local connected = {}
+local ppos, php = {}, {}
 local function player(name, h)
 	hunger[name], saturation[name] = h, 0
-	local object = {get_pos = function() return {x = 2, y = 0.1, z = 0} end, name = name}
+	ppos[name], php[name] = {x = 2, y = 0, z = 0}, 20
+	local object = {get_pos = function() return ppos[name] end, get_hp = function() return php[name] end, name = name}
 	connected[name] = object
 	return object
 end
@@ -329,7 +331,10 @@ local function step(seconds)
 		pm.step(0.25, pm_seat)
 	end
 end
-local function sit(name, chair) mcl_cozy.players[name] = {chair, "sit"} end
+local function sit(name, chair)
+	mcl_cozy.players[name] = {chair, "sit"}
+	ppos[name] = {x = chair.x, y = chair.y, z = chair.z}
+end
 local function stand_up(name) mcl_cozy.players[name] = nil end
 local function eating()
 	local hold = meal.plates[key(plate)]
@@ -346,7 +351,7 @@ assert(stacks[key(plate)] == nil, "nothing written to the plate")
 assert(hunger.pat >= 10 and hunger.pat < 12, "credited by bites so far")
 step(14)
 assert(hunger.pat == 13, "3 hunger points in all: " .. hunger.pat)
-assert(math.abs(saturation.pat - 1.5) < 0.2, "a little saturation")
+assert(math.abs(saturation.pat - 1.5) < 0.2, "a little saturation " .. saturation.pat)
 assert(meals_shown() == 0 and not eating(), "plate clear")
 step(5)
 stand_up("pat")
@@ -361,8 +366,19 @@ player("pat", 20)
 stand_up("pat")
 step(1)
 sit("pat", west)
+step(6)
+assert(eating() and meals_shown() == 1, "a full player is still served")
+step(14)
+assert(hunger.pat == 20 and saturation.pat == 0, "full: cap")
+
+-- One point of room: one point given.
+day = day + 1
+player("pat", 19)
+stand_up("pat")
+step(1)
+sit("pat", west)
 step(20)
-assert(hunger.pat == 20, "full: cap")
+assert(hunger.pat == 20 and not eating())
 
 -- Standing up early stops the meal and credits only the bites taken.
 day = day + 1
@@ -380,6 +396,74 @@ assert(not eating() and meals_shown() == 0, "display cleared on standing")
 assert(got > 5 and got < 8, "partial credit: " .. got)
 step(10)
 assert(hunger.pat == got)
+
+-- Any eating gives at least a point: one bite, then up.
+day = day + 1
+player("pat", 5)
+stand_up("pat")
+step(1)
+sit("pat", west)
+step(3.5)
+assert(eating() and hunger.pat == 6, "first bite gives a point: " .. hunger.pat)
+stand_up("pat")
+step(0.5)
+assert(not eating() and meals_shown() == 0)
+
+-- Death mid-meal: the entry stays in mcl_cozy, the meal and the display end at once.
+day = day + 1
+player("pat", 5)
+sit("pat", west)
+step(5)
+assert(eating())
+local before = hunger.pat
+php.pat = 0
+step(0.5)
+assert(not eating() and meals_shown() == 0 and hunger.pat == before, "dead: stopped")
+step(10)
+assert(hunger.pat == before and meals_shown() == 0)
+php.pat = 20
+step(8)
+assert(not eating(), "that day's meal was served: no second")
+mcl_cozy.players.pat = nil
+step(0.5)
+
+-- Teleported away mid-meal.
+day = day + 1
+player("pat", 5)
+sit("pat", west)
+step(5)
+assert(eating())
+ppos.pat = {x = 40, y = 0, z = 40}
+step(0.5)
+before = hunger.pat
+assert(not eating() and meals_shown() == 0, "teleported: stopped")
+step(10)
+assert(hunger.pat == before)
+mcl_cozy.players.pat = nil
+step(0.5)
+
+-- Teleported before being served: nothing is used up.
+day = day + 1
+player("pat", 5)
+sit("pat", west)
+step(1)
+ppos.pat = {x = 40, y = 0, z = 40}
+step(0.5)
+assert(pm.diners.pat == nil and pm.eaten["pat@0,0,0"] == nil)
+mcl_cozy.players.pat = nil
+step(0.5)
+
+-- The day changes while seated and fed: a new day, a new meal.
+day = day + 1
+player("pat", 5)
+sit("pat", west)
+step(18)
+assert(hunger.pat == 8 and not eating())
+day = day + 1
+step(5)
+assert(eating(), "next day, served again")
+mcl_cozy.players.pat = nil
+step(0.5)
 
 -- Disconnect mid-meal.
 day = day + 1

@@ -12,8 +12,15 @@
 -- chair a player sits in (#99).
 local core = minetest
 local JUKEBOX = "mcl_jukebox:jukebox"
--- A player's mouth above the seat (the sitting eye offset is 0.7 down).
-local MOUTH_HEIGHT = 0.9
+-- Where a seated player's mouth is. mcl_playerplus gives the standing eye height 1.6,
+-- and mcl_cozy's SIT_EYE_OFFSET (0, -7, 2) in tenth-nodes moves the eyes 0.7 down and
+-- 0.2 forward to match the sitting pose; the mouth is about 0.1 below the eyes. mcl_cozy
+-- moves the player to the chair node's centre, so heights count from there.
+local MOUTH_HEIGHT = 1.6 - 0.7 - 0.1
+local MOUTH_FORWARD = 0.2
+-- A seated player is at the chair; further than this, they were moved (teleport,
+-- respawn): mcl_cozy never clears its entry then.
+local CHAIR_REACH = 1.5
 -- A full meal: 3 hunger points and 1.5 saturation over the bites.
 local HUNGER = 3
 local SATURATION = 1.5
@@ -45,21 +52,22 @@ local function tavern_of(seat, chair)
 	return table_pos, best
 end
 
--- One bite's share of the meal. Whole hunger points are given as they add up;
--- a full player gets nothing.
+-- One bite's share of the meal, in whole hunger points: the running total rounded up,
+-- so any eating gives at least a point. A full player gets nothing.
 local function feed(diner)
 	local player = core.get_player_by_name(diner.name)
 	if not player or not mcl_hunger then return end
 	local hunger = mcl_hunger.get_hunger(player)
 	if hunger >= 20 then return end
-	if diner.given >= HUNGER then return end
-	diner.credit = diner.credit + HUNGER / BITES
-	if diner.credit >= 1 - 1e-6 then
-		diner.given = diner.given + 1
-		diner.credit = diner.credit - 1
-		mcl_hunger.set_hunger(player, math.min(20, hunger + 1))
+	diner.bites = diner.bites + 1
+	local points = math.min(HUNGER, math.ceil(diner.bites * HUNGER / BITES - 1e-6)) - diner.given
+	if points > 0 then
+		diner.given = diner.given + points
+		mcl_hunger.set_hunger(player, math.min(20, hunger + points))
 	end
-	mcl_hunger.saturate(diner.name, SATURATION / BITES)
+	local share = math.min(SATURATION / BITES, SATURATION - diner.saturated)
+	diner.saturated = diner.saturated + share
+	if share > 0 then mcl_hunger.saturate(diner.name, share) end
 end
 
 local function stop(name)
@@ -70,7 +78,7 @@ end
 
 local function start(name, chair, seat)
 	local table_pos, jukebox = tavern_of(seat, chair)
-	local diner = {name = name, chair = key(chair), credit = 0, given = 0}
+	local diner = {name = name, chair = key(chair), bites = 0, given = 0, saturated = 0}
 	diners[name] = diner
 	if not table_pos or not jukebox then return end
 	diner.jukebox = jukebox
@@ -78,7 +86,14 @@ local function start(name, chair, seat)
 	diner.table = {
 		_id = "player:" .. name,
 		_villages_seat = {table = table_pos},
-		_villages_mouth = MOUTH_HEIGHT,
+		_villages_mouth_at = function()
+			local player = core.get_player_by_name(name)
+			local pos = player and player:get_pos()
+			if not pos then return end
+			local yaw = player.get_look_horizontal and player:get_look_horizontal() or 0
+			return {x = pos.x - math.sin(yaw) * MOUTH_FORWARD, y = pos.y + MOUTH_HEIGHT,
+				z = pos.z + math.cos(yaw) * MOUTH_FORWARD}
+		end,
 		_villages_meal_day = eaten[diner.eaten_key],
 		_villages_on_bite = function() feed(diner) end,
 		object = core.get_player_by_name(name),
@@ -89,13 +104,16 @@ function M.step(dtime, seat)
 	local sitting = mcl_cozy and mcl_cozy.players or {}
 	for name, diner in pairs(diners) do
 		local entry = sitting[name]
-		if not core.get_player_by_name(name) or not entry or entry[2] ~= "sit"
-			or key(vector.round(entry[1])) ~= diner.chair then
+		local player = core.get_player_by_name(name)
+		if not player or not entry or entry[2] ~= "sit" or key(vector.round(entry[1])) ~= diner.chair
+			or player:get_hp() <= 0 or vector.distance(player:get_pos(), entry[1]) > CHAIR_REACH then
 			stop(name)
 		end
 	end
 	for name, entry in pairs(sitting) do
-		if not diners[name] and entry[2] == "sit" and entry[1] and core.get_player_by_name(name) then
+		local player = core.get_player_by_name(name)
+		if not diners[name] and entry[2] == "sit" and entry[1] and player and player:get_hp() > 0
+			and vector.distance(player:get_pos(), entry[1]) <= CHAIR_REACH then
 			start(name, vector.round(entry[1]), seat)
 		end
 		local diner = diners[name]

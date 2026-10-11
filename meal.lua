@@ -11,8 +11,8 @@
 --
 -- A player at a tavern table (#19) is served by the same loop: player_meals.lua
 -- passes a diner table that stands in for a villager (_id, _villages_seat.table,
--- object, _villages_meal_day, and optionally _villages_mouth and
--- _villages_on_bite, called on each bite).
+-- object, _villages_meal_day, and optionally _villages_mouth_at
+-- (a function giving the mouth position) and _villages_on_bite, called on each bite).
 --
 -- Load this once, at top-level load time (init.lua): it registers the entity,
 -- which Luanti allows only then, and the plate holds are its own in-memory
@@ -142,7 +142,8 @@ local function bite(self, item)
 	local definition = core.registered_items[item] or {}
 	local texture = definition.inventory_image
 	if not texture or texture == "" then texture = definition.wield_image end
-	local mouth = {x = pos.x, y = pos.y + (self._villages_mouth or MOUTH_HEIGHT), z = pos.z}
+	local mouth = self._villages_mouth_at and self._villages_mouth_at(self)
+		or {x = pos.x, y = pos.y + MOUTH_HEIGHT, z = pos.z}
 	if texture and texture ~= "" and definition._food_particles ~= false then
 		for i = 0, 8 do
 			core.add_particle({
