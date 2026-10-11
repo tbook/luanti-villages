@@ -16,6 +16,7 @@
 -- itself only while it is being pulled.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
 
 local SHEEP = "mobs_mc:sheep"
 local SETTING = "living_villages_flock_size"
@@ -47,10 +48,12 @@ local LEASH, UNSEEN = 56, 24
 -- where the shepherd lingers a while.
 local HERD_OUT, HERD_LOOM = 240, 60
 local AREA_RADIUS, AREA_MIN_RADIUS = 20, 8
--- Every FAR_EVERY-th stop (#243) is out in the countryside instead: FAR_MIN or more from
--- the bell, up to living_villages_flock_range (default 40; mcl_mobs freezes a mob no player
--- is within 48 of, so a stop much farther is seen only if the player walks out).
-local RANGE_SETTING, DEFAULT_RANGE, FAR_MIN, FAR_EVERY = "living_villages_flock_range", 40, 24, 3
+-- About one stop in three (#243; tune.far_share, a table so tests can fix the roll) is out
+-- in the countryside instead: FAR_MIN or more from the bell, up to living_villages_flock_range
+-- (default 32; mcl_mobs freezes a mob no player is within 48 of, so a stop much farther is
+-- seen only if the player walks out). After a far stop fails, the next one is near.
+local RANGE_SETTING, DEFAULT_RANGE, FAR_MIN = "living_villages_flock_range", 32, 24
+local tune = {far_share = 1 / 3}
 local LOOM_RADIUS = 12
 local STOP_MIN_RADIUS = 5
 local STOP_TRIES = 20
@@ -368,6 +371,18 @@ local function find_area(self, bell)
 	return nil, why .. ", and the loom leaves radius " .. radius
 end
 
+-- A far stop (over untouched terrain) is not on a tree canopy, and not on a ledge: at least two
+-- of its four neighbours are places a villager can stand too (cells.lua).
+local function solid_ground(cell)
+	local floor = core.get_node_or_nil({x = cell.x, y = cell.y - 1, z = cell.z})
+	if not floor or core.get_item_group(floor.name, "leaves") > 0 then return false end
+	local open = 0
+	for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+		if cells.can_stand({x = cell.x + d[1], y = cell.y, z = cell.z + d[2]}) then open = open + 1 end
+	end
+	return open >= 2
+end
+
 -- far: look beyond the buildings, between FAR_MIN and the area's far_radius (if it has room).
 local function pick_stop(area, pos, far)
 	local min_d, max_d = STOP_MIN_RADIUS, area.radius
@@ -375,7 +390,10 @@ local function pick_stop(area, pos, far)
 	for _ = 1, STOP_TRIES do
 		local cell = find_spot(area.center, min_d, max_d, 1)
 		-- On the level of the centre (+-2): a roof, a terrace or a pit is often not reachable.
-		if cell and flat(cell, pos) > STOP_MIN_RADIUS and math.abs(cell.y - area.center.y) <= 2 then return cell end
+		if cell and flat(cell, pos) > STOP_MIN_RADIUS and math.abs(cell.y - area.center.y) <= 2
+			and (min_d == STOP_MIN_RADIUS or solid_ground(cell)) then
+			return cell
+		end
 	end
 end
 
@@ -400,6 +418,7 @@ local function fail_stop(self, session, herd, why)
 	core.log("action", string.format("[living_villages] shepherd %s: grazing stop failed (%d): %s, route %s/%s",
 		tostring(self._id), herd.failures + 1, why or "?", route and tostring(route.status) or "-", route and tostring(route.reason) or "-"))
 	herd.stop, herd.walking, herd.linger_until = nil, false, nil
+	herd.skip_far = herd.far_stop
 	herd.failures = herd.failures + 1
 	if herd.failures >= MAX_FAILURES then begin_loom(self, session, herd) end
 end
@@ -466,6 +485,7 @@ local function herd_tick(self, session, pos, bell)
 			fail_stop(self, session, herd, string.format("ended %.1f from the stop", flat(pos, herd.stop)))
 			if herd.phase ~= "out" then return end
 		else
+			herd.failures = 0 -- only failures in a row count against the stops
 			herd.linger_until = herd.linger_until or now + LINGER_MIN + math.random() * (LINGER_MAX - LINGER_MIN)
 			if now < herd.linger_until then
 				herd.anchor = herd.anchor or {pos = vector.new(pos), radius = LINGER_RADIUS}
@@ -480,7 +500,8 @@ local function herd_tick(self, session, pos, bell)
 	-- each refusal would count against the stops: wait it out, then try another stop.
 	local route = self._villages_goto_route
 	if route and route.status == "retry" and route.retry_at and core.get_gametime() < route.retry_at then return end
-	local far = (herd.stops or 0) % FAR_EVERY == FAR_EVERY - 1
+	local far = not herd.skip_far and math.random() < tune.far_share
+	herd.skip_far = nil
 	local stop = pick_stop(herd.area, pos, far)
 	if far and not stop then stop = pick_stop(herd.area, pos) end
 	if not stop then
@@ -496,13 +517,16 @@ local function herd_tick(self, session, pos, bell)
 	if self.ready_to_path and not self:ready_to_path(true) then return end
 	if self:gopath(stop, function() end, true) then
 		herd.stop, herd.started, herd.walking = stop, now, true
-		herd.stops = (herd.stops or 0) + 1
-		core.log("info", string.format("[living_villages] shepherd %s grazing stop %d: %.0f from the bell, %.0f from the shepherd%s",
-			tostring(self._id), herd.stops, flat(stop, herd.area.center), flat(pos, stop), flat(stop, herd.area.center) >= FAR_MIN and " (far)" or ""))
+		herd.far_stop = flat(stop, herd.area.center) >= FAR_MIN
+		if herd.far_stop then
+			core.log("info", string.format("[living_villages] shepherd %s far grazing stop: %.0f from the bell, %.0f from the shepherd",
+				tostring(self._id), flat(stop, herd.area.center), flat(pos, stop)))
+		end
 		herd.limit = STOP_BASE + STOP_PER_NODE * flat(pos, stop)
 		if herd.anchor and self._villages_wander_anchor == herd.anchor then self._villages_wander_anchor = nil end
 		herd.anchor = nil
 	else
+		herd.skip_far = flat(stop, herd.area.center) >= FAR_MIN
 		herd.failures = herd.failures + 1
 		if herd.failures >= MAX_FAILURES then begin_loom(self, session, herd) end
 	end
@@ -719,5 +743,5 @@ return {
 	sessions = sessions, states = states, registry = registry,
 	roofed = roofed, find_spot = find_spot,
 	FAR = FAR, NEAR = NEAR, RUN_DISTANCE = RUN_DISTANCE, VILLAGE_CAP = VILLAGE_CAP,
-	HERD_OUT = HERD_OUT, FAR_MIN = FAR_MIN, FAR_EVERY = FAR_EVERY, HERD_LOOM = HERD_LOOM, GRACE = GRACE, LEASH = LEASH,
+	HERD_OUT = HERD_OUT, FAR_MIN = FAR_MIN, tune = tune, HERD_LOOM = HERD_LOOM, GRACE = GRACE, LEASH = LEASH,
 }
