@@ -56,6 +56,12 @@ living_villages_loomless_house_chance (Share of small houses without a loom) flo
 # in bed. 0 turns shepherds' flocks off, sheep already marked are then let go, and
 # shepherds no longer take their grazing walks about the bell in the work stage.
 living_villages_flock_size (Sheep per shepherd) int 5 0 5
+# How far from the village bell a shepherd's grazing stops may be (#243). About one stop in
+# three is out in the countryside, 24 or more nodes from the bell, up to this far
+# (and always within 46 of its bed, 90 of its loom). Villagers no player is within 48
+# nodes of stand still, so stops past that are seen only if the player walks out.
+# 0 keeps every stop in the village (within 20 of the bell).
+living_villages_flock_range (Shepherd grazing range) int 32 0 60
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.
 living_villages_well_hangout (Villagers gather at the well) bool true
