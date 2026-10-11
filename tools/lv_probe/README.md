@@ -98,7 +98,9 @@ The same watch counts conversations (`conversation.lua`, #242) as `conversations
 end, `frozen` (villagers that left a conversation 30 s or more before the end and never moved afterwards; should be empty),
 and `yaw_error_max` (radians, engine yaw against the direction to the others, after 4 s of talking). A few villagers rarely stand
 near one another; `LV_PROBE_CONF_EXTRA="lv_probe_gather = 1"` moves the adults together onto open ground (2 nodes apart) at the
-start of the watch (`gathered` is how many).
+start of the watch (`gathered` is how many). Without it the watch shows the natural frequency: `adult_samples` and
+`stand_samples` (adults seen, and standing, at 2 s steps) against `conversations.groups`. `lv_probe_tod = 0.45` in the same
+extra conf holds the bell stage (a holiday world day) instead of the morning.
 
 ## Plant census (#214, #224)
 

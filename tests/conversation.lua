@@ -125,27 +125,26 @@ do
 	assert(run_until_talking({a, b}), "after the cooldown they talk again")
 end
 
--- A trio faces the mean of the other two; the group never exceeds three.
+-- A trio faces the mean of the other two; the group never exceeds three. The random
+-- function is fixed (always 0: every roll wins and a trio is chosen), not seeded.
 do
 	clear()
 	local group = {}
 	for i = 1, 6 do group[i] = villager((i % 3) * 2, math.floor(i / 3) * 2) end
-	local sizes = {}
-	for round = 1, 30 do
-		now = now + 1000
-		for _, v in ipairs(group) do v._villages_talk, v._villages_talk_next, v.order = nil, nil, nil end
-		if run_until_talking(group) then
-			local seen = {}
-			for _, v in ipairs(group) do
-				if v._villages_talk then seen[v._villages_talk.group] = (seen[v._villages_talk.group] or 0) + 1 end
-			end
-			for _, n in pairs(seen) do
-				assert(n <= conversation.MAX_GROUP, "a group is at most three")
-				sizes[n] = true
-			end
-		end
+	local real_random = math.random
+	math.random = function(m, n) if m then return real_random(m, n) end return 0 end
+	assert(run_until_talking(group))
+	math.random = real_random
+	local seen = {}
+	for _, v in ipairs(group) do
+		if v._villages_talk then seen[v._villages_talk.group] = (seen[v._villages_talk.group] or 0) + 1 end
 	end
-	assert(sizes[2] and sizes[3], "both pairs and trios occur")
+	local trios = 0
+	for _, n in pairs(seen) do
+		assert(n <= conversation.MAX_GROUP, "a group is at most three")
+		if n == 3 then trios = trios + 1 end
+	end
+	assert(trios >= 1, "a trio forms")
 	for _, v in ipairs(group) do
 		tick(v)
 		if v._villages_talk then
@@ -163,6 +162,27 @@ do
 			assert(same_angle(v.target_yaw, yaw_to(v.pos, centre)), "a trio member faces the others")
 		end
 	end
+end
+
+-- A wall between two villagers: no group. Line of sight is asked eye to eye.
+do
+	clear()
+	local a, b = villager(0, 0), villager(3, 0)
+	local asked
+	minetest.line_of_sight = function(from, to)
+		asked = {from, to}
+		return false
+	end
+	assert(not run_until_talking({a, b}), "villagers apart by a wall do not talk")
+	assert(asked and asked[1].y == 1.5 and asked[2].y == 1.5, "sight is checked eye to eye")
+	minetest.line_of_sight = function() return true end
+	assert(run_until_talking({a, b}), "with a clear line they do")
+	-- One that climbs out of sight (3 nodes up) leaves, and so the pair ends.
+	tick(a); tick(b)
+	b.pos = {x = 3, y = 3, z = 0}
+	tick(a)
+	assert(not a._villages_talk and a.order == nil, "a partner on another level ends it")
+	minetest.line_of_sight = nil
 end
 
 -- Nobody forms a group alone, with a villager too far or on another level, or with a child.
@@ -196,6 +216,8 @@ blocked("trading", function(v) v._trading_players = {p = true} end)
 blocked("on the way to the well", function(v) v._villages_well = {} end)
 blocked("on the way to the bell", function(v) v._villages_bell = {} end)
 blocked("work stage", function() time = 9000 / 24000 end)
+time = 6000 / 24000
+blocked("tavern stage (guests belong to tavern.lua)", function() time = 16000 / 24000 end)
 time = 6000 / 24000
 blocked("night", function() time = 22000 / 24000 end)
 time = 6000 / 24000

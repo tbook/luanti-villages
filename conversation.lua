@@ -1,13 +1,15 @@
 -- Villagers converse (#242): two or three idle adults standing within a few nodes
--- of each other, as they do at the well (#11), about the bell (#127), in the
--- putter stage and before dinner, now and then stop and face one another for
+-- of each other, as they do at the well (#11) and about the bell (#127), in
+-- the putter and bell stages, now and then stop and face one another for
 -- 8-25 s, then go on. Atmosphere only: they talk where they stand and walk to
 -- nowhere, there is no animation for it (the model has stand, walk and sleep),
 -- and nothing is saved or placed.
 --
 -- A villager that is standing, free of every other system's errand, rolls
 -- CHANCE every few seconds; on a win it looks for idle neighbours within
--- RADIUS and, with one or two, starts a group (at most MAX_GROUP). A member
+-- RADIUS who can see it (line of sight) and, with one or two, starts a group
+-- (at most MAX_GROUP). Tavern guests are never free (tavern.lua owns them for
+-- the whole stage), so there is no tavern chatter. A member
 -- holds like the church's (church.lua): order "stand" every tick (vanilla
 -- clears it every few seconds), no do_states (which would turn it at random and
 -- start it walking), and its yaw toward the others' mean position. The moment
@@ -16,13 +18,15 @@
 -- Whoever leaves waits COOLDOWN before talking again. Well, bell and wander
 -- anchors are left as they are: the group only stops the legs.
 local core = minetest
+local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 
-local STAGES = {putter = true, bell = true, tavern = true}
+local STAGES = {putter = true, bell = true}
 local SCAN_MIN, SCAN_MAX = 4, 8
-local CHANCE = 0.15
-local RADIUS = 4
+local CHANCE = 0.3
+local RADIUS = 5
 local MAX_DY = 1.5
+local EYE = 1.5
 local MAX_GROUP = 3
 local TRIO_CHANCE = 0.5
 local HOLD_MIN, HOLD_MAX = 8, 25
@@ -32,7 +36,8 @@ local TURN_DELAY = 6
 local STRAY = 2 * RADIUS
 -- Saved with the villager by default; a conversation is this session's.
 local FIELDS = {"_villages_talk", "_villages_talk_next", "_villages_talk_scan"}
--- Other systems' errands and holds, which a conversation never takes over.
+-- Other systems' errands and holds, which a conversation never takes over. A new
+-- hold that is not a route or a field below (e.g. a shepherd's herd, #243) must be added.
 local BUSY = {
 	"_villages_church", "_villages_seat", "_villages_seated_at", "_villages_meal", "_villages_tavern_target",
 	"_villages_fish_session", "_villages_fish_target", "_villages_farm_target", "_villages_keeper_target",
@@ -92,7 +97,8 @@ local function leave(self, reason)
 	if not talk then return end
 	self._villages_talk = nil
 	self._villages_talk_next = now() + COOLDOWN_MIN + math.random() * (COOLDOWN_MAX - COOLDOWN_MIN)
-	-- The order the conversation set, if nothing else has put its own there.
+	-- The order the conversation set; one another wrapper set to "stand" this tick
+	-- (the church's, the tavern's) is cleared for a tick and set again by it.
 	if self.order == "stand" and not talk.was_standing then self.order = nil end
 	local members = talk.group.members
 	for i = #members, 1, -1 do
@@ -114,6 +120,12 @@ local function start(self, partners)
 		group.size, group.until_time - now()))
 end
 
+-- Whether two villagers at a and b can see each other, eye to eye: not through a wall.
+local function sees(a, b)
+	if not core.line_of_sight then return true end
+	return core.line_of_sight({x = a.x, y = a.y + EYE, z = a.z}, {x = b.x, y = b.y + EYE, z = b.z}) ~= false
+end
+
 -- Idle neighbours of self to talk with: nearest first, none more than RADIUS
 -- from self (nor the second from the first).
 local function find_partners(self, pos)
@@ -122,7 +134,7 @@ local function find_partners(self, pos)
 		local other = object:get_luaentity()
 		local other_pos = other and other ~= self and other.name == self.name and object:get_pos()
 		if other_pos and math.abs(other_pos.y - pos.y) <= MAX_DY and not other._villages_talk
-			and now() >= (other._villages_talk_next or 0) and idle(other) then
+			and now() >= (other._villages_talk_next or 0) and idle(other) and sees(pos, other_pos) then
 			found[#found + 1] = {other = other, pos = other_pos, distance = vector.distance(pos, other_pos)}
 		end
 	end
@@ -131,7 +143,7 @@ local function find_partners(self, pos)
 	local partners = {found[1].other}
 	local second = found[2]
 	if second and #partners + 1 < MAX_GROUP and math.random() < TRIO_CHANCE
-		and vector.distance(found[1].pos, second.pos) <= RADIUS then
+		and vector.distance(found[1].pos, second.pos) <= RADIUS and sees(found[1].pos, second.pos) then
 		partners[2] = second.other
 	end
 	return partners
@@ -147,6 +159,8 @@ local function hold(self, talk, pos)
 	for _, other in ipairs(others) do
 		local p = other.object:get_pos()
 		x, z = x + p.x, z + p.z
+		-- One that has climbed or dropped away can no longer see the others.
+		if math.abs(p.y - pos.y) > MAX_DY then return nil end
 	end
 	x, z = x / #others - pos.x, z / #others - pos.z
 	if x * x + z * z > STRAY * STRAY then return nil end
@@ -160,7 +174,7 @@ local function hold(self, talk, pos)
 	self:set_velocity(0)
 	self:set_animation("stand")
 	-- A mob's forward is (-sin yaw, cos yaw) (church.lua).
-	if x ~= 0 or z ~= 0 then self:set_yaw(math.atan2(-x, z), TURN_DELAY) end
+	if x ~= 0 or z ~= 0 then self:set_yaw(atan2(-x, z), TURN_DELAY) end
 	return false
 end
 
@@ -196,16 +210,12 @@ local function install(def)
 			if talk then leave(self, "taken over") end
 			return result
 		end
-		if not enabled() then
-			if talk then leave(self, "setting off") end
-			return result
-		end
-		local pos = self.object:get_pos()
-		if not pos then return result end
 		if talk then
-			if idle(self) then
-				local held = hold(self, talk, pos)
-				if held == false then return false end
+			local pos = self.object:get_pos()
+			if not enabled() then
+				leave(self, "setting off")
+			elseif pos and idle(self) then
+				if hold(self, talk, pos) == false then return false end
 				leave(self, "finished")
 			else
 				leave(self, "taken over")
@@ -216,10 +226,10 @@ local function install(def)
 		self._villages_talk_scan = scan
 		if scan > 0 or now() < (self._villages_talk_next or 0) then return result end
 		self._villages_talk_scan = SCAN_MIN + math.random() * (SCAN_MAX - SCAN_MIN)
-		if math.random() >= CHANCE or not idle(self) then return result end
-		local partners = find_partners(self, pos)
-		if not partners then return result end
-		start(self, partners)
+		if math.random() >= CHANCE or not enabled() or not idle(self) then return result end
+		local pos = self.object:get_pos()
+		local partners = pos and find_partners(self, pos)
+		if partners then start(self, partners) end
 		return result
 	end
 end

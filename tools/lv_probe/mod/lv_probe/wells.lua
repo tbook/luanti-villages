@@ -78,6 +78,10 @@ function wells.watch(minp, maxp)
 				local pos = object:get_pos()
 				local record = ids[e._id]
 				local talker = talkers[e._id]
+				if not e.child then
+					summary.adult_samples = (summary.adult_samples or 0) + 1
+					if e.state == "stand" then summary.stand_samples = (summary.stand_samples or 0) + 1 end
+				end
 				if e._villages_talk then
 					local group = e._villages_talk.group
 					groups[group] = groups[group] or {size = group.size, first = elapsed}

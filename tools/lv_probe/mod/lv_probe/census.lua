@@ -61,7 +61,7 @@ function census.run(area, emit, done)
 	local function tick()
 		-- Setting the time back counts as a new day (get_day_count), which would give every
 		-- villager a fresh roll each tick, so a putter census stops the clock instead.
-		local wanted = waited < putter and 0.24 or 0.33
+		local wanted = waited < putter and (tonumber(core.settings:get("lv_probe_tod")) or 0.24) or 0.33
 		if putter > 0 then
 			core.settings:set("time_speed", "0")
 			if waited == 0 or waited == putter then core.set_timeofday(wanted) end
