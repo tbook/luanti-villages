@@ -601,4 +601,48 @@ local t = shepherd(0, 0, {_trading_players = {x = true}})
 tick(t, 5)
 assert(#gopaths == 0, "no herding while someone is trading")
 
+-- 15. Every third stop is out in the countryside (#243), within the bed's and loom's reach.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local rover = shepherd(0, 0)
+local dists = {}
+local function next_stop()
+	local n = #gopaths
+	for _ = 1, 400 do
+		now = now + 1
+		tick(rover, 1)
+		if #gopaths > n then break end
+		-- Arrive wherever it was sent and linger.
+		local last = gopaths[#gopaths]
+		if last then rover.pos.x, rover.pos.z, rover.state = last.target.x, last.target.z, "stand" end
+	end
+	assert(#gopaths > n, "it sets off for another stop")
+	local t = gopaths[#gopaths].target
+	assert(vector.distance({x = t.x, y = 0, z = t.z}, {x = 0, y = 0, z = 0}) <= 46, "within 46 of the bed")
+	return flat(t, center)
+end
+for i = 1, 9 do dists[i] = next_stop() end
+for i = 1, 9 do
+	if i % flock.FAR_EVERY == 0 then
+		assert(dists[i] >= flock.FAR_MIN - 1, "stop " .. i .. " is out in the countryside: " .. dists[i])
+	else
+		assert(dists[i] <= 21, "stop " .. i .. " is among the buildings: " .. dists[i])
+	end
+end
+-- The setting: 0 keeps every stop in the village.
+reset(); gopaths = {}; settings.living_villages_flock_range = "0"
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+rover = shepherd(0, 0)
+for i = 1, 6 do assert(next_stop() <= 21, "range 0: stop " .. i .. " stays in the village") end
+settings.living_villages_flock_range = nil
+-- The tavern stage while far out ends the walk from where the shepherd stands.
+reset(); gopaths = {}; now = now + 700
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+rover = shepherd(0, 0)
+for _ = 1, 3 do next_stop() end
+rover.state = "gowp"
+time = 16000 / 24000
+villager_def.do_custom(rover, 1)
+assert(rover.state == "stand" and activity_of(rover) ~= "herd", "a far stop does not hold the shepherd past its stage")
+
 print("flock: ok")

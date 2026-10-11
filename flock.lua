@@ -47,6 +47,10 @@ local LEASH, UNSEEN = 56, 24
 -- where the shepherd lingers a while.
 local HERD_OUT, HERD_LOOM = 240, 60
 local AREA_RADIUS, AREA_MIN_RADIUS = 20, 8
+-- Every FAR_EVERY-th stop (#243) is out in the countryside instead: FAR_MIN or more from
+-- the bell, up to living_villages_flock_range (default 40; mcl_mobs freezes a mob no player
+-- is within 48 of, so a stop much farther is seen only if the player walks out).
+local RANGE_SETTING, DEFAULT_RANGE, FAR_MIN, FAR_EVERY = "living_villages_flock_range", 40, 24, 3
 local LOOM_RADIUS = 12
 local STOP_MIN_RADIUS = 5
 local STOP_TRIES = 20
@@ -85,6 +89,11 @@ local function flock_size()
 	local value = core.settings and tonumber(core.settings:get(SETTING))
 	if value == nil then return DEFAULT_SIZE end
 	return math.max(0, math.min(MAX_SIZE, math.floor(value)))
+end
+
+local function flock_range()
+	local value = core.settings and tonumber(core.settings:get(RANGE_SETTING))
+	return math.max(0, math.min(60, value and math.floor(value) or DEFAULT_RANGE))
 end
 
 local function valid_sheep(ent)
@@ -344,7 +353,10 @@ local function find_area(self, bell)
 	if site then
 		local center = bell.center_of(site)
 		local radius = math.min(AREA_RADIUS, room(center))
-		if radius >= AREA_MIN_RADIUS then return {center = center, radius = radius, bed_known = bed ~= nil} end
+		if radius >= AREA_MIN_RADIUS then
+			return {center = center, radius = radius, bed_known = bed ~= nil,
+				far_radius = math.min(flock_range(), room(center))}
+		end
 		why = string.format("the bell at (%d,%d,%d) leaves radius %d", site.x, site.y, site.z, radius)
 	else
 		why = "no bell within reach"
@@ -356,9 +368,12 @@ local function find_area(self, bell)
 	return nil, why .. ", and the loom leaves radius " .. radius
 end
 
-local function pick_stop(area, pos)
+-- far: look beyond the buildings, between FAR_MIN and the area's far_radius (if it has room).
+local function pick_stop(area, pos, far)
+	local min_d, max_d = STOP_MIN_RADIUS, area.radius
+	if far and (area.far_radius or 0) >= FAR_MIN + 2 then min_d, max_d = FAR_MIN, area.far_radius end
 	for _ = 1, STOP_TRIES do
-		local cell = find_spot(area.center, STOP_MIN_RADIUS, area.radius, 1)
+		local cell = find_spot(area.center, min_d, max_d, 1)
 		-- On the level of the centre (+-2): a roof, a terrace or a pit is often not reachable.
 		if cell and flat(cell, pos) > STOP_MIN_RADIUS and math.abs(cell.y - area.center.y) <= 2 then return cell end
 	end
@@ -465,7 +480,9 @@ local function herd_tick(self, session, pos, bell)
 	-- each refusal would count against the stops: wait it out, then try another stop.
 	local route = self._villages_goto_route
 	if route and route.status == "retry" and route.retry_at and core.get_gametime() < route.retry_at then return end
-	local stop = pick_stop(herd.area, pos)
+	local far = (herd.stops or 0) % FAR_EVERY == FAR_EVERY - 1
+	local stop = pick_stop(herd.area, pos, far)
+	if far and not stop then stop = pick_stop(herd.area, pos) end
 	if not stop then
 		if not herd.pick_logged then
 			herd.pick_logged = true
@@ -479,6 +496,9 @@ local function herd_tick(self, session, pos, bell)
 	if self.ready_to_path and not self:ready_to_path(true) then return end
 	if self:gopath(stop, function() end, true) then
 		herd.stop, herd.started, herd.walking = stop, now, true
+		herd.stops = (herd.stops or 0) + 1
+		core.log("info", string.format("[living_villages] shepherd %s grazing stop %d: %.0f from the bell, %.0f from the shepherd%s",
+			tostring(self._id), herd.stops, flat(stop, herd.area.center), flat(pos, stop), flat(stop, herd.area.center) >= FAR_MIN and " (far)" or ""))
 		herd.limit = STOP_BASE + STOP_PER_NODE * flat(pos, stop)
 		if herd.anchor and self._villages_wander_anchor == herd.anchor then self._villages_wander_anchor = nil end
 		herd.anchor = nil
@@ -699,5 +719,5 @@ return {
 	sessions = sessions, states = states, registry = registry,
 	roofed = roofed, find_spot = find_spot,
 	FAR = FAR, NEAR = NEAR, RUN_DISTANCE = RUN_DISTANCE, VILLAGE_CAP = VILLAGE_CAP,
-	HERD_OUT = HERD_OUT, HERD_LOOM = HERD_LOOM, GRACE = GRACE, LEASH = LEASH,
+	HERD_OUT = HERD_OUT, FAR_MIN = FAR_MIN, FAR_EVERY = FAR_EVERY, HERD_LOOM = HERD_LOOM, GRACE = GRACE, LEASH = LEASH,
 }
