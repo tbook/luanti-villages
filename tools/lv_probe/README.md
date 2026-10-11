@@ -99,7 +99,7 @@ end, `frozen` (villagers that left a conversation 30 s or more before the end an
 and `yaw_error_max` (radians, engine yaw against the direction to the others, after 4 s of talking). A few villagers rarely stand
 near one another; `LV_PROBE_CONF_EXTRA="lv_probe_gather = 1"` moves the adults together onto open ground (2 nodes apart) at the
 start of the watch (`gathered` is how many). Without it the watch shows the natural frequency: `adult_samples` and
-`stand_samples` (adults seen, and standing, at 2 s steps) against `conversations.groups`. `lv_probe_tod = 0.45` in the same
+`stand_samples` (adults seen, and standing, at 2 s steps) against `conversations.groups`. `lv_probe_well_all = 1` makes every adult go to the well (re-armed every 30 s, so a long watch sees many stays); `stays_talked` counts stays with a conversation (each member of a group counts); `at_well` samples what adults about the well are doing. `lv_probe_tod = 0.45` in the same
 extra conf holds the bell stage (a holiday world day) instead of the morning.
 
 ## Plant census (#214, #224)

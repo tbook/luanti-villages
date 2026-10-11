@@ -63,6 +63,17 @@ function wells.watch(minp, maxp)
 	local function sample()
 		if not running then return end
 		if elapsed == 0 and core.settings:get("lv_probe_gather") == "1" then gather() end
+		-- lv_probe_well_all = 1: every adult rolls to go to the well today (well.lua), so several
+		-- visit it by their own walks and stand about it for their stay
+		-- ...and again every 30 s for those who have left, so that a long watch sees many stays.
+		if elapsed % 30 == 0 and core.settings:get("lv_probe_well_all") == "1" then
+			for _, object in ipairs(core.get_objects_inside_radius(center, radius)) do
+				local e = object:get_luaentity()
+				if e and e.name == "mobs_mc:villager" and e._id and not e.child and not e._villages_well then
+					e._villages_well_day, e._villages_well_going = core.get_day_count(), true
+				end
+			end
+		end
 		elapsed = elapsed + SAMPLE
 		summary.samples = summary.samples + 1
 		for _, object in ipairs(core.get_objects_inside_radius(center, radius)) do
@@ -111,6 +122,11 @@ function wells.watch(minp, maxp)
 				end
 				if e._villages_well then
 					bound = bound + 1
+					if record and record.left_at then
+						summary.old = summary.old or {}
+						summary.old[#summary.old + 1] = record
+						record = nil
+					end
 					if not record then
 						record = {bound_at = elapsed}
 						ids[e._id] = record
@@ -123,9 +139,27 @@ function wells.watch(minp, maxp)
 				elseif record and record.arrived_at and not record.left_at then
 					record.left_at = elapsed
 				end
+				if e._villages_talk and record and record.arrived_at and not record.left_at then record.talked = true end
 				for _, well in ipairs(list) do
 					local d = math.sqrt((pos.x - well.center.x) ^ 2 + (pos.z - well.center.z) ^ 2)
-					if d <= NEAR and math.abs(pos.y - well.water.y) <= 4 then near = near + 1 end
+					if d <= NEAR and math.abs(pos.y - well.water.y) <= 4 then
+						near = near + 1
+						if not e.child then
+							local c = summary.at_well or {samples = 0, stand = 0, anchored = 0, partner_5 = 0, partner_5_stand = 0}
+							summary.at_well = c
+							c.samples = c.samples + 1
+							if e.state == "stand" then c.stand = c.stand + 1 end
+							if e._villages_wander_anchor then c.anchored = c.anchored + 1 end
+							for _, other in ipairs(core.get_objects_inside_radius(pos, 5)) do
+								local oe = other:get_luaentity()
+								if oe and oe ~= e and oe.name == "mobs_mc:villager" and not oe.child then
+									c.partner_5 = c.partner_5 + 1
+									if oe.state == "stand" and e.state == "stand" then c.partner_5_stand = c.partner_5_stand + 1 end
+									break
+								end
+							end
+						end
+					end
 					local feet = math.floor(pos.y + 0.26 + 0.5)
 					if d <= RIM and feet > well.stand_y then
 						summary.rim.count = summary.rim.count + 1
@@ -150,11 +184,16 @@ function wells.watch(minp, maxp)
 			summary.wells[#summary.wells + 1] = {water = well.water, stand_y = well.stand_y}
 		end
 		local bound_n, arrived_n, left_n, stays = 0, 0, 0, {}
-		for _, record in pairs(ids) do
+		local all = {}
+		for _, record in pairs(ids) do all[#all + 1] = record end
+		for _, record in ipairs(summary.old or {}) do all[#all + 1] = record end
+		summary.old = nil
+		for _, record in ipairs(all) do
 			bound_n = bound_n + 1
 			if record.arrived_at then arrived_n = arrived_n + 1 end
 			if record.left_at then
 				left_n = left_n + 1
+				if record.talked then summary.stays_talked = (summary.stays_talked or 0) + 1 end
 				stays[#stays + 1] = record.left_at - record.arrived_at
 			end
 		end

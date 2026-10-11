@@ -23,7 +23,7 @@ local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 
 local STAGES = {putter = true, bell = true}
 local SCAN_MIN, SCAN_MAX = 4, 8
-local CHANCE = 0.3
+local CHANCE = 0.1
 local RADIUS = 5
 local MAX_DY = 1.5
 local EYE = 1.5
@@ -38,10 +38,12 @@ local STRAY = 2 * RADIUS
 local FIELDS = {"_villages_talk", "_villages_talk_next", "_villages_talk_scan"}
 -- Other systems' errands and holds, which a conversation never takes over. A new
 -- hold that is not a route or a field below (e.g. a shepherd's herd, #243) must be added.
+-- (_villages_door_entry is not one: navigation.lua leaves it set after a walk that ended at a door, and it
+-- blocked every roll of such a villager for good, #242. A walk in progress is state "gowp" anyway.)
 local BUSY = {
 	"_villages_church", "_villages_seat", "_villages_seated_at", "_villages_meal", "_villages_tavern_target",
 	"_villages_fish_session", "_villages_fish_target", "_villages_farm_target", "_villages_keeper_target",
-	"_villages_door_entry", "_villages_follow", "_villages_keeper", "_villages_sleeping",
+	"_villages_follow", "_villages_keeper", "_villages_sleeping",
 }
 local ROUTES = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route", "_villages_fish_route",
@@ -51,6 +53,31 @@ local ORDERS = {[""] = true, roam = true, stand = true}
 
 local function now()
 	return core.get_gametime()
+end
+
+-- Why rolls did not start a conversation, reported every REPORT_SECONDS (the
+-- living_villages_conversation_report setting overrides it), so that a
+-- playtest where nothing happened can be explained from debug.txt.
+local REPORT_SECONDS = 600
+local stats, next_report = {}, nil
+
+local function count(what)
+	stats[what] = (stats[what] or 0) + 1
+end
+
+local function report()
+	local every = core.settings and tonumber(core.settings:get("living_villages_conversation_report")) or REPORT_SECONDS
+	next_report = next_report or now() + every
+	if now() < next_report then return end
+	next_report = now() + every
+	local names = {}
+	for name in pairs(stats) do names[#names + 1] = name end
+	table.sort(names)
+	local parts = {}
+	for _, name in ipairs(names) do parts[#parts + 1] = name .. "=" .. stats[name] end
+	core.log("action", string.format("[living_villages] conversation report (%d s): %s", every,
+		#parts > 0 and table.concat(parts, " ") or "no rolls"))
+	stats = {}
 end
 
 local function enabled()
@@ -68,18 +95,27 @@ end
 -- Standing and free: an adult in a stage that idles, with no trip, route, seat,
 -- trade or visit still on its way. Used to start a conversation and to keep one.
 local function idle(self)
-	if self.child or not self._id or self.following or self.state ~= "stand" or trading(self) then return false end
-	if not STAGES[common.schedule_stage(nil, self)] or not ORDERS[self.order or ""] then return false end
+	if self.child or not self._id then return false, "child" end
+	if self.following then return false, "following" end
+	-- Standing, or between short legs about the well or bell (anchored wander legs, wander.lua),
+	-- which are a villager's idling there and are stopped when it joins. Any other walk is an errand.
+	if self.state ~= "stand" and not (self.state == "walk" and self._villages_wander_anchor) then
+		return false, "walking"
+	end
+	if trading(self) then return false, "trading" end
+	if not STAGES[common.schedule_stage(nil, self)] then return false, "stage" end
+	if not ORDERS[self.order or ""] then return false, "order:" .. tostring(self.order) end
 	for _, field in ipairs(BUSY) do
-		if self[field] then return false end
+		if self[field] then return false, field end
 	end
 	for _, field in ipairs(ROUTES) do
 		local route = self[field]
-		if route and (route.status == "planning" or route.status == "travelling") then return false end
+		if route and (route.status == "planning" or route.status == "travelling") then return false, field end
 	end
 	-- Heading for the well or bell, not yet about it.
 	local well, bell = self._villages_well, self._villages_bell
-	return not (well and not well.arrived) and not (bell and not bell.arrived)
+	if (well and not well.arrived) or (bell and not bell.arrived) then return false, "not arrived" end
+	return true
 end
 
 local function others_of(self, talk)
@@ -105,8 +141,9 @@ local function leave(self, reason)
 		if members[i] == self then table.remove(members, i) end
 	end
 	if #members < 2 then talk.group.over = true end
+	count("ended:" .. reason)
 	core.log("action", string.format("[living_villages] villager %s left a conversation of %d after %d s (%s)",
-		tostring(self._id), talk.group.size, now() - talk.since, reason))
+		tostring(self._id):sub(1, 6), talk.group.size, now() - talk.since, reason))
 end
 
 local function start(self, partners)
@@ -114,10 +151,16 @@ local function start(self, partners)
 	for _, partner in ipairs(partners) do group.members[#group.members + 1] = partner end
 	for _, member in ipairs(group.members) do
 		member._villages_talk = {group = group, since = now(), was_standing = member.order == "stand"}
-		member.order = "stand"
+		-- Stop a wander leg: the state is what wander.lua and vanilla's states go by.
+		member.order, member.state, member._villages_wander = "stand", "stand", nil
+		member:set_velocity(0)
+		member:set_animation("stand")
 	end
-	core.log("action", string.format("[living_villages] %d villagers began a conversation, for %d s",
-		group.size, group.until_time - now()))
+	count("groups")
+	local ids = {}
+	for _, member in ipairs(group.members) do ids[#ids + 1] = tostring(member._id):sub(1, 6) end
+	core.log("action", string.format("[living_villages] %d villagers (%s) began a conversation, for %d s",
+		group.size, table.concat(ids, " "), group.until_time - now()))
 end
 
 -- Whether two villagers at a and b can see each other, eye to eye: not through a wall.
@@ -129,17 +172,32 @@ end
 -- Idle neighbours of self to talk with: nearest first, none more than RADIUS
 -- from self (nor the second from the first).
 local function find_partners(self, pos)
-	local found = {}
+	local found, seen = {}, 0
 	for _, object in ipairs(core.get_objects_inside_radius(pos, RADIUS)) do
 		local other = object:get_luaentity()
 		local other_pos = other and other ~= self and other.name == self.name and object:get_pos()
-		if other_pos and math.abs(other_pos.y - pos.y) <= MAX_DY and not other._villages_talk
-			and now() >= (other._villages_talk_next or 0) and idle(other) and sees(pos, other_pos) then
-			found[#found + 1] = {other = other, pos = other_pos, distance = vector.distance(pos, other_pos)}
+		if other_pos then
+			seen = seen + 1
+			local ok, why = true, nil
+			if math.abs(other_pos.y - pos.y) > MAX_DY then ok, why = false, "height"
+			elseif other._villages_talk then ok, why = false, "talking"
+			elseif now() < (other._villages_talk_next or 0) then ok, why = false, "cooldown"
+			else
+				ok, why = idle(other)
+				if ok and not sees(pos, other_pos) then ok, why = false, "sight" end
+			end
+			if ok then
+				found[#found + 1] = {other = other, pos = other_pos, distance = vector.distance(pos, other_pos)}
+			else
+				count("near-not-free:" .. why)
+			end
 		end
 	end
 	table.sort(found, function(a, b) return a.distance < b.distance end)
-	if #found == 0 then return nil end
+	if #found == 0 then
+		count(seen > 0 and "none-free" or "alone")
+		return nil
+	end
 	local partners = {found[1].other}
 	local second = found[2]
 	if second and #partners + 1 < MAX_GROUP and math.random() < TRIO_CHANCE
@@ -224,12 +282,21 @@ local function install(def)
 		end
 		local scan = (self._villages_talk_scan or math.random() * SCAN_MAX) - dtime
 		self._villages_talk_scan = scan
-		if scan > 0 or now() < (self._villages_talk_next or 0) then return result end
+		if scan > 0 then return result end
+		report()
+		if now() < (self._villages_talk_next or 0) then return result end
 		self._villages_talk_scan = SCAN_MIN + math.random() * (SCAN_MAX - SCAN_MIN)
-		if math.random() >= CHANCE or not enabled() or not idle(self) then return result end
+		if not enabled() then return result end
+		local free, why = idle(self)
+		if not free then
+			count("rolls-not-free:" .. why)
+			return result
+		end
+		count("rolls-free")
+		if math.random() >= CHANCE then return result end
 		local pos = self.object:get_pos()
 		local partners = pos and find_partners(self, pos)
-		if partners then start(self, partners) end
+		if partners then start(self, partners) else count("won-no-partner") end
 		return result
 	end
 end

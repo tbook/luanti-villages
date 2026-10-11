@@ -18,7 +18,7 @@ minetest = {
 	get_day_count = function() return day end,
 	get_item_group = function() return 0 end,
 	registered_nodes = {},
-	settings = {get_bool = function(_, name, default)
+	settings = {get = function() return nil end, get_bool = function(_, name, default)
 		assert(name == "living_villages_conversation", "the setting is read by its name")
 		return setting
 	end},
@@ -193,6 +193,29 @@ do
 	local far, high, child = villager(conversation.RADIUS + 3, 0), villager(2, 0, 4), villager(1, 1)
 	child.child = true
 	assert(not run_until_talking({a, far, high, child}), "far, high and child villagers are no company")
+end
+
+-- Between wander legs about the well or bell (state walk with an anchor) counts as idling: the
+-- legs are stopped. A plain walk, with no anchor, is somebody's errand.
+do
+	clear()
+	local a, b = villager(0, 0), villager(2, 0)
+	a.state, b.state = "walk", "walk"
+	assert(not run_until_talking({a, b}), "walkers with no anchor do not talk")
+	a._villages_wander_anchor, b._villages_wander_anchor = {pos = a.pos, radius = 5}, {pos = a.pos, radius = 5}
+	a._villages_wander, b._villages_wander = {target = a.pos}, {target = a.pos}
+	assert(run_until_talking({a, b}), "anchored wanderers talk")
+	assert(a.state == "stand" and b.state == "stand" and a._villages_wander == nil and b._villages_wander == nil,
+		"their legs are stopped")
+	assert(a._villages_wander_anchor, "the anchor stays the well's")
+end
+
+-- navigation.lua leaves _villages_door_entry set after a walk that ended at a door: not a reason to stay silent.
+do
+	clear()
+	local a, b = villager(0, 0), villager(2, 0)
+	a._villages_door_entry, b._villages_door_entry = {door = a.pos, entry = a.pos}, {door = a.pos, entry = a.pos}
+	assert(run_until_talking({a, b}), "a stale door entry does not block a conversation")
 end
 
 -- Not when another system has the villager.
