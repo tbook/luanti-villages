@@ -117,6 +117,8 @@ local sheep_def = {}
 sheep_def.do_custom = function() sheep_def.vanilla_ran = (sheep_def.vanilla_ran or 0) + 1 end
 local bell = dofile("bell.lua")
 flock.install(villager_def, sheep_def, bell)
+-- The sections before 15 expect near stops; the far roll is fixed off there.
+flock.tune.far_share = 0
 
 local ids = 0
 local gopaths = {}
