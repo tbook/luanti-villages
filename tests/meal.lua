@@ -295,4 +295,173 @@ now = now + 6
 def.do_custom(waiter, 0.1)
 assert(waiter._villages_meal and meals_shown() == 1, "orphan cleared, one meal on the plate")
 
+
+
+-- Players at the table (#19, player_meals.lua): the same loop, fed by bites.
+now = now + 60
+day = day + 1
+for _, entity in ipairs(entities) do entity.removed = true end
+local hunger, saturation = {}, {}
+local connected = {}
+local function player(name, h)
+	hunger[name], saturation[name] = h, 0
+	local object = {get_pos = function() return {x = 2, y = 0.1, z = 0} end, name = name}
+	connected[name] = object
+	return object
+end
+minetest.get_player_by_name = function(name) return connected[name] end
+mcl_hunger = {
+	get_hunger = function(p) return hunger[p.name] end,
+	set_hunger = function(p, h) hunger[p.name] = math.min(20, h) end,
+	saturate = function(name, s) saturation[name] = saturation[name] + s end,
+}
+mcl_cozy = {players = {}}
+local pm = dofile("player_meals.lua")
+local pm_seat = dofile("seat.lua")
+local on_leave
+minetest.settings = {get_bool = function(_, _, default) return default end}
+minetest.register_globalstep = function() end
+minetest.register_on_leaveplayer = function(f) on_leave = f end
+pm.install(meal, pm_seat)
+local function step(seconds)
+	for _ = 1, seconds / 0.25 do
+		now = now + 0.25
+		pm.step(0.25, pm_seat)
+	end
+end
+local function sit(name, chair) mcl_cozy.players[name] = {chair, "sit"} end
+local function stand_up(name) mcl_cozy.players[name] = nil end
+local function eating()
+	local hold = meal.plates[key(plate)]
+	return hold and hold.until_time >= now and hold.id:match("^player:") and hold
+end
+
+player("pat", 10)
+sit("pat", west)
+step(2)
+assert(not eating() and meals_shown() == 0, "not before the wait")
+step(2)
+assert(eating() and meals_shown() == 1, "served after the wait")
+assert(stacks[key(plate)] == nil, "nothing written to the plate")
+assert(hunger.pat >= 10 and hunger.pat < 12, "credited by bites so far")
+step(14)
+assert(hunger.pat == 13, "3 hunger points in all: " .. hunger.pat)
+assert(math.abs(saturation.pat - 1.5) < 0.2, "a little saturation")
+assert(meals_shown() == 0 and not eating(), "plate clear")
+step(5)
+stand_up("pat")
+step(1)
+sit("pat", west)
+step(6)
+assert(not eating() and hunger.pat == 13, "second sitting the same day gets nothing")
+
+-- A new day serves again; a full player is served but not fed beyond the cap.
+day = day + 1
+player("pat", 20)
+stand_up("pat")
+step(1)
+sit("pat", west)
+step(20)
+assert(hunger.pat == 20, "full: cap")
+
+-- Standing up early stops the meal and credits only the bites taken.
+day = day + 1
+player("pat", 5)
+stand_up("pat")
+step(1)
+sit("pat", west)
+step(3.6)
+assert(eating())
+step(3)
+stand_up("pat")
+step(0.4)
+local got = hunger.pat
+assert(not eating() and meals_shown() == 0, "display cleared on standing")
+assert(got > 5 and got < 8, "partial credit: " .. got)
+step(10)
+assert(hunger.pat == got)
+
+-- Disconnect mid-meal.
+day = day + 1
+player("pat", 5)
+sit("pat", west)
+step(5)
+assert(eating())
+local connected_object = {get_player_name = function() return "pat" end}
+connected.pat = nil
+on_leave(connected_object)
+step(0.4)
+assert(not eating() and meals_shown() == 0 and next(pm.diners) == nil, "disconnect clears")
+mcl_cozy.players.pat = nil
+
+-- Seat taken: another player takes over the chair, the first is out.
+day = day + 1
+player("pat", 5)
+player("quin", 5)
+sit("pat", west)
+step(5)
+assert(eating())
+mcl_cozy.players.pat = nil
+sit("quin", west)
+step(0.4)
+assert(pm.diners.pat == nil and pm.diners.quin and not eating(), "new sitter starts afresh")
+mcl_cozy.players.quin = nil
+step(0.4)
+
+-- Two players at one plate: one meal, the other waits for the plate.
+day = day + 1
+player("pat", 5)
+player("quin", 5)
+sit("pat", west)
+sit("quin", east)
+step(4)
+assert(meals_shown() == 1, "one meal per plate")
+local first = hunger.pat > 5 and "pat" or "quin"
+local second = first == "pat" and "quin" or "pat"
+assert(hunger[second] == 5, "the other has had nothing yet")
+step(14)
+assert(hunger[first] == 8)
+step(8)
+assert(hunger[second] > 5, "served when the plate was free")
+mcl_cozy.players.pat, mcl_cozy.players.quin = nil, nil
+step(0.4)
+
+-- Keeper off duty: seated, but nothing is served; it starts when he is back.
+day = day + 1
+player("pat", 5)
+keeper_object.get_pos = function() return {x = 30, y = 0, z = 30} end
+sit("pat", west)
+step(8)
+assert(not eating() and hunger.pat == 5, "no keeper, no meal")
+keeper_object.get_pos = function() return {x = 0, y = 0, z = 1} end
+step(1)
+assert(eating(), "keeper on duty: served")
+mcl_cozy.players.pat = nil
+step(0.4)
+
+-- Outside a staffed tavern nothing changes: no jukebox near the chair.
+day = day + 1
+nodes[key({x = 20, y = 0, z = 20})] = {name = "mcl_decor:chair_wooden", param2 = 3}
+nodes[key({x = 19, y = 0, z = 20})] = "mcl_decor:table_wooden"
+nodes[key({x = 19, y = 1, z = 20})] = "mcl_itemframes:plate"
+player("pat", 5)
+sit("pat", {x = 20, y = 0, z = 20})
+step(10)
+assert(meals_shown() == 0 and hunger.pat == 5 and pm.diners.pat.table == nil, "not a tavern")
+mcl_cozy.players.pat = nil
+step(0.4)
+
+-- A villager's reservation: the player in the chair wins it, and the villager's
+-- hold on the plate does not block the player once the villager stood.
+day = day + 1
+player("pat", 5)
+local ben = villager("ben", {x = 1, y = -0.49, z = 1})
+def.do_custom(ben, 0.1)
+assert(ben._villages_seated and vector.equals(ben._villages_seat.chair, west))
+sit("pat", west)
+def.do_custom(ben, 0.1)
+assert(not ben._villages_seated, "villager gives the chair to the player")
+step(5)
+assert(eating() and meals_shown() == 1, "player served")
+
 print("meal.lua: ok")

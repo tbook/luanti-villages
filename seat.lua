@@ -384,5 +384,7 @@ function M.install(def)
 	end
 end
 
+M.focus = seat_focus
+M.SEARCH_RADIUS, M.SEARCH_HEIGHT = SEARCH_RADIUS, SEARCH_HEIGHT
 M.reservations = reservations
 return M

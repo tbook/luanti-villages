@@ -9,6 +9,11 @@
 -- mid-meal simply clears the meal. The frame's own code looks only for its
 -- mcl_itemframes:item entity, so it never mistakes the meal for its item.
 --
+-- A player at a tavern table (#19) is served by the same loop: player_meals.lua
+-- passes a diner table that stands in for a villager (_id, _villages_seat.table,
+-- object, _villages_meal_day, and optionally _villages_mouth and
+-- _villages_on_bite, called on each bite).
+--
 -- Load this once, at top-level load time (init.lua): it registers the entity,
 -- which Luanti allows only then, and the plate holds are its own in-memory
 -- table.
@@ -137,7 +142,7 @@ local function bite(self, item)
 	local definition = core.registered_items[item] or {}
 	local texture = definition.inventory_image
 	if not texture or texture == "" then texture = definition.wield_image end
-	local mouth = {x = pos.x, y = pos.y + MOUTH_HEIGHT, z = pos.z}
+	local mouth = {x = pos.x, y = pos.y + (self._villages_mouth or MOUTH_HEIGHT), z = pos.z}
 	if texture and texture ~= "" and definition._food_particles ~= false then
 		for i = 0, 8 do
 			core.add_particle({
@@ -154,6 +159,8 @@ local function bite(self, item)
 	core.sound_play("mcl_hunger_bite", {
 		max_hear_distance = 12, gain = 0.33, pitch = 1 + math.random(-10, 10) * 0.005, object = self.object,
 	}, true)
+	-- A player diner (player_meals.lua, #19) is fed by its bites.
+	if self._villages_on_bite then self._villages_on_bite(self) end
 end
 
 local M = {}

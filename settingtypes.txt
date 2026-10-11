@@ -59,3 +59,8 @@ living_villages_flock_size (Sheep per shepherd) int 5 0 5
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.
 living_villages_well_hangout (Villagers gather at the well) bool true
+
+# A player who sits at a tavern table while the keeper is on duty is served a meal on the
+# plate, which feeds a little (#19). Once per player per tavern per game day. Atmosphere
+# and a small benefit; the keeper's trades are unchanged.
+living_villages_player_meals (Players are served a meal at tavern tables) bool true
