@@ -186,12 +186,27 @@ assert(#flock_of(a) == 5 and spawned == 5, "five sheep, no more")
 for _, ent in ipairs(flock_of(a)) do
 	assert(flat(ent.pos, a.pos) <= 7, "sheep are set down beside the shepherd")
 end
-for _, ent in ipairs(flock_of(a)) do ent.object.removed = true end
+-- Sheep that die are replaced, within a day's allowance.
+for _, ent in ipairs(flock_of(a)) do
+	sheep_def.on_die(ent, ent.pos, nil)
+	ent.object.removed = true
+end
 tick(a, 60)
 assert(#flock_of(a) == 0 and spawned == 5, "no more than five a day")
 day = 2
 tick(a, 60)
 assert(#flock_of(a) == 5 and spawned == 10, "a new day allows new sheep")
+assert(a._villages_flock_total == 5, "the record counts them")
+-- Sheep that vanish without a death (unloaded, stranded) are not replaced at once, only
+-- after five days without a sighting.
+local lost_two = flock_of(a)
+lost_two[1].object.removed, lost_two[2].object.removed = true, true
+day = 3
+tick(a, 60)
+assert(#flock_of(a) == 3 and spawned == 10, "stranded sheep are not doubled")
+day = 9
+tick(a, 60)
+assert(#flock_of(a) == 5 and spawned == 12, "forgotten after five days")
 
 -- 2. Children, non-shepherds, shepherds with no loom and shepherds nobody is near keep none.
 reset(); spawned = 0
@@ -281,16 +296,27 @@ tick(c)
 assert(st.pull, "and the holiday putter stage does not")
 day = 5
 
--- 6. Under a roof the flock is left alone.
+-- 6. Under a roof the flock is left alone; a tree canopy high above is no roof, and a
+-- moment under one does not drop the flock.
 st.pull = nil
-tick(c, 1)
+tick(c, 2)
+assert(st.pull, "followed in the open")
+nodes[key({x = 0, y = 7, z = 0})] = "mcl_core:stone"
+st.pull = nil
+tick(c, 4)
+assert(st.pull, "a canopy high above is not a roof")
+nodes[key({x = 0, y = 7, z = 0})] = nil
 nodes[key({x = 0, y = 4, z = 0})] = "mcl_core:stone"
-st.pull = nil
-tick(c, 3)
+tick(c, 1)
+assert(st.pull, "one tick under a roof does not drop the flock")
+tick(c, 4)
+step_sheep(40)
 assert(not st.pull, "a shepherd under a roof is not followed")
 nodes[key({x = 0, y = 4, z = 0})] = nil
-tick(c, 2)
-assert(st.pull, "and is again in the open")
+tick(c, 1)
+assert(not st.pull, "and not at the first tick in the open")
+tick(c, 4)
+assert(st.pull, "but is again in the open")
 
 -- 7. Stuck against a fence, the sheep rests and vanilla's wander takes over.
 st.pull = nil
@@ -305,12 +331,42 @@ now = now + 10
 tick(c)
 assert(st.pull, "but is, after the rest")
 
--- 8. A drop in the way stops the sheep. (Make room: drop the sheep the holiday test added.)
-c._villages_flock_day, c._villages_flock_made = day, 5
-near_sheep.object.removed = true
-for _, ent in ipairs(flock_of(c)) do
-	if ent ~= far_sheep and ent ~= running_sheep then ent.object.removed = true end
+-- 7b. Continuous danger checks: a sheep pulled over many steps toward a ledge or water
+-- stops short of it instead of walking off, and a wall in the line holds it back.
+local function pulled_toward(x_shepherd, setup)
+	reset()
+	local sh = shepherd(x_shepherd, 0)
+	sh._villages_flock_day, sh._villages_flock_made = day, 5
+	local sheep = make_sheep(0, 0)
+	sheep._villages_shepherd = sh._id
+	setup()
+	for _ = 1, 25 do tick(sh); step_sheep(10) end
+	return sh, sheep
 end
+local _, ledge_sheep = pulled_toward(-20, function()
+	for x = -70, -5 do nodes[key({x = x, y = -1, z = 0})] = nil end
+end)
+assert(ledge_sheep.pos.x > -5.5, "a pulled sheep stops at a drop, at " .. ledge_sheep.pos.x)
+assert(ledge_sheep.pos.x < -1, "but did walk toward the shepherd")
+minetest.registered_nodes["default:water"] = {walkable = false, liquidtype = "source", groups = {water = 3}}
+local _, wet_sheep = pulled_toward(-20, function()
+	for x = -70, -5 do if x ~= -18 then nodes[key({x = x, y = 0, z = 0})] = "default:water" end end
+end)
+assert(wet_sheep.pos.x > -5.5 and wet_sheep.pos.x < -1, "a pulled sheep stops at water, at " .. wet_sheep.pos.x)
+local _, walled = pulled_toward(-20, function() nodes[key({x = -3, y = 1, z = 0})] = "mcl_core:stone" end)
+assert(walled.pos.x == 0, "a sheep is not pulled through a wall")
+local _, stepped = pulled_toward(-20, function() nodes[key({x = -3, y = 0, z = 0})] = "mcl_core:stone" end)
+assert(stepped.pos.x < -1, "a one-block step is no wall")
+
+-- 8. A drop in the way stops the sheep.
+reset(); spawned = 0; day = 5
+c = shepherd(0, 0)
+c._villages_flock_day, c._villages_flock_made = day, 5
+far_sheep = make_sheep(9, 0)
+running_sheep = make_sheep(30, 0)
+for _, ent in ipairs({far_sheep, running_sheep}) do ent._villages_shepherd = c._id end
+tick(c)
+st = flock.states[running_sheep]
 local edge = make_sheep(15, 0)
 edge._villages_shepherd = c._id
 edge.is_at_cliff_or_danger = function() return "free fall" end
@@ -409,6 +465,17 @@ time = 16000 / 24000
 villager_def.do_custom(f, 1)
 assert(f.state == "stand", "the herd walk ends with the stage")
 assert(activity_of(f) ~= "herd")
+
+-- 12b. A bell too far from the loom is not used: the stops would drop the job.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = -30, y = 5, z = 0})] = "mcl_bells:bell"
+local remote = shepherd(0, 0)
+nodes[key(remote._jobsite)] = nil
+remote._jobsite = {x = 80, y = 0, z = 0}
+nodes[key(remote._jobsite)] = "mcl_loom:loom"
+metas[key(remote._jobsite)] = {villager = remote._id}
+tick(remote, 5)
+assert(#gopaths == 0, "no grazing stops where the loom would be dropped")
 
 -- 13. No bell: it grazes about the loom. A bell too near vanilla's limit is passed over.
 reset(); gopaths = {}; time = 10000 / 24000

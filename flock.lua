@@ -57,7 +57,18 @@ local MAX_FAILURES = 3
 -- Vanilla sends a villager home past 50 nodes from its bed (do_activity).
 local BED_REACH = 46
 local AREA_RETRY = 120
-local ROOF_HEIGHT = 9
+-- Solid within ROOF_HEIGHT above the shepherd's feet (past its own head) is a roof; a tree
+-- canopy is higher. A change of roof must hold for ROOF_TICKS ticks to count.
+local ROOF_HEIGHT = 4
+local ROOF_TICKS = 2
+-- Sheep made and not seen again are forgotten after this many game days (flock record).
+local UNSEEN_DAYS = 5
+-- Stops stay this far from the loom: vanilla drops a jobsite 100 away (RESETTLE_DISTANCE).
+local LOOM_REACH = 90
+local AREA_TTL = 600
+-- How far ahead of a pulled sheep the ground is checked, every step.
+local AHEAD = 1.0
+local deaths = {}
 
 local sessions = setmetatable({}, {__mode = "k"})
 local states = setmetatable({}, {__mode = "k"})
@@ -139,6 +150,7 @@ end
 local function release(self, session, pos)
 	for _, ent in ipairs(session.sheep) do free(ent) end
 	session.sheep = {}
+	self._villages_flock_total, self._villages_flock_unseen = nil, nil
 	if pos then
 		for _, ent in ipairs(scan(self, pos)) do free(ent) end
 	end
@@ -169,6 +181,21 @@ local function refresh(self, session, pos, size)
 	-- A flock grown past the setting (it was lowered, or sheep came back from an
 	-- unload) lets its extras go.
 	while #session.sheep > size do free(table.remove(session.sheep)) end
+	-- The record of sheep made and not known dead, which the scan cannot see when a sheep
+	-- is unloaded or stranded: replacements wait for it, so stranded sheep are not doubled.
+	-- Deaths seen (on_die) lower it; so does five days without sighting the full record.
+	local count = #session.sheep
+	local total = self._villages_flock_total or 0
+	local dead = deaths[self._id]
+	if dead then total, deaths[self._id] = math.max(0, total - dead), nil end
+	if count >= total then
+		total, self._villages_flock_unseen = count, nil
+	else
+		local day = core.get_day_count and core.get_day_count() or 0
+		self._villages_flock_unseen = self._villages_flock_unseen or day
+		if day - self._villages_flock_unseen >= UNSEEN_DAYS then total, self._villages_flock_unseen = count, nil end
+	end
+	self._villages_flock_total = total
 end
 
 local function village_count(self, pos, own)
@@ -196,6 +223,27 @@ local function pull_started(st, sheep_pos, shepherd, run)
 		check_at = 0, last = {x = sheep_pos.x, z = sheep_pos.z}}
 end
 
+local function solid_at(x, y, z)
+	local node = core.get_node_or_nil({x = x, y = y, z = z})
+	local def = node and core.registered_nodes[node.name]
+	return def and def.walkable or false, def, node and node.name
+end
+
+-- Whether a wall, door or fence stands across the straight line from a to b at head
+-- height: pulled sheep walk straight, so they are not pulled through one.
+local function line_blocked(a, b)
+	local head = math.floor(a.y + 0.5) + 1
+	local length = flat(a, b)
+	local steps = math.floor(length)
+	for i = 1, steps do
+		local t = i / (steps + 1)
+		if solid_at(math.floor(a.x + (b.x - a.x) * t + 0.5), head, math.floor(a.z + (b.z - a.z) * t + 0.5)) then
+			return true
+		end
+	end
+	return false
+end
+
 -- Called each shepherd tick for each sheep: starts, renews, or gives up a pull.
 local function steer(ent, shepherd_pos)
 	local sheep_pos = ent.object:get_pos()
@@ -203,6 +251,11 @@ local function steer(ent, shepherd_pos)
 	if not st then st = {blocked = 0}; states[ent] = st end
 	local distance = flat(sheep_pos, shepherd_pos)
 	if math.abs(shepherd_pos.y - sheep_pos.y) > MAX_RISE then return end
+	if distance > FAR and line_blocked(sheep_pos, shepherd_pos) then
+		-- Left where it stands; vanilla's wander takes over.
+		if st.pull then st.pull = nil; if ent.stand then ent:stand() end end
+		return
+	end
 	if st.pull then
 		local pull = st.pull
 		pull.x, pull.y, pull.z, pull.left = shepherd_pos.x, shepherd_pos.y, shepherd_pos.z, PULL_SECONDS
@@ -223,7 +276,7 @@ local function steer(ent, shepherd_pos)
 end
 
 local function spawn_sheep(self, session, pos, size, count)
-	if count >= size or session.clock < session.spawn_at then return end
+	if (self._villages_flock_total or count) >= size or session.clock < session.spawn_at then return end
 	local day = core.get_day_count and core.get_day_count() or 0
 	if self._villages_flock_day ~= day then
 		self._villages_flock_day, self._villages_flock_made = day, 0
@@ -239,6 +292,7 @@ local function spawn_sheep(self, session, pos, size, count)
 	ent._villages_shepherd = self._id
 	self._villages_flock_made = (self._villages_flock_made or 0) + 1
 	table.insert(session.sheep, ent)
+	self._villages_flock_total = (self._villages_flock_total or 0) + 1
 	if registry[self._id] then registry[self._id].count = #session.sheep end
 	core.log("action", string.format("[living_villages] shepherd %s has a new sheep at (%d,%d,%d) (%d of %d)",
 		tostring(self._id), cell.x, cell.y, cell.z, #session.sheep, size))
@@ -252,7 +306,15 @@ end
 local function follows(self, session, pos)
 	if not FOLLOW_STAGES[common.schedule_stage(nil, self)] then return false end
 	if trading(self) or self._villages_sleeping or not in_open(session.herd) then return false end
-	return not roofed(pos)
+	-- Indoors or out changes only when the new reading has held for ROOF_TICKS ticks.
+	local roof = roofed(pos)
+	if roof == (session.roof or false) then
+		session.roof_ticks = 0
+	else
+		session.roof_ticks = (session.roof_ticks or 0) + 1
+		if session.roof_ticks >= ROOF_TICKS then session.roof, session.roof_ticks = roof, 0 end
+	end
+	return not session.roof
 end
 
 ---------------------------------------------------------------------------
@@ -263,14 +325,16 @@ local function herding_stage(self)
 end
 
 -- Where the shepherd grazes: about the nearest bell, or else about its loom, with a
--- radius that keeps it within vanilla's 50 nodes of its bed. nil if there is no room.
+-- radius that keeps it within vanilla's 50 nodes of its bed and 100 of its loom
+-- (validate_jobsite drops a jobsite farther than that). nil if there is no room.
 local function find_area(self, bell)
 	local bed = self._bed
 	if not bed or not self._jobsite then return nil end
 	local site = bell and bell.nearest_bell(self, bed)
 	if site then
 		local center = bell.center_of(site)
-		local radius = math.min(AREA_RADIUS, BED_REACH - vector.distance(center, bed))
+		local radius = math.min(AREA_RADIUS, BED_REACH - vector.distance(center, bed),
+			LOOM_REACH - vector.distance(center, self._jobsite))
 		if radius >= AREA_MIN_RADIUS then return {center = center, radius = radius} end
 	end
 	local radius = math.min(LOOM_RADIUS, BED_REACH - vector.distance(self._jobsite, bed))
@@ -315,7 +379,11 @@ local function herd_tick(self, session, pos, bell)
 	local herd = session.herd
 	if not herd then
 		if now < (session.area_check or 0) then return end
-		local area = session.area or find_area(self, bell)
+		-- Looked up again every AREA_TTL seconds: a bell may be built or taken down.
+		local area = session.area
+		if area and now - area.at > AREA_TTL then area = nil end
+		area = area or find_area(self, bell)
+		if area then area.at = area.at or now end
 		session.area = area
 		if not area then
 			session.area_check = now + AREA_RETRY
@@ -448,6 +516,33 @@ local function rest(self, st)
 	stop_pull(self, st)
 end
 
+local function is_liquid(def)
+	return def ~= nil and ((def.liquidtype or "none") ~= "none" or (def.groups ~= nil and (def.groups.water or def.groups.lava)) and true or false)
+end
+
+-- Whether the ground a pulled sheep is about to step onto, AHEAD nodes on toward (dx, dz)
+-- (a unit vector), is a drop of two or more, water, lava, or what vanilla calls
+-- dangerous (is_node_dangerous, is_node_waterhazard in mcl_mobs/movement.lua).
+local function unsafe_ahead(self, pos, dx, dz)
+	local x, z = math.floor(pos.x + dx * AHEAD + 0.5), math.floor(pos.z + dz * AHEAD + 0.5)
+	local body = math.floor(pos.y + 0.5)
+	local stand
+	if solid_at(x, body, z) then stand = body + 1
+	elseif solid_at(x, body - 1, z) then stand = body
+	elseif solid_at(x, body - 2, z) then stand = body - 1
+	else return "drop" end
+	for _, y in ipairs({stand - 1, stand, stand + 1}) do
+		local node = core.get_node_or_nil({x = x, y = y, z = z})
+		local def = node and core.registered_nodes[node.name]
+		if is_liquid(def) then return "liquid" end
+		if node and ((self.is_node_dangerous and self:is_node_dangerous(node.name))
+			or (self.is_node_waterhazard and self:is_node_waterhazard(node.name))) then
+			return "danger"
+		end
+	end
+	return false
+end
+
 local function pull_step(self, st, dtime)
 	local pull = st.pull
 	local pos = self.object:get_pos()
@@ -484,6 +579,10 @@ local function pull_step(self, st, dtime)
 		end
 		pull.last.x, pull.last.z, pull.started = pos.x, pos.z, true
 	end
+	if unsafe_ahead(self, pos, dx / distance, dz / distance) then
+		rest(self, st)
+		return true
+	end
 	self:turn_in_direction(dx, dz, 0)
 	self.state = "walk"
 	if pull.run then
@@ -498,6 +597,14 @@ end
 
 local function install_sheep(def)
 	local original_custom = def.do_custom
+	local original_die = def.on_die
+	-- A death lowers its shepherd's record of sheep made (the shepherd may be unloaded, in
+	-- which case five days without a sighting forgets it instead).
+	def.on_die = function(self, pos, cmi_cause)
+		local id = self._villages_shepherd
+		if id then deaths[id] = (deaths[id] or 0) + 1 end
+		if original_die then return original_die(self, pos, cmi_cause) end
+	end
 	def.do_custom = function(self, dtime)
 		local result
 		if original_custom then result = original_custom(self, dtime) end

@@ -121,6 +121,7 @@ function flock.run(area, emit, done)
 	local t, phase_index, phase_t = 0, 1, 0
 	local samples, frozen = {}, {}
 	local peak = {}
+	local hazards = {wet = 0, hurt = 0, max_hurt_sheep = 0}
 	local function scan()
 		local shepherds, sheep_by = {}, {}
 		for _, obj in ipairs(core.get_objects_inside_radius(center, radius)) do
@@ -131,6 +132,13 @@ function flock.run(area, emit, done)
 				local list = sheep_by[e._villages_shepherd] or {}
 				sheep_by[e._villages_shepherd] = list
 				list[#list + 1] = obj:get_pos()
+				-- Hurt or wet sheep: the pulled flock must not walk off ledges or into water.
+				local p = obj:get_pos()
+				local node = core.get_node_or_nil({x = math.floor(p.x + 0.5), y = math.floor(p.y + 0.5), z = math.floor(p.z + 0.5)})
+				local def = node and core.registered_nodes[node.name]
+				if def and (def.liquidtype or "none") ~= "none" then hazards.wet = hazards.wet + 1 end
+				if e.health and e.health < (e.initial_properties and e.initial_properties.hp_max or 8) then hazards.hurt = hazards.hurt + 1 end
+				hazards.max_hurt_sheep = math.max(hazards.max_hurt_sheep, hazards.hurt)
 			end
 		end
 		return shepherds, sheep_by
@@ -143,7 +151,7 @@ function flock.run(area, emit, done)
 				total[kind] = {calls = c.n, ms_per_call = c.n > 0 and round1(c.s / c.n * 1e4) / 10 or 0,
 					total_ms = round1(c.s * 1000)}
 			end
-			emit({type = "flock", samples = samples, frozen = frozen, cost = total, synthetic = #added, peak = peak})
+			emit({type = "flock", samples = samples, frozen = frozen, cost = total, synthetic = #added, peak = peak, hazards = hazards})
 			player_pos = nil
 			return done()
 		end

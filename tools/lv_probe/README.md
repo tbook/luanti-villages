@@ -162,3 +162,21 @@ cannot be rebuilt from the tracked `results/*.jsonl`: regenerate them with `run_
 `run_cases.sh --with-mod`.
 
 `tests/lv_probe_metrics.lua` covers the pure functions in `metrics.lua`.
+
+## Shepherd flock (#215)
+
+```sh
+LV_PROBE_FLOCK=1 [LV_PROBE_FLOCK_EXTRA=10] [LV_PROBE_CONF_EXTRA='living_villages_flock_size = 0'] \
+    tools/lv_probe/run.sh 2002 --chunk -832,128 --with-mod
+```
+
+`LV_PROBE_FLOCK=1` (needs `--with-mod`; not with `LV_PROBE_CENSUS`) runs the shepherds' day on each
+built village instead of the census: work 6 min, tavern 1, putter 1, work 2, a pretend player moved 400
+nodes away for 1 (the freeze), work 1. The moon phase is pinned so the clock jumps cannot flip a
+holiday, and villagers and sheep are treated as having a player near (the 48 node rule is kept for the
+pretend player). `LV_PROBE_FLOCK_EXTRA=N` adds N synthetic shepherds, each with a loom of its own;
+`LV_PROBE_CONF_EXTRA` appends settings lines (e.g. `living_villages_flock_size = 0` for a baseline).
+The `"type":"flock"` line has `samples` (every 5 s: each shepherd's stage, position, state and its
+flock's sorted distances), `frozen` (how far each shepherd and sheep moved while frozen), `cost`
+(calls and milliseconds of the villager and sheep `do_custom` wrappers), `peak` and `hazards`
+(sheep-seconds seen in liquid or hurt).

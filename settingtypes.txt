@@ -53,5 +53,6 @@ living_villages_loomless_house_chance (Share of small houses without a loom) flo
 
 # Sheep each shepherd with a loom keeps and herds (#215): they follow it about the
 # village by day and are left to graze while it is at church, the bell, the tavern or
-# in bed. 0 turns shepherds' flocks off; sheep already marked are then let go.
+# in bed. 0 turns shepherds' flocks off, sheep already marked are then let go, and
+# shepherds no longer take their grazing walks about the bell in the work stage.
 living_villages_flock_size (Sheep per shepherd) int 5 0 5
