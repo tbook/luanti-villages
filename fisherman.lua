@@ -29,12 +29,24 @@ local WAIT_SECONDS = 8
 local REEL_SECONDS = 2
 local BOBBER_ENTITY = "living_villages:bobber"
 local BOBBER_DISTANCE = 2
-local BOBBER_HEIGHT = 0.15
+-- The bobber (#227) sits on the water, not in it. The sprite is
+-- mcl_fishing_bobber.png scaled to BOBBER_SIZE; its float fills rows 2-13 of
+-- the 16 and its stem rows 8-13 (read from the png), so the visible part is
+-- centred on the sprite's own centre, at most 6 px = 6/16 * BOBBER_SIZE above
+-- and below it. The anchor is a water node's centre, and the surface of a
+-- source is at most WATER_TOP above that. Raising the sprite centre
+-- BOBBER_LIFT above the surface leaves the stem's foot (6 px down) just
+-- under it and the float head clear above. The old offset of 0.15 from the
+-- node centre put the whole float 0.24 or more under the surface.
+local BOBBER_SIZE = 0.3
+local WATER_TOP = 0.5
+local BOBBER_LIFT = 0.05
+local BOBBER_HEIGHT = WATER_TOP + BOBBER_LIFT
 
 core.register_entity(BOBBER_ENTITY, {
 	initial_properties = {
 		visual = "sprite",
-		visual_size = {x = 0.3, y = 0.3},
+		visual_size = {x = BOBBER_SIZE, y = BOBBER_SIZE},
 		textures = {"mcl_fishing_bobber.png"},
 		physical = false,
 		pointable = false,
