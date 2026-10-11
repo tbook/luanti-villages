@@ -19,7 +19,9 @@
 # is used, never one a running game holds), LV_PROBE_LIMIT (seconds before giving up;
 # default 3600, or with a census sites x (census seconds + 120) + 600 if larger),
 # LV_PROBE_FLOCK=1 (with --with-mod) runs the shepherd flock day of each built village (#215;
-# LV_PROBE_FLOCK_EXTRA=N adds N synthetic shepherds), LV_PROBE_CENSUS (whole seconds of jobsite census per village, #217; needs --with-mod).
+# LV_PROBE_FLOCK_EXTRA=N adds N synthetic shepherds),
+# LV_PROBE_CENSUS_PUTTER (seconds of the census held at the Putter stage first, with a well watch, #11),
+# LV_PROBE_CENSUS (whole seconds of jobsite census per village, #217; needs --with-mod).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -133,6 +135,7 @@ lv_probe_chunk = $chunk
 lv_probe_census = $census
 lv_probe_flock = $flock
 lv_probe_flock_extra = $flock_extra
+lv_probe_census_putter = ${LV_PROBE_CENSUS_PUTTER:-0}
 EOT
 # Extra settings for the run, one `name = value` per line (e.g. living_villages_flock_size = 0).
 if [ -n "${LV_PROBE_CONF_EXTRA:-}" ]; then printf '%s\n' "$LV_PROBE_CONF_EXTRA" >> "$conf"; fi

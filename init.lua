@@ -560,6 +560,7 @@ core.register_on_mods_loaded(function()
 	local flock = dofile(core.get_modpath("living_villages") .. "/flock.lua")
 	flock.install(def, core.registered_entities["mobs_mc:sheep"], bell)
 	common.activity_override = flock.activity_override
+	dofile(core.get_modpath("living_villages") .. "/well.lua").install(def)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
