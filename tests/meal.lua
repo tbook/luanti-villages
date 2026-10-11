@@ -323,6 +323,9 @@ local pm_seat = dofile("seat.lua")
 local on_leave
 minetest.settings = {get_bool = function(_, _, default) return default end}
 minetest.register_globalstep = function() end
+local logs = {}
+minetest.log = function(_, text) table.insert(logs, text) end
+minetest.register_chatcommand = function() end
 minetest.register_on_leaveplayer = function(f) on_leave = f end
 pm.install(meal, pm_seat)
 local function step(seconds)
@@ -464,6 +467,27 @@ step(5)
 assert(eating(), "next day, served again")
 mcl_cozy.players.pat = nil
 step(0.5)
+
+assert(#logs > 0)
+-- The diagnostics say why: the keeper's absence, then the plate.
+logs = {}
+day = day + 1
+player("pat", 5)
+keeper_object.get_pos = function() return {x = 30, y = 0, z = 30} end
+sit("pat", west)
+step(5)
+assert(pm.report("pat"):find("keeper is not loaded"), pm.report("pat"))
+assert(logs[#logs]:find("keeper is not loaded") and #logs == 1, "logged once per change")
+keeper_object.get_pos = function() return {x = 0, y = 0, z = 1} end
+stacks[key(plate)] = "mcl_core:apple"
+step(1)
+assert(pm.report("pat"):find("plate holds an item"))
+stacks[key(plate)] = nil
+step(1)
+assert(logs[#logs]:find("eating"))
+mcl_cozy.players.pat = nil
+step(0.5)
+assert(logs[#logs]:find("stopped: stood up"))
 
 -- Disconnect mid-meal.
 day = day + 1

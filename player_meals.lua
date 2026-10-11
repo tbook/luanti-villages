@@ -70,9 +70,16 @@ local function feed(diner)
 	if share > 0 then mcl_hunger.saturate(diner.name, share) end
 end
 
-local function stop(name)
+local function say(diner, text)
+	if diner.said == text then return end
+	diner.said = text
+	core.log("action", "[living_villages] player meal, " .. diner.name .. " at " .. diner.chair .. ": " .. text)
+end
+
+local function stop(name, why)
 	local diner = diners[name]
 	diners[name] = nil
+	if diner then say(diner, "stopped: " .. (why or "stood up")) end
 	if diner and diner.table then meal.stand(diner.table) end
 end
 
@@ -80,7 +87,8 @@ local function start(name, chair, seat)
 	local table_pos, jukebox = tavern_of(seat, chair)
 	local diner = {name = name, chair = key(chair), bites = 0, given = 0, saturated = 0}
 	diners[name] = diner
-	if not table_pos or not jukebox then return end
+	if not table_pos then return say(diner, "sat; no table in front of this chair") end
+	if not jukebox then return say(diner, "sat; no jukebox within reach, so not a tavern") end
 	diner.jukebox = jukebox
 	diner.eaten_key = name .. "@" .. key(jukebox)
 	diner.table = {
@@ -105,10 +113,12 @@ function M.step(dtime, seat)
 	for name, diner in pairs(diners) do
 		local entry = sitting[name]
 		local player = core.get_player_by_name(name)
-		if not player or not entry or entry[2] ~= "sit" or key(vector.round(entry[1])) ~= diner.chair
-			or player:get_hp() <= 0 or vector.distance(player:get_pos(), entry[1]) > CHAIR_REACH then
-			stop(name)
-		end
+		local why
+		if not player then why = "left the game"
+		elseif not entry or entry[2] ~= "sit" or key(vector.round(entry[1])) ~= diner.chair then why = "stood up"
+		elseif player:get_hp() <= 0 then why = "died"
+		elseif vector.distance(player:get_pos(), entry[1]) > CHAIR_REACH then why = "moved away from the chair" end
+		if why then stop(name, why) end
 	end
 	for name, entry in pairs(sitting) do
 		local player = core.get_player_by_name(name)
@@ -120,6 +130,7 @@ function M.step(dtime, seat)
 		if diner and diner.table then
 			diner.table.object = core.get_player_by_name(name)
 			meal.tick(diner.table, dtime, diner.jukebox)
+			say(diner, diner.table._villages_meal and "eating" or "sat; " .. meal.explain(diner.table, diner.jukebox))
 			if diner.table._villages_meal_day then eaten[diner.eaten_key] = diner.table._villages_meal_day end
 		end
 	end
@@ -128,11 +139,24 @@ function M.step(dtime, seat)
 	end
 end
 
+-- What the chair under a seated player says, for /living_villages_meal.
+function M.report(name)
+	local diner = diners[name]
+	if not diner then return "not sitting on a chair" end
+	if not diner.table then return diner.said or "sat; not a tavern table" end
+	return "sat at " .. diner.chair .. ": " .. meal.explain(diner.table, diner.jukebox)
+end
+
 function M.install(shared_meal, seat)
 	meal = shared_meal
 	if core.settings and not core.settings:get_bool("living_villages_player_meals", true) then return end
 	if not core.register_globalstep then return end
 	core.register_globalstep(function(dtime) M.step(dtime, seat) end)
+	core.register_chatcommand("living_villages_meal", {
+		description = "Say why the chair you sit on serves, or does not serve, a meal",
+		privs = {server = true},
+		func = function(name) return true, M.report(name) end,
+	})
 	core.register_on_leaveplayer(function(player) stop(player:get_player_name()) end)
 end
 
