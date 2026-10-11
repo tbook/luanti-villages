@@ -65,3 +65,6 @@ living_villages_flock_range (Shepherd grazing range) int 32 0 60
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.
 living_villages_well_hangout (Villagers gather at the well) bool true
+# Idle villagers standing near each other sometimes stop and face one another in
+# twos and threes for a few seconds, as if talking (#242). Atmosphere only.
+living_villages_conversation (Villagers converse) bool true
