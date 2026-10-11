@@ -58,7 +58,7 @@ local STOP_BASE, STOP_PER_NODE = 30, 3
 local MAX_FAILURES = 3
 -- Vanilla sends a villager home past 50 nodes from its bed (do_activity).
 local BED_REACH = 46
-local AREA_RETRY = 120
+local AREA_RETRY = 30
 -- Solid within ROOF_HEIGHT above the shepherd's feet (past its own head) is a roof; a tree
 -- canopy is higher. A change of roof must hold for ROOF_TICKS ticks to count.
 local ROOF_HEIGHT = 4
@@ -326,21 +326,34 @@ local function herding_stage(self)
 	return common.schedule_stage(nil, self) == "work"
 end
 
--- Where the shepherd grazes: about the nearest bell, or else about its loom, with a
--- radius that keeps it within vanilla's 50 nodes of its bed and 100 of its loom
--- (validate_jobsite drops a jobsite farther than that). nil if there is no room.
+-- Where the shepherd grazes: about the nearest bell, or else about its loom. The radius
+-- keeps it within 100 nodes of its loom (validate_jobsite drops a jobsite farther than
+-- that) and, when it has a bed (vanilla gives one only at night, so a shepherd may have
+-- none), within vanilla's 50 of the bed (do_activity's wandered_too_far). Returns the
+-- area, or nil and the reason there is none.
 local function find_area(self, bell)
-	local bed = self._bed
-	if not bed or not self._jobsite then return nil end
-	local site = bell and bell.nearest_bell(self, bed)
+	local loom, bed = self._jobsite, self._bed
+	if not loom then return nil, "no loom" end
+	local function room(center)
+		local radius = LOOM_REACH - vector.distance(center, loom)
+		if bed then radius = math.min(radius, BED_REACH - vector.distance(center, bed)) end
+		return radius
+	end
+	local why
+	local site = bell and bell.nearest_bell(self, bed or loom)
 	if site then
 		local center = bell.center_of(site)
-		local radius = math.min(AREA_RADIUS, BED_REACH - vector.distance(center, bed),
-			LOOM_REACH - vector.distance(center, self._jobsite))
-		if radius >= AREA_MIN_RADIUS then return {center = center, radius = radius} end
+		local radius = math.min(AREA_RADIUS, room(center))
+		if radius >= AREA_MIN_RADIUS then return {center = center, radius = radius, bed_known = bed ~= nil} end
+		why = string.format("the bell at (%d,%d,%d) leaves radius %d", site.x, site.y, site.z, radius)
+	else
+		why = "no bell within reach"
 	end
-	local radius = math.min(LOOM_RADIUS, BED_REACH - vector.distance(self._jobsite, bed))
-	if radius >= STOP_MIN_RADIUS + 1 then return {center = vector.new(self._jobsite), radius = radius} end
+	local radius = math.min(LOOM_RADIUS, room(loom))
+	if radius >= STOP_MIN_RADIUS + 1 then
+		return {center = vector.new(loom), radius = radius, bed_known = bed ~= nil}
+	end
+	return nil, why .. ", and the loom leaves radius " .. radius
 end
 
 local function pick_stop(area, pos)
@@ -385,25 +398,29 @@ local function herd_tick(self, session, pos, bell)
 	local herd = session.herd
 	if not herd then
 		if now < (session.area_check or 0) then return end
-		-- Looked up again every AREA_TTL seconds: a bell may be built or taken down.
+		-- Looked up again every AREA_TTL seconds (a bell may be built or taken down) and when
+		-- a bed turns up (it bounds the radius); a shepherd with none grazes without one.
 		local area = session.area
-		if area and now - area.at > AREA_TTL then area = nil end
-		area = area or find_area(self, bell)
+		if area and (now - area.at > AREA_TTL or area.bed_known ~= (self._bed ~= nil)) then area = nil end
+		local why
+		if not area then area, why = find_area(self, bell) end
 		if area then area.at = area.at or now end
 		session.area = area
 		if not area then
 			session.area_check = now + AREA_RETRY
-			if not session.no_area_logged then
-				session.no_area_logged = true
-				core.log("action", string.format("[living_villages] shepherd %s has no grazing area (bed %s, loom %s)",
-					tostring(self._id), tostring(self._bed and core.pos_to_string(self._bed)),
+			-- Logged once per change of reason, not per attempt.
+			if session.no_area_logged ~= why then
+				session.no_area_logged = why
+				core.log("action", string.format("[living_villages] shepherd %s has no grazing area: %s (bed %s, loom %s)",
+					tostring(self._id), tostring(why), tostring(self._bed and core.pos_to_string(self._bed)),
 					tostring(self._jobsite and core.pos_to_string(self._jobsite))))
 			end
 			return
 		end
 		session.no_area_logged = nil
-		core.log("action", string.format("[living_villages] shepherd %s grazes about (%d,%d,%d), radius %d",
-			tostring(self._id), area.center.x, area.center.y, area.center.z, area.radius))
+		core.log("action", string.format("[living_villages] shepherd %s grazes about (%d,%d,%d), radius %d%s",
+			tostring(self._id), area.center.x, area.center.y, area.center.z, area.radius,
+			self._bed and "" or " (no bed yet)"))
 		herd = {phase = "out", since = now, area = area, failures = 0}
 		session.herd = herd
 		if self.order == "work" then self.order = nil end
@@ -450,6 +467,11 @@ local function herd_tick(self, session, pos, bell)
 	if route and route.status == "retry" and route.retry_at and core.get_gametime() < route.retry_at then return end
 	local stop = pick_stop(herd.area, pos)
 	if not stop then
+		if not herd.pick_logged then
+			herd.pick_logged = true
+			core.log("action", string.format("[living_villages] shepherd %s finds no open place to graze about (%d,%d,%d), radius %d",
+				tostring(self._id), herd.area.center.x, herd.area.center.y, herd.area.center.z, herd.area.radius))
+		end
 		herd.failures = herd.failures + 1
 		if herd.failures >= MAX_FAILURES then begin_loom(self, session, herd) end
 		return
@@ -667,7 +689,7 @@ return {
 			if herd.stop then text = text .. string.format(", stop (%d,%d,%d)", herd.stop.x, herd.stop.y, herd.stop.z) end
 			if herd.failures > 0 then text = text .. ", failed stops " .. herd.failures end
 		elseif herding_stage(villager) then
-			text = text .. (session.area == nil and ", no grazing area (needs a bed; retried every 2 min)" or ", not started")
+			text = text .. (session.area == nil and ", no grazing area: " .. tostring(session.no_area_logged) .. " (retried every 30 s)" or ", not started")
 		else
 			text = text .. ", not the work stage"
 		end

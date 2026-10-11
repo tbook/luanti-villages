@@ -475,6 +475,29 @@ villager_def.do_custom(f, 1)
 assert(f.state == "stand", "the herd walk ends with the stage")
 assert(activity_of(f) ~= "herd")
 
+-- 12. A shepherd with no bed (vanilla gives one only at night) grazes about the bell all the
+-- same, within 90 of its loom; and about the loom with no bell.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local bedless = shepherd(0, 0)
+bedless._bed = nil
+tick(bedless, 3)
+assert(#gopaths >= 1 and flat(gopaths[1].target, center) <= 21, "no bed: it still goes out about the bell")
+assert(activity_of(bedless) == "herd")
+assert(flock.status(bedless):find("grazing out"))
+bedless.state = "stand"
+reset(); gopaths = {}
+local bedless_loom = shepherd(0, 0)
+bedless_loom._bed = nil
+tick(bedless_loom, 3)
+assert(#gopaths == 1 and flat(gopaths[1].target, bedless_loom._jobsite) <= 13, "no bed, no bell: about the loom")
+-- A bed that turns up later bounds the area again (a bed 60 away leaves no room).
+bedless_loom._bed = {x = 60, y = 0, z = 0}
+bedless_loom.state = "stand"
+now = now + 700
+tick(bedless_loom, 3)
+assert(activity_of(bedless_loom) ~= "herd" or #gopaths >= 1)
+
 -- 12a. A route still being planned (the villager stands, route status "planning") is a
 -- stop under way, not a failed one; three of those used to send the shepherd back to the loom.
 reset(); gopaths = {}; time = 10000 / 24000
@@ -549,11 +572,16 @@ reset(); gopaths = {}; time = 10000 / 24000
 nodes[key({x = -30, y = 5, z = 0})] = "mcl_bells:bell"
 local remote = shepherd(0, 0)
 nodes[key(remote._jobsite)] = nil
-remote._jobsite = {x = 80, y = 0, z = 0}
+remote._jobsite = {x = 65, y = 0, z = 0}
 nodes[key(remote._jobsite)] = "mcl_loom:loom"
 metas[key(remote._jobsite)] = {villager = remote._id}
 tick(remote, 5)
 assert(#gopaths == 0, "no grazing stops where the loom would be dropped")
+-- Tried again every 30 s: without the bed it can graze about the loom.
+remote._bed = nil
+tick(remote, 35)
+assert(#gopaths >= 1, "and when the bed is gone it grazes about the loom (within 90 of it)")
+assert(flat(gopaths[1].target, remote._jobsite) <= 13)
 
 -- 13. No bell: it grazes about the loom. A bell too near vanilla's limit is passed over.
 reset(); gopaths = {}; time = 10000 / 24000

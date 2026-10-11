@@ -69,6 +69,9 @@ core.register_on_mods_loaded(function()
 		local def = core.registered_entities[name]
 		local custom = def.do_custom
 		def.do_custom = function(self, dtime)
+			if name == VILLAGER and self._profession == "shepherd" and core.settings:get_bool("lv_probe_flock_nobed", false) then
+				self._bed = nil
+			end
 			local start = os.clock()
 			local result = custom(self, dtime)
 			local kind = name == SHEEP and "sheep" or (self._profession == "shepherd" and "shepherd" or "villager")
@@ -141,6 +144,8 @@ function flock.run(area, emit, done)
 		for _, obj in ipairs(core.get_objects_inside_radius(center, radius)) do
 			local e = obj:get_luaentity()
 			if e and e.name == VILLAGER and e._profession == "shepherd" and e._id then
+				-- Vanilla gives a bed only at night: a shepherd may have none by day.
+				if nobed then e._bed = nil end
 				shepherds[#shepherds + 1] = {e = e, pos = obj:get_pos()}
 			elseif e and e.name == SHEEP and e._villages_shepherd then
 				local list = sheep_by[e._villages_shepherd] or {}
@@ -157,6 +162,7 @@ function flock.run(area, emit, done)
 		end
 		return shepherds, sheep_by
 	end
+	local nobed = core.settings:get_bool("lv_probe_flock_nobed", false)
 	local function step()
 		local phase = PHASES[phase_index]
 		if not phase then
