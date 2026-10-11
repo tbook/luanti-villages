@@ -1,0 +1,604 @@
+-- Run with: lua tests/flock.lua
+local time = 10000 / 24000
+local now, day = 1000, 1
+local nodes, metas = {}, {}
+local settings = {}
+local players = {{pos = {x = 0, y = 0, z = 0}}}
+local objects = {}
+local function key(pos) return pos.x .. "," .. pos.y .. "," .. pos.z end
+local function parse(k)
+	local x, y, z = k:match("(-?%d+),(-?%d+),(-?%d+)")
+	return {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+end
+
+vector = {
+	distance = function(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2) end,
+	round = function(a) return {x = math.floor(a.x + 0.5), y = math.floor(a.y + 0.5), z = math.floor(a.z + 0.5)} end,
+	zero = function() return {x = 0, y = 0, z = 0} end,
+	new = function(a, b, c)
+		if type(a) == "table" then return {x = a.x, y = a.y, z = a.z} end
+		return {x = a, y = b, z = c}
+	end,
+}
+
+minetest = {
+	get_modpath = function() return "." end,
+	get_timeofday = function() return time end,
+	get_gametime = function() return now end,
+	get_day_count = function() return day end,
+	get_item_group = function() return 0 end,
+	settings = {get = function(_, name) return settings[name] end},
+	registered_nodes = {
+		air = {walkable = false},
+		["mcl_core:stone"] = {walkable = true},
+		["mcl_bells:bell"] = {walkable = false},
+		["mcl_loom:loom"] = {walkable = true},
+	},
+	log = function() end,
+	pos_to_string = function(p) return "(" .. p.x .. "," .. p.y .. "," .. p.z .. ")" end,
+	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
+	get_meta = function(pos)
+		return {get_string = function(_, field) return (metas[key(pos)] or {})[field] or "" end}
+	end,
+	get_connected_players = function()
+		local list = {}
+		for _, p in ipairs(players) do
+			table.insert(list, {get_pos = function() return p.pos end})
+		end
+		return list
+	end,
+	get_objects_inside_radius = function(pos, radius)
+		local found = {}
+		for _, obj in ipairs(objects) do
+			local p = obj:get_pos()
+			if p and vector.distance(p, pos) <= radius then table.insert(found, obj) end
+		end
+		return found
+	end,
+	find_nodes_in_area = function(minp, maxp, names)
+		local found = {}
+		for k, name in pairs(nodes) do
+			local p = parse(k)
+			if name == names[1] and p.x >= minp.x and p.x <= maxp.x and p.y >= minp.y and p.y <= maxp.y
+				and p.z >= minp.z and p.z <= maxp.z then
+				table.insert(found, p)
+			end
+		end
+		table.sort(found, function(a, b) return key(a) < key(b) end)
+		return found
+	end,
+}
+
+local flock = dofile("flock.lua")
+local common = dofile("common.lua")
+common.activity_override = flock.activity_override
+
+local function reset()
+	nodes, metas, objects = {}, {}, {}
+	for k in pairs(flock.registry) do flock.registry[k] = nil end
+	for x = -70, 70 do
+		for z = -70, 70 do nodes[key({x = x, y = -1, z = z})] = "mcl_core:stone" end
+	end
+end
+
+-- A sheep entity with the parts of mcl_mobs' mob class that flock.lua uses.
+local function make_sheep(x, z)
+	local pos = {x = x, y = -0.49, z = z}
+	local ent = {name = "mobs_mc:sheep", state = "stand", walk_velocity = 1, run_velocity = 2}
+	local obj = {removed = false}
+	obj.get_pos = function() if obj.removed then return nil end return pos end
+	obj.set_pos = function(_, p) pos.x, pos.y, pos.z = p.x, p.y, p.z end
+	obj.get_luaentity = function() return ent end
+	ent.object = obj
+	ent.pos = pos
+	ent.velocity = 0
+	ent.heading = {1, 0}
+	ent.stand = function(s) s.velocity, s.state, s.animation = 0, "stand", "stand" end
+	ent.set_velocity = function(s, v) s.velocity = v end
+	ent.set_animation = function(s, a) s.animation = a end
+	ent.turn_in_direction = function(s, dx, dz) s.heading = {dx, dz} end
+	ent.is_at_cliff_or_danger = function() return false end
+	table.insert(objects, obj)
+	return ent, obj
+end
+
+local spawned = 0
+mcl_mobs = {
+	spawn = function(pos, name)
+		assert(name == "mobs_mc:sheep", "only sheep are spawned")
+		spawned = spawned + 1
+		local _, obj = make_sheep(pos.x, pos.z)
+		return obj
+	end,
+}
+
+local villager_def = {do_custom = function() end, on_die = function() end}
+local sheep_def = {}
+sheep_def.do_custom = function() sheep_def.vanilla_ran = (sheep_def.vanilla_ran or 0) + 1 end
+local bell = dofile("bell.lua")
+flock.install(villager_def, sheep_def, bell)
+
+local ids = 0
+local gopaths = {}
+local function shepherd(x, z, extra)
+	ids = ids + 1
+	local pos = {x = x, y = -0.49, z = z}
+	local self = {_id = "s" .. ids, _profession = "shepherd", state = "stand",
+		_bed = {x = x, y = 0, z = z}, _jobsite = {x = x + 2, y = 0, z = z}}
+	nodes[key(self._jobsite)] = "mcl_loom:loom"
+	metas[key(self._jobsite)] = {villager = self._id}
+	self.object = {get_pos = function() return pos end, set_velocity = function() end}
+	self.pos = pos
+	self.player_in_active_range = function() return self.near ~= false end
+	self.ready_to_path = function() return true end
+	self.gopath = function(s, target)
+		table.insert(gopaths, {self = s, target = target})
+		s.state = "gowp"
+		return true
+	end
+	for k, v in pairs(extra or {}) do self[k] = v end
+	return self
+end
+
+local function tick(self, seconds)
+	for _ = 1, seconds or 1 do villager_def.do_custom(self, 1) end
+end
+
+local function flock_of(self)
+	local mine = {}
+	for _, obj in ipairs(objects) do
+		local ent = obj:get_luaentity()
+		if ent._villages_shepherd == self._id and not obj.removed then table.insert(mine, ent) end
+	end
+	return mine
+end
+
+local function flat(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.z - b.z) ^ 2) end
+
+-- Drive every sheep for tenths of a second, as the engine's on_step does through do_custom.
+local function step_sheep(tenths)
+	for _ = 1, tenths do
+		for _, obj in ipairs(objects) do
+			local ent = obj:get_luaentity()
+			if sheep_def.do_custom(ent, 0.1) == false and ent.velocity > 0 then
+				local dx, dz = ent.heading[1], ent.heading[2]
+				local len = math.sqrt(dx * dx + dz * dz)
+				ent.pos.x = ent.pos.x + dx / len * ent.velocity * 0.1
+				ent.pos.z = ent.pos.z + dz / len * ent.velocity * 0.1
+			end
+		end
+	end
+end
+
+local function activity_of(villager)
+	local activity
+	common.as_villager(villager, function() activity = common.get_activity() end)
+	return activity
+end
+
+-- 1. A shepherd with a loom gets sheep one at a time, five at most, each marked with
+-- its id; a day's spawns are capped.
+-- (The putter stage: no grazing walks to get in the way of the spawning.)
+time = 6000 / 24000
+reset()
+local a = shepherd(0, 0)
+tick(a, 3)
+assert(#flock_of(a) == 1, "the first sheep is spawned at once, one at a time")
+tick(a, 60)
+assert(#flock_of(a) == 5 and spawned == 5, "five sheep, no more")
+for _, ent in ipairs(flock_of(a)) do
+	assert(flat(ent.pos, a.pos) <= 7, "sheep are set down beside the shepherd")
+end
+-- Sheep that die are replaced, within a day's allowance.
+for _, ent in ipairs(flock_of(a)) do
+	sheep_def.on_die(ent, ent.pos, nil)
+	ent.object.removed = true
+end
+tick(a, 60)
+assert(#flock_of(a) == 0 and spawned == 5, "no more than five a day")
+day = 2
+tick(a, 60)
+assert(#flock_of(a) == 5 and spawned == 10, "a new day allows new sheep")
+assert(a._villages_flock_total == 5, "the record counts them")
+-- Sheep that vanish without a death (unloaded, stranded) are not replaced at once, only
+-- after five days without a sighting.
+local lost_two = flock_of(a)
+lost_two[1].object.removed, lost_two[2].object.removed = true, true
+day = 3
+tick(a, 60)
+assert(#flock_of(a) == 3 and spawned == 10, "stranded sheep are not doubled")
+day = 9
+tick(a, 60)
+assert(#flock_of(a) == 5 and spawned == 12, "forgotten after five days")
+
+-- 2. Children, non-shepherds, shepherds with no loom and shepherds nobody is near keep none.
+reset(); spawned = 0
+for name, extra in pairs({child = {child = true}, farmer = {_profession = "farmer"}, away = {near = false}}) do
+	local s = shepherd(0, 0, extra)
+	tick(s, 30)
+	assert(spawned == 0, "no flock for " .. name)
+end
+local loomless = shepherd(0, 0)
+metas[key(loomless._jobsite)] = {villager = "someone else"}
+tick(loomless, 30)
+assert(spawned == 0, "no flock without a claimed loom")
+
+-- 3. The setting: a smaller number caps the flock; 0 turns it off and lets it go.
+reset(); spawned = 0
+local b = shepherd(0, 0)
+settings.living_villages_flock_size = "3"
+tick(b, 60)
+assert(#flock_of(b) == 3, "the setting sets the flock size")
+settings.living_villages_flock_size = "0"
+tick(b, 2)
+assert(#flock_of(b) == 0, "size 0 lets the flock go")
+local before = spawned
+tick(b, 30)
+assert(spawned == before, "size 0 spawns none")
+settings.living_villages_flock_size = nil
+
+-- 4. A village keeps 15 sheep over its shepherds.
+reset(); spawned = 0; day = 3
+local crowd = {}
+for i = 1, 4 do crowd[i] = shepherd(i * 3, 0) end
+for _ = 1, 80 do for i = 1, 4 do tick(crowd[i]) end end
+assert(spawned == flock.VILLAGE_CAP, "the village cap holds: " .. spawned)
+for i = 1, 4 do assert(#flock_of(crowd[i]) <= 5) end
+
+time = 10000 / 24000
+-- 5. Following: sheep beyond FAR are pulled in, those near are left alone.
+reset(); spawned = 0; day = 5
+local c = shepherd(0, 0)
+local near_sheep = make_sheep(2, 0)
+local far_sheep = make_sheep(9, 0)
+local running_sheep = make_sheep(30, 0)
+for _, ent in ipairs({near_sheep, far_sheep, running_sheep}) do ent._villages_shepherd = c._id end
+settings.living_villages_flock_size = nil
+-- Today's sheep have been made already, so no more are added.
+c._villages_flock_day, c._villages_flock_made = day, 5
+tick(c)
+step_sheep(1)
+assert(not (flock.states[near_sheep] and flock.states[near_sheep].pull), "a sheep close by is not pulled")
+assert(flock.states[far_sheep].pull and not flock.states[far_sheep].pull.run, "a sheep 9 away walks")
+assert(flock.states[running_sheep].pull.run, "a sheep 30 away comes running")
+assert(far_sheep.state == "walk" and far_sheep.animation == "walk" and running_sheep.animation == "run")
+assert(sheep_def.vanilla_ran, "vanilla's own do_custom still runs")
+local start = flat(far_sheep.pos, c.pos)
+step_sheep(10)
+assert(flat(far_sheep.pos, c.pos) < start, "the pulled sheep gets closer")
+for _ = 1, 8 do tick(c); step_sheep(10) end
+assert(flat(far_sheep.pos, c.pos) <= flock.NEAR + 0.2, "and stops within NEAR")
+assert(far_sheep.state == "stand" and far_sheep.velocity == 0, "it rests there")
+-- Stages that take the shepherd to a building release the flock: a pull it does not
+-- renew runs out, and the sheep stay where they are.
+running_sheep.pos.x = 40
+time = 16000 / 24000 -- tavern
+tick(c, 3)
+step_sheep(40)
+assert(running_sheep.state == "stand" and not flock.states[running_sheep].pull, "an unrenewed pull ends")
+local stay = running_sheep.pos.x
+step_sheep(30)
+assert(running_sheep.pos.x == stay, "released sheep stay where they are")
+tick(c, 5)
+assert(not flock.states[running_sheep].pull, "no pull at the tavern stage")
+time = 6000 / 24000 -- putter
+tick(c)
+assert(flock.states[running_sheep].pull and flock.states[running_sheep].pull.run,
+	"when the shepherd is free they come running")
+-- Holidays: church and bell stages release them, and putter does not.
+day = 8
+time = 8000 / 24000
+local st = flock.states[running_sheep]
+st.pull = nil
+tick(c, 3)
+assert(not st.pull, "the church stage releases the flock")
+time = 10800 / 24000
+tick(c, 3)
+assert(not st.pull, "so does the bell stage")
+time = 6000 / 24000
+tick(c)
+assert(st.pull, "and the holiday putter stage does not")
+day = 5
+
+-- 6. Under a roof the flock is left alone; a tree canopy high above is no roof, and a
+-- moment under one does not drop the flock.
+st.pull = nil
+tick(c, 2)
+assert(st.pull, "followed in the open")
+nodes[key({x = 0, y = 7, z = 0})] = "mcl_core:stone"
+st.pull = nil
+tick(c, 4)
+assert(st.pull, "a canopy high above is not a roof")
+nodes[key({x = 0, y = 7, z = 0})] = nil
+nodes[key({x = 0, y = 4, z = 0})] = "mcl_core:stone"
+tick(c, 1)
+assert(st.pull, "one tick under a roof does not drop the flock")
+tick(c, 4)
+step_sheep(40)
+assert(not st.pull, "a shepherd under a roof is not followed")
+nodes[key({x = 0, y = 4, z = 0})] = nil
+tick(c, 1)
+assert(not st.pull, "and not at the first tick in the open")
+tick(c, 4)
+assert(st.pull, "but is again in the open")
+
+-- 7. Stuck against a fence, the sheep rests and vanilla's wander takes over.
+st.pull = nil
+running_sheep.pos.x, running_sheep.pos.z = 20, 0
+tick(c)
+assert(st.pull)
+for _ = 1, 100 do sheep_def.do_custom(running_sheep, 0.1) end
+assert(not st.pull and st.rest_until > now, "a stuck sheep rests")
+tick(c, 2)
+assert(not st.pull, "and is not pulled again while it rests")
+now = now + 10
+tick(c)
+assert(st.pull, "but is, after the rest")
+
+-- 7b. Continuous danger checks: a sheep pulled over many steps toward a ledge or water
+-- stops short of it instead of walking off, and a wall in the line holds it back.
+local function pulled_toward(x_shepherd, setup)
+	reset()
+	local sh = shepherd(x_shepherd, 0)
+	sh._villages_flock_day, sh._villages_flock_made = day, 5
+	local sheep = make_sheep(0, 0)
+	sheep._villages_shepherd = sh._id
+	setup()
+	for _ = 1, 25 do tick(sh); step_sheep(10) end
+	return sh, sheep
+end
+local _, ledge_sheep = pulled_toward(-20, function()
+	for x = -70, -5 do nodes[key({x = x, y = -1, z = 0})] = nil end
+end)
+assert(ledge_sheep.pos.x > -5.5, "a pulled sheep stops at a drop, at " .. ledge_sheep.pos.x)
+assert(ledge_sheep.pos.x < -1, "but did walk toward the shepherd")
+minetest.registered_nodes["default:water"] = {walkable = false, liquidtype = "source", groups = {water = 3}}
+local _, wet_sheep = pulled_toward(-20, function()
+	for x = -70, -5 do if x ~= -18 then nodes[key({x = x, y = 0, z = 0})] = "default:water" end end
+end)
+assert(wet_sheep.pos.x > -5.5 and wet_sheep.pos.x < -1, "a pulled sheep stops at water, at " .. wet_sheep.pos.x)
+local _, walled = pulled_toward(-20, function() nodes[key({x = -3, y = 1, z = 0})] = "mcl_core:stone" end)
+assert(walled.pos.x == 0, "a sheep is not pulled through a wall")
+local _, stepped = pulled_toward(-20, function() nodes[key({x = -3, y = 0, z = 0})] = "mcl_core:stone" end)
+assert(stepped.pos.x < -1, "a one-block step is no wall")
+
+-- 8. A drop in the way stops the sheep.
+reset(); spawned = 0; day = 5
+c = shepherd(0, 0)
+c._villages_flock_day, c._villages_flock_made = day, 5
+far_sheep = make_sheep(9, 0)
+running_sheep = make_sheep(30, 0)
+for _, ent in ipairs({far_sheep, running_sheep}) do ent._villages_shepherd = c._id end
+tick(c)
+st = flock.states[running_sheep]
+local edge = make_sheep(15, 0)
+edge._villages_shepherd = c._id
+edge.is_at_cliff_or_danger = function() return "free fall" end
+tick(c, 11) -- it is found at the next scan
+step_sheep(3)
+assert(edge.state == "stand" and flock.states[edge].rest_until, "a sheep at a drop rests")
+
+-- 9. Far behind: set down beside the shepherd if no one sees it, not if someone does.
+local lost = make_sheep(60, 0)
+lost._villages_shepherd = c._id
+players = {{pos = {x = 56, y = 0, z = 0}}, {pos = {x = 0, y = 0, z = 0}}}
+tick(c, 11)
+assert(lost.pos.x == 60, "a lost sheep in sight is not moved")
+players = {{pos = {x = 0, y = 0, z = 0}}}
+tick(c, 2)
+assert(flat(lost.pos, c.pos) <= 7, "out of sight it is set down by the shepherd")
+players = {{pos = {x = 0, y = 0, z = 0}}}
+
+-- 10. The shepherd reloaded: a new entity with the same id finds the flock again.
+reset(); spawned = 0; day = 9
+settings.living_villages_flock_size = nil
+local d = shepherd(0, 0)
+tick(d, 60)
+local kept = flock_of(d)
+assert(#kept == 5)
+local reloaded = shepherd(0, 0)
+reloaded._id = d._id
+reloaded._jobsite = d._jobsite
+metas[key(d._jobsite)] = {villager = d._id}
+reloaded._villages_flock_day, reloaded._villages_flock_made = d._villages_flock_day, d._villages_flock_made
+local before_spawn = spawned
+tick(reloaded, 20)
+assert(spawned == before_spawn, "a reloaded shepherd does not spawn a second flock")
+assert(#flock.sessions[reloaded].sheep == 5, "it found its sheep again")
+-- Persistence: the sheep carry a plain string, and nothing session-only is on them.
+for _, ent in ipairs(kept) do
+	assert(type(ent._villages_shepherd) == "string")
+	for k in pairs(ent) do assert(not tostring(k):find("pull"), "no pull state on the entity") end
+end
+
+-- 11. A lost claim lets them go, after the grace period; death at once.
+metas[key(d._jobsite)] = {villager = "other"}
+tick(d, flock.GRACE - 5)
+assert(#flock_of(d) == 5, "a missing claim is waited out")
+tick(d, 10)
+assert(#flock_of(d) == 0, "a lost claim releases the flock")
+local e = shepherd(0, 0)
+tick(e, 20)
+assert(#flock_of(e) >= 1)
+villager_def.on_die(e, e.pos, nil)
+assert(#flock_of(e) == 0, "a dead shepherd's sheep are released")
+
+-- 12. Herding in the work stage: grazing stops about the bell, and no pull to the loom.
+reset(); spawned = 0; day = 6; time = 10000 / 24000
+gopaths = {}
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local center = bell.center_of({x = 15, y = 5, z = 0})
+local f = shepherd(0, 0)
+tick(f, 3)
+assert(#gopaths >= 1, "the shepherd sets off for a grazing stop")
+local stop = gopaths[1].target
+assert(flat(stop, center) <= 21 and flat(stop, center) >= 4, "the stop is about the bell")
+assert(activity_of(f) == "herd", "vanilla is told the shepherd is not at work")
+assert(flock.status(f):find("grazing out"), "the inspector says so: " .. flock.status(f))
+assert(flock.status(shepherd(40, 40, {_profession = "farmer"})) == "not a shepherd")
+assert(activity_of(shepherd(40, 40, {_profession = "farmer"})) == "work", "others are unaffected")
+-- It arrives and lingers with its wander about the stop.
+f.pos.x, f.pos.z = stop.x, stop.z
+f.state = "stand"
+tick(f)
+assert(f._villages_wander_anchor and f._villages_wander_anchor.radius == 3
+	and flat(f._villages_wander_anchor.pos, stop) == 0, "it grazes about the stop")
+local walks = #gopaths
+tick(f, 10)
+assert(#gopaths == walks, "it lingers before the next stop")
+tick(f, 41)
+assert(#gopaths == walks + 1 and f._villages_wander_anchor == nil, "then goes to another")
+-- After HERD_OUT it goes back to the loom, where vanilla's work resumes.
+f.state = "stand"
+for _ = 1, flock.HERD_OUT + 10 do
+	tick(f)
+	if activity_of(f) == "work" then break end
+end
+assert(activity_of(f) == "work", "back to the loom after a while")
+local walks2 = #gopaths
+tick(f, 10)
+assert(#gopaths == walks2, "no grazing walks while at the loom")
+-- The flock does not follow it there.
+for _, ent in ipairs(flock_of(f)) do ent.pos.x = 30 end
+tick(f, 3)
+step_sheep(40)
+for _, ent in ipairs(flock_of(f)) do
+	assert(not (flock.states[ent] and flock.states[ent].pull), "no flock at the loom")
+end
+tick(f, flock.HERD_LOOM)
+assert(activity_of(f) == "herd", "and out again")
+-- The tavern stage ends the herd and stops its walk.
+f.state = "gowp"
+f._villages_herd_probe = nil
+time = 16000 / 24000
+villager_def.do_custom(f, 1)
+assert(f.state == "stand", "the herd walk ends with the stage")
+assert(activity_of(f) ~= "herd")
+
+-- 12. A shepherd with no bed (vanilla gives one only at night) grazes about the bell all the
+-- same, within 90 of its loom; and about the loom with no bell.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local bedless = shepherd(0, 0)
+bedless._bed = nil
+tick(bedless, 3)
+assert(#gopaths >= 1 and flat(gopaths[1].target, center) <= 21, "no bed: it still goes out about the bell")
+assert(activity_of(bedless) == "herd")
+assert(flock.status(bedless):find("grazing out"))
+bedless.state = "stand"
+reset(); gopaths = {}
+local bedless_loom = shepherd(0, 0)
+bedless_loom._bed = nil
+tick(bedless_loom, 3)
+assert(#gopaths == 1 and flat(gopaths[1].target, bedless_loom._jobsite) <= 13, "no bed, no bell: about the loom")
+-- A bed that turns up later bounds the area again (a bed 60 away leaves no room).
+bedless_loom._bed = {x = 60, y = 0, z = 0}
+bedless_loom.state = "stand"
+now = now + 700
+tick(bedless_loom, 3)
+assert(activity_of(bedless_loom) ~= "herd" or #gopaths >= 1)
+
+-- 12a. A route still being planned (the villager stands, route status "planning") is a
+-- stop under way, not a failed one; three of those used to send the shepherd back to the loom.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local slow = shepherd(0, 0)
+slow.gopath = function(s, target)
+	table.insert(gopaths, {self = s, target = target})
+	s._villages_goto_route = {status = "planning"}
+	return true
+end
+tick(slow, 12)
+assert(#gopaths == 1, "it waits for the planner: one stop, not " .. #gopaths)
+assert(activity_of(slow) == "herd", "and is still out grazing")
+slow._villages_goto_route = nil
+slow.state = "gowp"
+slow.pos.x = gopaths[1].target.x
+slow.pos.z = gopaths[1].target.z
+tick(slow, 2)
+slow.state = "stand"
+tick(slow, 3)
+assert(slow._villages_wander_anchor, "it grazes at the stop once the walk is done")
+
+-- 12a1. A walk that arrives a few nodes from the stop (the route's last cell is beside it)
+-- is a stop reached: used to be counted failed, and three in a row sent the shepherd back.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local near_miss = shepherd(0, 0)
+tick(near_miss, 2)
+local want = gopaths[1].target
+near_miss.pos.x, near_miss.pos.z = want.x + 3, want.z
+near_miss.state = "stand"
+near_miss._villages_goto_route = {status = "arrived"}
+tick(near_miss, 2)
+assert(near_miss._villages_wander_anchor and near_miss._villages_wander_anchor.pos.x == want.x + 3,
+	"it grazes where the walk ended")
+assert(activity_of(near_miss) == "herd")
+
+-- 12a2. A failed route makes navigation.lua refuse every goto for its retry time; the
+-- refusals are waited out, not counted as failed stops (three of them used to end the
+-- grazing for the minute at the loom, so a shepherd with one unreachable stop hardly left).
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local refused = shepherd(0, 0)
+local refusals = 0
+refused.gopath = function(s, target)
+	if s._villages_goto_route and s._villages_goto_route.status == "retry" and now < s._villages_goto_route.retry_at then
+		refusals = refusals + 1
+		return false
+	end
+	table.insert(gopaths, {self = s, target = target})
+	if #gopaths == 1 then
+		s._villages_goto_route = {status = "planning"}
+	else
+		s.state = "gowp"
+	end
+	return true
+end
+local start_now = now
+tick(refused, 1)
+assert(#gopaths == 1)
+refused._villages_goto_route = {status = "retry", retry_at = now + 30}
+for _ = 1, 12 do now = now + 1; tick(refused, 1) end
+assert(refusals == 0, "it does not even ask while navigation refuses")
+assert(activity_of(refused) == "herd", "and is still out grazing, not back at the loom")
+now = now + 30
+tick(refused, 2)
+assert(#gopaths >= 2, "then it tries another stop")
+now = start_now
+
+-- 12b. A bell too far from the loom is not used: the stops would drop the job.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = -30, y = 5, z = 0})] = "mcl_bells:bell"
+local remote = shepherd(0, 0)
+nodes[key(remote._jobsite)] = nil
+remote._jobsite = {x = 65, y = 0, z = 0}
+nodes[key(remote._jobsite)] = "mcl_loom:loom"
+metas[key(remote._jobsite)] = {villager = remote._id}
+tick(remote, 5)
+assert(#gopaths == 0, "no grazing stops where the loom would be dropped")
+-- Tried again every 30 s: without the bed it can graze about the loom.
+remote._bed = nil
+tick(remote, 35)
+assert(#gopaths >= 1, "and when the bed is gone it grazes about the loom (within 90 of it)")
+assert(flat(gopaths[1].target, remote._jobsite) <= 13)
+
+-- 13. No bell: it grazes about the loom. A bell too near vanilla's limit is passed over.
+reset(); gopaths = {}; time = 10000 / 24000
+local h = shepherd(0, 0)
+tick(h, 3)
+assert(#gopaths == 1 and flat(gopaths[1].target, h._jobsite) <= 13, "no bell: about the loom")
+reset(); gopaths = {}
+nodes[key({x = 45, y = 5, z = 0})] = "mcl_bells:bell"
+local far_home = shepherd(0, 0)
+tick(far_home, 3)
+assert(#gopaths == 1 and flat(gopaths[1].target, far_home._jobsite) <= 13,
+	"a bell near vanilla's 50 node limit is passed over")
+
+-- 14. Trading holds the herd.
+reset(); gopaths = {}
+local t = shepherd(0, 0, {_trading_players = {x = true}})
+tick(t, 5)
+assert(#gopaths == 0, "no herding while someone is trading")
+
+print("flock: ok")

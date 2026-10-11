@@ -215,14 +215,21 @@ local function end_seat_walk(self, approach)
 	end
 end
 
-return {
+local M
+M = {
 	stop_walk = stop_walk,
 	end_seat_walk = end_seat_walk,
 	schedule_stage = stage_at,
 	is_holiday = is_holiday,
 	-- Replacement for VoxeLibre's get_activity(tod), which villager.lua
 	-- declares without `local` and looks up as a global on every call.
-	get_activity = function(tod) return vanilla_activity[stage_at(tod, current_villager)] end,
+	-- activity_override(villager, stage), when set, may answer instead (flock.lua keeps
+	-- a shepherd out among its sheep from being sent to the loom, #215).
+	get_activity = function(tod)
+		local stage = stage_at(tod, current_villager)
+		local override = M.activity_override
+		return override and current_villager and override(current_villager, stage) or vanilla_activity[stage]
+	end,
 	-- Runs fn(...) with get_activity answering for villager.
 	as_villager = function(villager, fn, ...)
 		local previous = current_villager
@@ -332,3 +339,4 @@ return {
 	end,
 	workstation_search_nodes = function() return workstation_search_node_names end,
 }
+return M

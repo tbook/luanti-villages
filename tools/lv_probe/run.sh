@@ -18,6 +18,8 @@
 # default tools/lv_probe/results/), LV_PROBE_PORT (first port to try; a free one
 # is used, never one a running game holds), LV_PROBE_LIMIT (seconds before giving up;
 # default 3600, or with a census sites x (census seconds + 120) + 600 if larger),
+# LV_PROBE_FLOCK=1 (with --with-mod) runs the shepherd flock day of each built village (#215;
+# LV_PROBE_FLOCK_EXTRA=N adds N synthetic shepherds),
 # LV_PROBE_CENSUS_PUTTER (seconds of the census held at the Putter stage first, with a well watch, #11),
 # LV_PROBE_CENSUS (whole seconds of jobsite census per village, #217; needs --with-mod).
 set -eu
@@ -53,6 +55,20 @@ case $census in
 esac
 if [ "$census" -gt 0 ] && [ "$with_mod" != 1 ]; then
 	echo "LV_PROBE_CENSUS needs --with-mod: vanilla villagers have no approach cells to count" >&2
+	exit 2
+fi
+
+flock=${LV_PROBE_FLOCK:-0}
+flock_extra=${LV_PROBE_FLOCK_EXTRA:-0}
+case $flock$flock_extra in
+	''|*[!0-9]*) echo "LV_PROBE_FLOCK and LV_PROBE_FLOCK_EXTRA want whole numbers" >&2; exit 2 ;;
+esac
+if [ "$flock" -gt 0 ] && [ "$with_mod" != 1 ]; then
+	echo "LV_PROBE_FLOCK needs --with-mod" >&2
+	exit 2
+fi
+if [ "$flock" -gt 0 ] && [ "$census" -gt 0 ]; then
+	echo "LV_PROBE_FLOCK and LV_PROBE_CENSUS cannot both be set" >&2
 	exit 2
 fi
 
@@ -117,14 +133,20 @@ lv_probe_sites = $sites
 lv_probe_radius = $radius
 lv_probe_chunk = $chunk
 lv_probe_census = $census
+lv_probe_flock = $flock
+lv_probe_flock_extra = $flock_extra
 lv_probe_census_putter = ${LV_PROBE_CENSUS_PUTTER:-0}
 EOT
+# Extra settings for the run, one `name = value` per line (e.g. living_villages_flock_size = 0).
+if [ -n "${LV_PROBE_CONF_EXTRA:-}" ]; then printf '%s\n' "$LV_PROBE_CONF_EXTRA" >> "$conf"; fi
 
 ports=${TMPDIR:-/tmp}/lv_ports
 port=$(lv_claim_port "${LV_PROBE_PORT:-30123}" "$ports")
 visits=$sites
 if [ -n "$chunk" ]; then visits=1; fi
-limit=${LV_PROBE_LIMIT:-$((visits * (census + 120) + 600))}
+extra_seconds=$census
+if [ "$flock" -gt 0 ]; then extra_seconds=800; fi
+limit=${LV_PROBE_LIMIT:-$((visits * (extra_seconds + 120) + 600))}
 if [ -z "${LV_PROBE_LIMIT:-}" ] && [ "$limit" -lt 3600 ]; then limit=3600; fi
 server=
 # On exit or Ctrl-C stop the server too, so it does not keep the port and the scratch world.

@@ -553,11 +553,17 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal, seat)
 	-- After the tavern, so its seated-guest check sees a pew first.
 	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
-	dofile(core.get_modpath("living_villages") .. "/bell.lua").install(def)
+	local bell = dofile(core.get_modpath("living_villages") .. "/bell.lua")
+	bell.install(def)
+	-- The shepherd's flock (#215) steers VoxeLibre's own sheep and, while the shepherd
+	-- grazes it, answers get_activity for it.
+	local flock = dofile(core.get_modpath("living_villages") .. "/flock.lua")
+	flock.install(def, core.registered_entities["mobs_mc:sheep"], bell)
+	common.activity_override = flock.activity_override
 	dofile(core.get_modpath("living_villages") .. "/well.lua").install(def)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
-	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def)
+	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def, flock)
 	dofile(core.get_modpath("living_villages") .. "/paths.lua").install(def, path_storage)
 	dofile(core.get_modpath("living_villages") .. "/floor_guard.lua")(def)
 end)

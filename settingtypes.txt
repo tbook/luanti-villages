@@ -51,6 +51,11 @@ living_villages_child_grow_days (Child growth time, game days) float 12 0.1 100
 # builds none with a loom. Existing villages are unchanged.
 living_villages_loomless_house_chance (Share of small houses without a loom) float 0.5 0 1
 
+# Sheep each shepherd with a loom keeps and herds (#215): they follow it about the
+# village by day and are left to graze while it is at church, the bell, the tavern or
+# in bed. 0 turns shepherds' flocks off, sheep already marked are then let go, and
+# shepherds no longer take their grazing walks about the bell in the work stage.
+living_villages_flock_size (Sheep per shepherd) int 5 0 5
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.
 living_villages_well_hangout (Villagers gather at the well) bool true

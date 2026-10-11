@@ -18,6 +18,7 @@ local metrics = dofile(modpath .. "/metrics.lua")
 local index = dofile(modpath .. "/village_index.lua")
 local terrain_rules = dofile(modpath .. "/village_terrain.lua") -- copied in by run.sh; is_overhang (#219)
 local census = dofile(modpath .. "/census.lua")
+local flock_probe = dofile(modpath .. "/flock.lua")
 local plants = dofile(modpath .. "/plants.lua")
 local remains = dofile(modpath .. "/remains.lua")
 
@@ -399,6 +400,13 @@ local function finish_site(site, outcome)
 	local function finish()
 		for _, block in ipairs(site.blocks or {}) do core.forceload_free_block(block, true) end
 		site.on_done()
+	end
+	if outcome == "built" and site.info and flock_probe.enabled() then
+		return flock_probe.run(site.area, function(record)
+			record.seed, record.chunk = seed, result.chunk
+			local f = io.open(RESULT_FILE, "a")
+			if f then f:write(core.write_json(record), "\n") f:close() end
+		end, finish)
 	end
 	if outcome == "built" and site.info and census.enabled() then
 		return census.run(site.area, function(record)
