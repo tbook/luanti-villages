@@ -22,6 +22,20 @@ local PHASES = {
 	{"work", 0.33, 60, "near"},
 }
 
+-- Other days, picked with lv_probe_flock_phases. A fifth field true makes the day a holiday.
+local DAYS = {
+	-- /time 20000 from the middle of the work stage, and from just before the tavern.
+	night = {{"work", 0.33, 150, "near"}, {"sleep", 0.8333, 240, "near"}},
+	night2 = {{"work", 0.625, 90, "near"}, {"sleep", 0.8333, 240, "near"}},
+	holiday = {{"putter", 0.24, 90, "near", true}, {"church", 0.33, 150, "near", true},
+		{"bell", 0.45, 90, "near", true}, {"tavern", 0.58, 60, "near", true}},
+	-- Only the first work stage, to see whether a shepherd leaves its loom.
+	work = {{"work", 0.33, 420, "near"}},
+}
+local days = DAYS[core.settings:get("lv_probe_flock_phases") or ""]
+if days then PHASES = days end
+local holiday_now = false
+
 function flock.enabled()
 	return (tonumber(core.settings:get("lv_probe_flock")) or 0) > 0
 end
@@ -50,7 +64,7 @@ core.register_on_mods_loaded(function()
 	end
 	-- No holiday: the probe moves the clock about, and the moon phase (day count and
 	-- the time of day) would flip it between a working day and a holiday.
-	if mcl_moon then mcl_moon.get_moon_phase = function() return 1 end end
+	if mcl_moon then mcl_moon.get_moon_phase = function() return holiday_now and 3 or 1 end end
 	for _, name in ipairs({VILLAGER, SHEEP}) do
 		local def = core.registered_entities[name]
 		local custom = def.do_custom
@@ -156,6 +170,7 @@ function flock.run(area, emit, done)
 			return done()
 		end
 		core.set_timeofday(phase[2])
+		holiday_now = phase[5] and true or false
 		player_pos = phase[4] == "away" and {x = center.x + 400, y = center.y, z = center.z} or nil
 		local shepherds, sheep_by = scan()
 		if t % 5 == 0 then
@@ -170,6 +185,8 @@ function flock.run(area, emit, done)
 				row.shepherds[#row.shepherds + 1] = {
 					id = s.e._id:sub(1, 22), stage = stage_of(common, s.e), pos = {round1(s.pos.x), round1(s.pos.y), round1(s.pos.z)},
 					state = s.e.state, order = s.e.order, sheep = #d, d = d,
+					loom = s.e._jobsite and round1(vector.distance(s.pos, s.e._jobsite)), bed = s.e._bed and round1(vector.distance(s.pos, s.e._bed)),
+					sleeping = s.e._villages_sleeping or nil,
 				}
 				peak[s.e._id] = math.max(peak[s.e._id] or 0, #d)
 			end

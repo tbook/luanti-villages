@@ -192,6 +192,9 @@ local function planner_trail(route)
 	return table.concat(positions, " -> ")
 end
 
+-- Set by install: flock.lua's one-line account of a shepherd's flock and grazing (#215).
+local flock_status
+
 local function work_status(villager, job_ok)
 	local route = villager._villages_job_route
 	if route and route.status == "travelling" then return "travelling to jobsite" end
@@ -503,6 +506,7 @@ local function show(player, villager)
 		"Jobsite owner: " .. claim_owner(villager._jobsite, villager, "jobsite"),
 		"Jobsite claim: " .. status_of_claim(villager._jobsite, villager._id, "jobsite"),
 		"Work status: " .. work_status(villager, job_ok),
+		"Flock: " .. (flock_status and flock_status(villager) or "off"),
 		"Jobsite route: " .. route_status(villager._villages_job_route),
 		"Jobsite planner: " .. planner_status(villager._villages_job_route),
 		"Jobsite planner trail: " .. planner_trail(villager._villages_job_route),
@@ -580,7 +584,8 @@ local function permitted(player)
 		or core.check_player_privs(name, {debug = true})
 end
 
-local function install(_)
+local function install(_, flock)
+	flock_status = flock and flock.status
 	local items = core.registered_items or {}
 	for _, name in ipairs({"doc_identifier:identifier_solid", "doc_identifier:identifier_liquid"}) do
 		local item = items[name]

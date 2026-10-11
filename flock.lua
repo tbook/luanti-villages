@@ -51,7 +51,9 @@ local LOOM_RADIUS = 12
 local STOP_MIN_RADIUS = 5
 local STOP_TRIES = 20
 local LINGER_MIN, LINGER_MAX, LINGER_RADIUS = 15, 40, 3
-local ARRIVE = 2.5
+-- A walk ends on the route's final cell, which can be a node or two from the stop itself (the
+-- stop was not standable, or the follower stops short): within this, or "arrived", is arrived.
+local ARRIVE = 4
 local STOP_BASE, STOP_PER_NODE = 30, 3
 local MAX_FAILURES = 3
 -- Vanilla sends a villager home past 50 nodes from its bed (do_activity).
@@ -344,7 +346,8 @@ end
 local function pick_stop(area, pos)
 	for _ = 1, STOP_TRIES do
 		local cell = find_spot(area.center, STOP_MIN_RADIUS, area.radius, 1)
-		if cell and flat(cell, pos) > STOP_MIN_RADIUS then return cell end
+		-- On the level of the centre (+-2): a roof, a terrace or a pit is often not reachable.
+		if cell and flat(cell, pos) > STOP_MIN_RADIUS and math.abs(cell.y - area.center.y) <= 2 then return cell end
 	end
 end
 
@@ -364,7 +367,10 @@ local function begin_loom(self, session, herd)
 	herd.phase, herd.since = "loom", session.clock
 end
 
-local function fail_stop(self, session, herd)
+local function fail_stop(self, session, herd, why)
+	local route = self._villages_goto_route
+	core.log("action", string.format("[living_villages] shepherd %s: grazing stop failed (%d): %s, route %s/%s",
+		tostring(self._id), herd.failures + 1, why or "?", route and tostring(route.status) or "-", route and tostring(route.reason) or "-"))
 	herd.stop, herd.walking, herd.linger_until = nil, false, nil
 	herd.failures = herd.failures + 1
 	if herd.failures >= MAX_FAILURES then begin_loom(self, session, herd) end
@@ -387,8 +393,17 @@ local function herd_tick(self, session, pos, bell)
 		session.area = area
 		if not area then
 			session.area_check = now + AREA_RETRY
+			if not session.no_area_logged then
+				session.no_area_logged = true
+				core.log("action", string.format("[living_villages] shepherd %s has no grazing area (bed %s, loom %s)",
+					tostring(self._id), tostring(self._bed and core.pos_to_string(self._bed)),
+					tostring(self._jobsite and core.pos_to_string(self._jobsite))))
+			end
 			return
 		end
+		session.no_area_logged = nil
+		core.log("action", string.format("[living_villages] shepherd %s grazes about (%d,%d,%d), radius %d",
+			tostring(self._id), area.center.x, area.center.y, area.center.z, area.radius))
 		herd = {phase = "out", since = now, area = area, failures = 0}
 		session.herd = herd
 		if self.order == "work" then self.order = nil end
@@ -405,18 +420,23 @@ local function herd_tick(self, session, pos, bell)
 		if self.state == "gowp" then
 			if now - herd.started > herd.limit then
 				common.stop_walk(self)
-				fail_stop(self, session, herd)
+				fail_stop(self, session, herd, "walk took too long")
 			end
 			return
 		end
+		-- The route queue (#162) plans a few milliseconds a step, and the villager stands in
+		-- route status "planning" until its search is done: not a failed stop.
+		local route = self._villages_goto_route
+		if route and route.status == "planning" and now - herd.started <= herd.limit then return end
 		herd.walking = false
-		if flat(pos, herd.stop) > ARRIVE then
-			fail_stop(self, session, herd)
+		local arrived = route and route.status == "arrived" and flat(pos, herd.stop) <= 2 * ARRIVE
+		if not arrived and flat(pos, herd.stop) > ARRIVE then
+			fail_stop(self, session, herd, string.format("ended %.1f from the stop", flat(pos, herd.stop)))
 			if herd.phase ~= "out" then return end
 		else
 			herd.linger_until = herd.linger_until or now + LINGER_MIN + math.random() * (LINGER_MAX - LINGER_MIN)
 			if now < herd.linger_until then
-				herd.anchor = herd.anchor or {pos = herd.stop, radius = LINGER_RADIUS}
+				herd.anchor = herd.anchor or {pos = vector.new(pos), radius = LINGER_RADIUS}
 				self._villages_wander_anchor = herd.anchor
 				return
 			end
@@ -424,6 +444,10 @@ local function herd_tick(self, session, pos, bell)
 			self._villages_wander_anchor = nil
 		end
 	end
+	-- After a route fails, navigation.lua refuses every goto for its retry time (30 s), and
+	-- each refusal would count against the stops: wait it out, then try another stop.
+	local route = self._villages_goto_route
+	if route and route.status == "retry" and route.retry_at and core.get_gametime() < route.retry_at then return end
 	local stop = pick_stop(herd.area, pos)
 	if not stop then
 		herd.failures = herd.failures + 1
@@ -627,6 +651,27 @@ return {
 		local session = sessions[villager]
 		local herd = session and session.herd
 		if herd and herd.phase == "out" then return "herd" end
+	end,
+	-- One line for the Lookup Tool inspector (diagnostic.lua): why a shepherd does or does not graze.
+	status = function(villager)
+		if villager._profession ~= "shepherd" then return "not a shepherd" end
+		if flock_size() == 0 then return "off (living_villages_flock_size = 0)" end
+		local session = sessions[villager]
+		if not session then return "not ticked yet" end
+		local herd = session.herd
+		local text = string.format("%d sheep (record %s)", #session.sheep, tostring(villager._villages_flock_total))
+		if not keeps_flock(villager) then text = text .. ", no claimed loom" end
+		if herd then
+			text = text .. string.format(", grazing %s %ds about (%d,%d,%d) r%d", herd.phase, session.clock - herd.since,
+				herd.area.center.x, herd.area.center.y, herd.area.center.z, herd.area.radius)
+			if herd.stop then text = text .. string.format(", stop (%d,%d,%d)", herd.stop.x, herd.stop.y, herd.stop.z) end
+			if herd.failures > 0 then text = text .. ", failed stops " .. herd.failures end
+		elseif herding_stage(villager) then
+			text = text .. (session.area == nil and ", no grazing area (needs a bed; retried every 2 min)" or ", not started")
+		else
+			text = text .. ", not the work stage"
+		end
+		return text
 	end,
 	-- Exposed for tests.
 	sessions = sessions, states = states, registry = registry,

@@ -35,6 +35,7 @@ minetest = {
 		["mcl_loom:loom"] = {walkable = true},
 	},
 	log = function() end,
+	pos_to_string = function(p) return "(" .. p.x .. "," .. p.y .. "," .. p.z .. ")" end,
 	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
 	get_meta = function(pos)
 		return {get_string = function(_, field) return (metas[key(pos)] or {})[field] or "" end}
@@ -433,6 +434,8 @@ assert(#gopaths >= 1, "the shepherd sets off for a grazing stop")
 local stop = gopaths[1].target
 assert(flat(stop, center) <= 21 and flat(stop, center) >= 4, "the stop is about the bell")
 assert(activity_of(f) == "herd", "vanilla is told the shepherd is not at work")
+assert(flock.status(f):find("grazing out"), "the inspector says so: " .. flock.status(f))
+assert(flock.status(shepherd(40, 40, {_profession = "farmer"})) == "not a shepherd")
 assert(activity_of(shepherd(40, 40, {_profession = "farmer"})) == "work", "others are unaffected")
 -- It arrives and lingers with its wander about the stop.
 f.pos.x, f.pos.z = stop.x, stop.z
@@ -471,6 +474,75 @@ time = 16000 / 24000
 villager_def.do_custom(f, 1)
 assert(f.state == "stand", "the herd walk ends with the stage")
 assert(activity_of(f) ~= "herd")
+
+-- 12a. A route still being planned (the villager stands, route status "planning") is a
+-- stop under way, not a failed one; three of those used to send the shepherd back to the loom.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local slow = shepherd(0, 0)
+slow.gopath = function(s, target)
+	table.insert(gopaths, {self = s, target = target})
+	s._villages_goto_route = {status = "planning"}
+	return true
+end
+tick(slow, 12)
+assert(#gopaths == 1, "it waits for the planner: one stop, not " .. #gopaths)
+assert(activity_of(slow) == "herd", "and is still out grazing")
+slow._villages_goto_route = nil
+slow.state = "gowp"
+slow.pos.x = gopaths[1].target.x
+slow.pos.z = gopaths[1].target.z
+tick(slow, 2)
+slow.state = "stand"
+tick(slow, 3)
+assert(slow._villages_wander_anchor, "it grazes at the stop once the walk is done")
+
+-- 12a1. A walk that arrives a few nodes from the stop (the route's last cell is beside it)
+-- is a stop reached: used to be counted failed, and three in a row sent the shepherd back.
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local near_miss = shepherd(0, 0)
+tick(near_miss, 2)
+local want = gopaths[1].target
+near_miss.pos.x, near_miss.pos.z = want.x + 3, want.z
+near_miss.state = "stand"
+near_miss._villages_goto_route = {status = "arrived"}
+tick(near_miss, 2)
+assert(near_miss._villages_wander_anchor and near_miss._villages_wander_anchor.pos.x == want.x + 3,
+	"it grazes where the walk ended")
+assert(activity_of(near_miss) == "herd")
+
+-- 12a2. A failed route makes navigation.lua refuse every goto for its retry time; the
+-- refusals are waited out, not counted as failed stops (three of them used to end the
+-- grazing for the minute at the loom, so a shepherd with one unreachable stop hardly left).
+reset(); gopaths = {}; time = 10000 / 24000
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local refused = shepherd(0, 0)
+local refusals = 0
+refused.gopath = function(s, target)
+	if s._villages_goto_route and s._villages_goto_route.status == "retry" and now < s._villages_goto_route.retry_at then
+		refusals = refusals + 1
+		return false
+	end
+	table.insert(gopaths, {self = s, target = target})
+	if #gopaths == 1 then
+		s._villages_goto_route = {status = "planning"}
+	else
+		s.state = "gowp"
+	end
+	return true
+end
+local start_now = now
+tick(refused, 1)
+assert(#gopaths == 1)
+refused._villages_goto_route = {status = "retry", retry_at = now + 30}
+for _ = 1, 12 do now = now + 1; tick(refused, 1) end
+assert(refusals == 0, "it does not even ask while navigation refuses")
+assert(activity_of(refused) == "herd", "and is still out grazing, not back at the loom")
+now = now + 30
+tick(refused, 2)
+assert(#gopaths >= 2, "then it tries another stop")
+now = start_now
 
 -- 12b. A bell too far from the loom is not used: the stops would drop the job.
 reset(); gopaths = {}; time = 10000 / 24000
