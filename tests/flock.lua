@@ -117,6 +117,8 @@ local sheep_def = {}
 sheep_def.do_custom = function() sheep_def.vanilla_ran = (sheep_def.vanilla_ran or 0) + 1 end
 local bell = dofile("bell.lua")
 flock.install(villager_def, sheep_def, bell)
+-- The sections before 15 expect near stops; the far roll is fixed off there.
+flock.tune.far_share = 0
 
 local ids = 0
 local gopaths = {}
@@ -601,4 +603,100 @@ local t = shepherd(0, 0, {_trading_players = {x = true}})
 tick(t, 5)
 assert(#gopaths == 0, "no herding while someone is trading")
 
+-- 15. About one stop in three is out in the countryside (#243), within the bed's and loom's
+-- reach; flock.tune.far_share fixes the roll.
+local function fresh(bed_x)
+	reset(); gopaths = {}; time = 10000 / 24000; now = now + 700
+	nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+	local s = shepherd(0, 0)
+	if bed_x then s._bed = {x = bed_x, y = 0, z = 0} end
+	return s
+end
+-- Sends the shepherd to its next stop (arriving wherever it was sent), returns its distance from the bell.
+local function next_stop(rover)
+	local n = #gopaths
+	for _ = 1, 400 do
+		now = now + 1
+		tick(rover, 1)
+		if #gopaths > n then break end
+		local last = gopaths[#gopaths]
+		if last then rover.pos.x, rover.pos.z, rover.state = last.target.x, last.target.z, "stand" end
+	end
+	assert(#gopaths > n, "it sets off for another stop")
+	local t = gopaths[#gopaths].target
+	assert(flat(t, {x = 0, z = 0}) <= 46, "within 46 of the bed")
+	return flat(t, center)
+end
+local rover = fresh()
+flock.tune.far_share = 1
+for i = 1, 4 do
+	local d = next_stop(rover)
+	assert(d >= flock.FAR_MIN - 1, "stop " .. i .. " is out in the countryside: " .. d)
+end
+flock.tune.far_share = 0
+for i = 1, 4 do assert(next_stop(rover) <= 21, "share 0: stop " .. i .. " is among the buildings") end
+-- The setting: 0 keeps every stop in the village.
+flock.tune.far_share = 1
+settings.living_villages_flock_range = "0"
+rover = fresh()
+for i = 1, 4 do assert(next_stop(rover) <= 21, "range 0: stop " .. i .. " stays in the village") end
+settings.living_villages_flock_range = nil
+-- No room: a bed 25 from the bell leaves less than 26, so far stops fall back to near ones.
+rover = fresh(-10)
+for i = 1, 4 do assert(next_stop(rover) <= 21, "no room: stop " .. i .. " is near") end
+-- No far spot (nothing to stand on beyond 22 of the bell): near ones too.
+rover = fresh()
+for k in pairs(nodes) do
+	if flat(parse(k), center) > 22 then nodes[k] = nil end
+end
+for i = 1, 4 do assert(next_stop(rover) <= 21, "no far spot: stop " .. i .. " is near") end
+-- A tree canopy is no far stop.
+rover = fresh()
+minetest.registered_nodes["mcl_core:leaves"] = {walkable = true}
+for k in pairs(nodes) do
+	if flat(parse(k), center) > 22 then nodes[k] = "mcl_core:leaves" end
+end
+local real_group = minetest.get_item_group
+minetest.get_item_group = function(name, group) return name == "mcl_core:leaves" and group == "leaves" and 1 or 0 end
+for i = 1, 3 do assert(next_stop(rover) <= 21, "canopy: stop " .. i .. " is near") end
+minetest.get_item_group = real_group
+-- A failed far stop is followed by a near one, never a second far try.
+rover = fresh()
+local tries = {}
+rover.gopath = function(s, target)
+	local far = flat(target, center) >= flock.FAR_MIN
+	table.insert(tries, far)
+	if far then return false end
+	s.state = "gowp"
+	return true
+end
+tick(rover, 2)
+assert(tries[1] == true and tries[2] == false, "after a refused far stop the next is near")
+-- Failures in a row send it to the loom; a stop that arrives clears the count.
+flock.tune.far_share = 0
+rover = fresh()
+local script = {false, false, true, false, false}
+local attempts = 0
+rover.gopath = function(s, target)
+	attempts = attempts + 1
+	local ok = table.remove(script, 1)
+	if ok == nil then ok = true end
+	if ok then s.state = "gowp"; table.insert(gopaths, {target = target}) end
+	return ok
+end
+tick(rover, 3)
+assert(attempts == 3 and rover.state == "gowp", "two refusals, then a stop")
+rover.pos.x, rover.pos.z, rover.state = gopaths[1].target.x, gopaths[1].target.z, "stand"
+tick(rover, 1)
+tick(rover, 45)
+tick(rover, 3)
+assert(attempts >= 5 and flock.sessions[rover].herd.phase == "out" and activity_of(rover) == "herd",
+	"scattered failures do not send it to the loom")
+rover = fresh()
+rover.gopath = function() attempts = attempts + 1; return false end
+tick(rover, 4)
+assert(flock.sessions[rover].herd.phase == "loom", "three in a row do")
+flock.tune.far_share = 1 / 3
+
 print("flock: ok")
+
