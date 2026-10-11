@@ -153,7 +153,14 @@ do
 			for _, m in ipairs(v._villages_talk.group.members) do
 				if m ~= v then ox, oz, n = ox + m.pos.x, oz + m.pos.z, n + 1 end
 			end
-			assert(same_angle(v.target_yaw, yaw_to(v.pos, {x = ox / n, z = oz / n})), "a trio member faces the others")
+			local centre = {x = ox / n, z = oz / n}
+			if vector.distance({x = centre.x, y = 0, z = centre.z}, {x = v.pos.x, y = 0, z = v.pos.z}) < 0.1 then
+				-- Between the other two: faces one of them.
+				for _, m in ipairs(v._villages_talk.group.members) do
+					if m ~= v then centre = m.pos break end
+				end
+			end
+			assert(same_angle(v.target_yaw, yaw_to(v.pos, centre)), "a trio member faces the others")
 		end
 	end
 end

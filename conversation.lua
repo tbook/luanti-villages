@@ -150,6 +150,11 @@ local function hold(self, talk, pos)
 	end
 	x, z = x / #others - pos.x, z / #others - pos.z
 	if x * x + z * z > STRAY * STRAY then return nil end
+	-- Standing between the other two: face one of them.
+	if x * x + z * z < 0.01 then
+		local first = others[1].object:get_pos()
+		x, z = first.x - pos.x, first.z - pos.z
+	end
 	self.order = "stand"
 	self._villages_wander = nil
 	self:set_velocity(0)
