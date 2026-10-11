@@ -551,6 +551,7 @@ core.register_on_mods_loaded(function()
 	-- chairs and the church's.
 	local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal, seat)
+	dofile(core.get_modpath("living_villages") .. "/player_meals.lua").install(meal, seat)
 	-- After the tavern, so its seated-guest check sees a pew first.
 	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
 	local bell = dofile(core.get_modpath("living_villages") .. "/bell.lua")
@@ -561,6 +562,8 @@ core.register_on_mods_loaded(function()
 	flock.install(def, core.registered_entities["mobs_mc:sheep"], bell)
 	common.activity_override = flock.activity_override
 	dofile(core.get_modpath("living_villages") .. "/well.lua").install(def)
+	-- After the well and bell, which it only reads; before wander.lua, whose legs it stops.
+	dofile(core.get_modpath("living_villages") .. "/conversation.lua").install(def)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
 	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def, flock)
