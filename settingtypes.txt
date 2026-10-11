@@ -65,6 +65,12 @@ living_villages_flock_range (Shepherd grazing range) int 32 0 60
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.
 living_villages_well_hangout (Villagers gather at the well) bool true
+
+# A player who sits at a tavern table while the keeper is on duty is served a meal on the
+# plate, which feeds a little (#19). Once per player per tavern per game day. Atmosphere
+# and a small benefit; the keeper's trades are unchanged.
+living_villages_player_meals (Players are served a meal at tavern tables) bool true
+
 # Idle villagers standing near each other sometimes stop and face one another in
 # twos and threes for a few seconds, as if talking (#242). Atmosphere only.
 living_villages_conversation (Villagers converse) bool true

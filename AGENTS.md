@@ -30,7 +30,8 @@ their jobsite lose it, so vanilla demotes them.
 | `far_trips.lua` | Hides the bed from vanilla's `wandered_too_far` test (#216) while a villager has an errand (claimed jobsite at work, tavern, church, bell) more than 50 nodes from home; `init.lua` runs vanilla's `do_custom` through it |
 | `wander.lua` | Replaces vanilla's aimless walk with short, checked straight legs that stop short of walls |
 | `seat.lua` | Chair reservation and the sitting pose, for dinner tables and church pews |
-| `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity |
+| `meal.lua` | Serving and eating dinner on plates, and the `living_villages:meal` display entity; also serves player diners (#19) |
+| `player_meals.lua` | Players eat in taverns (#19): a player sitting (found by watching `mcl_cozy.players`, since mcl_decor chairs hold `mcl_cozy.sit` by value) on a chair at a table within a tavern whose keeper is on duty is served through `meal.lua`'s loop as a diner table. Each bite feeds through `mcl_hunger` (3 hunger, 1.5 saturation per meal, none when full); one meal per player per tavern per game day, in memory. `living_villages_player_meals` turns it off. Logs one `[living_villages] player meal` line per change of state (why it does or does not serve), and `/living_villages_meal` (server priv) says the same for the chair you sit on |
 | `tavern_schematic.lua` | Furnishes newly generated taverns by editing the stock schematic in memory |
 | `cleric.lua` | Clerics claim free pulpits through the same node metadata vanilla uses and work there |
 | `pulpit.lua` | The `living_villages:pulpit` node, a lectern clone that is no profession's jobsite |

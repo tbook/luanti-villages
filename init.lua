@@ -551,6 +551,7 @@ core.register_on_mods_loaded(function()
 	-- chairs and the church's.
 	local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal, seat)
+	dofile(core.get_modpath("living_villages") .. "/player_meals.lua").install(meal, seat)
 	-- After the tavern, so its seated-guest check sees a pew first.
 	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
 	local bell = dofile(core.get_modpath("living_villages") .. "/bell.lua")

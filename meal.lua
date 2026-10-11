@@ -9,6 +9,11 @@
 -- mid-meal simply clears the meal. The frame's own code looks only for its
 -- mcl_itemframes:item entity, so it never mistakes the meal for its item.
 --
+-- A player at a tavern table (#19) is served by the same loop: player_meals.lua
+-- passes a diner table that stands in for a villager (_id, _villages_seat.table,
+-- object, _villages_meal_day, and optionally _villages_mouth_at
+-- (a function giving the mouth position) and _villages_on_bite, called on each bite).
+--
 -- Load this once, at top-level load time (init.lua): it registers the entity,
 -- which Luanti allows only then, and the plate holds are its own in-memory
 -- table.
@@ -85,16 +90,22 @@ end
 
 -- The keeper on duty at the guest's tavern: the villager that claimed the
 -- jukebox, close by and staffing it.
-local function keeper_on_duty(jukebox)
+local function keeper_state(jukebox)
 	local id = core.get_meta(jukebox):get_string("villager")
-	if id == "" then return end
+	if id == "" then return nil, "the jukebox has no keeper claimed" end
+	local status
 	for _, object in ipairs(core.get_objects_inside_radius(jukebox, KEEPER_RADIUS)) do
 		local entity = object:get_luaentity()
-		if entity and entity._id == id and entity._villages_keeper
-			and keeper.status(entity) == "staffing the tavern" then
-			return entity
+		if entity and entity._id == id and entity._villages_keeper then
+			status = keeper.status(entity)
+			if status == "staffing the tavern" then return entity end
 		end
 	end
+	return nil, status and ("the keeper is " .. status:gsub(" %(.*%)", "")) or "the keeper is not loaded within reach of the jukebox"
+end
+
+local function keeper_on_duty(jukebox)
+	return (keeper_state(jukebox))
 end
 
 -- A display whose guest no longer holds its plate: the guest unloaded, or
@@ -137,7 +148,8 @@ local function bite(self, item)
 	local definition = core.registered_items[item] or {}
 	local texture = definition.inventory_image
 	if not texture or texture == "" then texture = definition.wield_image end
-	local mouth = {x = pos.x, y = pos.y + MOUTH_HEIGHT, z = pos.z}
+	local mouth = self._villages_mouth_at and self._villages_mouth_at(self)
+		or {x = pos.x, y = pos.y + MOUTH_HEIGHT, z = pos.z}
 	if texture and texture ~= "" and definition._food_particles ~= false then
 		for i = 0, 8 do
 			core.add_particle({
@@ -154,6 +166,8 @@ local function bite(self, item)
 	core.sound_play("mcl_hunger_bite", {
 		max_hear_distance = 12, gain = 0.33, pitch = 1 + math.random(-10, 10) * 0.005, object = self.object,
 	}, true)
+	-- A player diner (player_meals.lua, #19) is fed by its bites.
+	if self._villages_on_bite then self._villages_on_bite(self) end
 end
 
 local M = {}
@@ -166,6 +180,23 @@ function M.finish(self)
 	if meal.object then meal.object:remove() end
 	local hold_here = plates[key(meal.plate)]
 	if hold_here and hold_here.id == self._id then plates[key(meal.plate)] = nil end
+end
+
+-- Why a diner would not be served now, for the log and /living_villages_meal (#19).
+function M.explain(self, jukebox)
+	if not jukebox then return "no jukebox near the chair" end
+	if self._villages_meal then return "eating" end
+	if self._villages_meal_day == core.get_day_count() then return "already served here today" end
+	local pos = plate_for(self)
+	if not pos then return "no plate on the table in front of the chair" end
+	if not plate_empty(pos) then return "the plate holds an item" end
+	if held_by_other(pos, self._id) then return "the plate is held by " .. plates[key(pos)].id end
+	local _, reason = keeper_state(jukebox)
+	if reason then return reason end
+	local last = served[key(jukebox)]
+	if last and now() - last < SERVE_SECONDS then return "the keeper is serving another plate" end
+	if #menu() == 0 then return "the menu is empty" end
+	return "ready to serve"
 end
 
 local function serve(self, jukebox)
