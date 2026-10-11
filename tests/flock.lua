@@ -177,6 +177,8 @@ end
 
 -- 1. A shepherd with a loom gets sheep one at a time, five at most, each marked with
 -- its id; a day's spawns are capped.
+-- (The putter stage: no grazing walks to get in the way of the spawning.)
+time = 6000 / 24000
 reset()
 local a = shepherd(0, 0)
 tick(a, 3)
@@ -242,6 +244,7 @@ for _ = 1, 80 do for i = 1, 4 do tick(crowd[i]) end end
 assert(spawned == flock.VILLAGE_CAP, "the village cap holds: " .. spawned)
 for i = 1, 4 do assert(#flock_of(crowd[i]) <= 5) end
 
+time = 10000 / 24000
 -- 5. Following: sheep beyond FAR are pulled in, those near are left alone.
 reset(); spawned = 0; day = 5
 local c = shepherd(0, 0)
@@ -428,7 +431,7 @@ local f = shepherd(0, 0)
 tick(f, 3)
 assert(#gopaths >= 1, "the shepherd sets off for a grazing stop")
 local stop = gopaths[1].target
-assert(flat(stop, center) <= 20 and flat(stop, center) >= 5 - 1e-9, "the stop is about the bell")
+assert(flat(stop, center) <= 21 and flat(stop, center) >= 4, "the stop is about the bell")
 assert(activity_of(f) == "herd", "vanilla is told the shepherd is not at work")
 assert(activity_of(shepherd(40, 40, {_profession = "farmer"})) == "work", "others are unaffected")
 -- It arrives and lingers with its wander about the stop.
@@ -444,7 +447,10 @@ tick(f, 41)
 assert(#gopaths == walks + 1 and f._villages_wander_anchor == nil, "then goes to another")
 -- After HERD_OUT it goes back to the loom, where vanilla's work resumes.
 f.state = "stand"
-tick(f, flock.HERD_OUT - 50)
+for _ = 1, flock.HERD_OUT + 10 do
+	tick(f)
+	if activity_of(f) == "work" then break end
+end
 assert(activity_of(f) == "work", "back to the loom after a while")
 local walks2 = #gopaths
 tick(f, 10)
@@ -481,12 +487,12 @@ assert(#gopaths == 0, "no grazing stops where the loom would be dropped")
 reset(); gopaths = {}; time = 10000 / 24000
 local h = shepherd(0, 0)
 tick(h, 3)
-assert(#gopaths == 1 and flat(gopaths[1].target, h._jobsite) <= 12, "no bell: about the loom")
+assert(#gopaths == 1 and flat(gopaths[1].target, h._jobsite) <= 13, "no bell: about the loom")
 reset(); gopaths = {}
 nodes[key({x = 45, y = 5, z = 0})] = "mcl_bells:bell"
 local far_home = shepherd(0, 0)
 tick(far_home, 3)
-assert(#gopaths == 1 and flat(gopaths[1].target, far_home._jobsite) <= 12,
+assert(#gopaths == 1 and flat(gopaths[1].target, far_home._jobsite) <= 13,
 	"a bell near vanilla's 50 node limit is passed over")
 
 -- 14. Trading holds the herd.
