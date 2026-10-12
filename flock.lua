@@ -283,6 +283,9 @@ local function steer(ent, shepherd_pos)
 			local cell = find_spot(shepherd_pos, 2, 5)
 			if cell then
 				ent.object:set_pos({x = cell.x, y = cell.y - 0.49, z = cell.z})
+				-- mcl_mobs measures fall damage from old_y, the height it last stood
+				-- still at: carried over a hill's drop it would hurt the sheep (#248).
+				ent.old_y = cell.y - 0.49
 				st.pull, st.blocked = nil, 0
 			end
 		end

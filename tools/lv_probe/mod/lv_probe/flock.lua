@@ -138,7 +138,12 @@ function flock.run(area, emit, done)
 	local t, phase_index, phase_t = 0, 1, 0
 	local samples, frozen = {}, {}
 	local peak = {}
-	local hazards = {wet = 0, hurt = 0, max_hurt_sheep = 0}
+	local hazards = {wet = 0, hurt = 0, wet_sheep = 0, hurt_sheep = 0, events = {}}
+	local sheep_seen = setmetatable({}, {__mode = "k"})
+	local function round_pos(p) return {round1(p.x), round1(p.y), round1(p.z)} end
+	local function add_event(event)
+		if #hazards.events < 40 then hazards.events[#hazards.events + 1] = event end
+	end
 	local function scan()
 		local shepherds, sheep_by = {}, {}
 		for _, obj in ipairs(core.get_objects_inside_radius(center, radius)) do
@@ -151,13 +156,29 @@ function flock.run(area, emit, done)
 				local list = sheep_by[e._villages_shepherd] or {}
 				sheep_by[e._villages_shepherd] = list
 				list[#list + 1] = obj:get_pos()
-				-- Hurt or wet sheep: the pulled flock must not walk off ledges or into water.
+				-- Hurt or wet sheep: the pulled flock must not walk off ledges or into water (#248).
+				-- hurt and wet are sheep-seconds; a sheep never heals, so one hurt sheep counts every
+				-- second to the end. hurt_sheep and wet_sheep count each sheep once, and events says
+				-- when and where (from is its position at the previous sample, old_y mcl_mobs' fall record).
 				local p = obj:get_pos()
 				local node = core.get_node_or_nil({x = math.floor(p.x + 0.5), y = math.floor(p.y + 0.5), z = math.floor(p.z + 0.5)})
 				local def = node and core.registered_nodes[node.name]
-				if def and (def.liquidtype or "none") ~= "none" then hazards.wet = hazards.wet + 1 end
+				local record = sheep_seen[e] or {hp = e.health, pos = p}
+				sheep_seen[e] = record
+				if def and (def.liquidtype or "none") ~= "none" then
+					hazards.wet = hazards.wet + 1
+					if not record.wet then
+						record.wet, hazards.wet_sheep = true, hazards.wet_sheep + 1
+						add_event({t = t, what = "wet", node = node.name, pos = round_pos(p), from = round_pos(record.pos)})
+					end
+				end
+				if e.health and record.hp and e.health < record.hp then
+					add_event({t = t, what = "hurt", hp = record.hp .. "->" .. e.health, pos = round_pos(p),
+						from = round_pos(record.pos), old_y = e.old_y and round1(e.old_y)})
+					if not record.hurt then record.hurt, hazards.hurt_sheep = true, hazards.hurt_sheep + 1 end
+				end
+				record.hp, record.pos = e.health, p
 				if e.health and e.health < (e.initial_properties and e.initial_properties.hp_max or 8) then hazards.hurt = hazards.hurt + 1 end
-				hazards.max_hurt_sheep = math.max(hazards.max_hurt_sheep, hazards.hurt)
 			end
 		end
 		return shepherds, sheep_by
