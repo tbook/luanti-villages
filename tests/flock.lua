@@ -677,7 +677,7 @@ tick(rover, 18)
 assert(#gopaths == before, "still standing after 18 s")
 tick(rover, 14)
 assert(#gopaths == before + 1, "off to the next after 30 s")
--- The scan is cached per bell, and goes a slab at a time (9 slabs of 8 over +-32).
+-- The scan goes a slab at a time (9 slabs of 8 over +-32), in at most 4 passes per bell.
 local scans = 0
 local real_find = minetest.find_nodes_in_area
 minetest.find_nodes_in_area = function(minp, maxp, names, ...)
@@ -688,11 +688,13 @@ minetest.find_nodes_in_area = function(minp, maxp, names, ...)
 	return real_find(minp, maxp, names, ...)
 end
 rover = fresh()
-next_stop(rover); next_stop(rover); next_stop(rover)
-assert(scans == 9, "one scan of 9 slabs per bell: " .. scans)
+next_stop(rover)
+assert(scans == 9, "the first stop waits for one pass of 9 slabs: " .. scans)
+tick(rover, 600)
+assert(scans == 36, "four passes in all, then no more: " .. scans)
 session = flock.sessions[rover]
-session.area = nil; session.herd = nil; next_stop(rover)
-assert(scans == 9, "a second area lookup does not scan again: " .. scans)
+session.area = nil; session.herd = nil; tick(rover, 100)
+assert(scans == 36, "a second area lookup does not scan again: " .. scans)
 minetest.find_nodes_in_area = real_find
 -- The setting caps the margin: range 20 puts the stops 15-20 beyond the door (25-30); a range
 -- under 20 counts as 20, and a larger one widens the band.
@@ -714,17 +716,35 @@ settings.living_villages_flock_range = "0"
 rover = fresh()
 for i = 1, 4 do assert(flat(next_stop(rover), center) <= 21, "range 0: stop " .. i .. " stays in the village") end
 settings.living_villages_flock_range = nil
--- No building found, or the area not loaded: near stops, and nothing is cached.
+-- No building found: the band sits 45-60 from the bell (an assumed reach of 30), not near stops.
 rover = fresh(nil, 10)
 for k, v in pairs(nodes) do if v == "mcl_doors:door" then nodes[k] = nil end end
-for i = 1, 3 do assert(flat(next_stop(rover), center) <= 21, "no building: stop " .. i .. " is near") end
-assert(next(flock.reach_cache) == nil, "an empty scan is not cached")
-rover = fresh()
-local real_node = minetest.get_node_or_nil
-minetest.get_node_or_nil = function(pos) if flat(pos, center) > 30 then return nil end return real_node(pos) end
-for i = 1, 3 do assert(flat(next_stop(rover), center) <= 21, "unloaded: stop " .. i .. " is near") end
-assert(next(flock.reach_cache) == nil, "an unloaded scan is not cached")
-minetest.get_node_or_nil = real_node
+for i = 1, 3 do
+	local d = flat(next_stop(rover), center)
+	assert(d >= 44 and d <= 61, "no building: stop " .. i .. " is in the default band: " .. d)
+end
+-- The far part of the area is not loaded yet (find_nodes_in_area sees only what is): the band comes
+-- from the door at 10 that is, 25-40; the door at 45 that loads later moves it out (reach 45: 60-75
+-- from the bell, within the loom's 90 less its 13).
+rover = fresh(nil, 10)
+nodes[key({x = 15 + 45, y = 0, z = 0})] = "mcl_doors:door"
+local loaded = false
+minetest.find_nodes_in_area = function(minp, maxp, names, ...)
+	local found = real_find(minp, maxp, names, ...)
+	if loaded then return found end
+	local kept = {}
+	for _, p in ipairs(found) do if flat(p, center) <= 30 then kept[#kept + 1] = p end end
+	return kept
+end
+for i = 1, 3 do
+	local d = flat(next_stop(rover), center)
+	assert(d >= 24 and d <= 41, "far corner unloaded: stop " .. i .. " is 25-40 from the bell: " .. d)
+end
+loaded = true
+local farthest = 0
+for _ = 1, 12 do farthest = math.max(farthest, flat(next_stop(rover), center)) end
+assert(farthest >= 55, "after the area loads the band moves out: " .. farthest)
+minetest.find_nodes_in_area = real_find
 -- No field spot (nothing to stand on beyond 22 of the bell): near ones too.
 rover = fresh()
 for k in pairs(nodes) do

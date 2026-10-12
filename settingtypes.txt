@@ -58,7 +58,7 @@ living_villages_loomless_house_chance (Share of small houses without a loom) flo
 living_villages_flock_size (Sheep per shepherd) int 5 0 5
 # How far beyond the village's farthest building a shepherd leads its flock in the work
 # stage (#249). Out in the field it walks to a spot 15 to this many nodes past the farthest
-# door or bed (measured from the bell, scanned once; a player's house counts), stands 20-30 s,
+# door or bed (measured from the bell, scanned in up to 4 passes over what is loaded, 45-60 from the bell when no building is seen; a player's house counts), stands 20-30 s,
 # then walks about 10 nodes on, and so on, at the normal walking pace. A value under 20 counts
 # as 20. Always within 90 of its loom (not bounded by its bed: far_trips.lua keeps vanilla from
 # sending it home); where that leaves no room it grazes as far as it allows, or among the

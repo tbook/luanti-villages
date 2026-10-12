@@ -35,6 +35,8 @@ local DAYS = {
 	-- The sixth field "far": the phase ends once a shepherd has been 55+ from the village for 25 s.
 	-- The return margin: out in the field, then the last 10 minutes of work (13200 ticks: 115 s before the end at time_speed 72), then the tavern.
 	fieldreturn = {{"work", 0.33, 420, "near"}, {"work", 13200 / 24000, 110, "near"}, {"tavern", 0.66, 120, "near"}},
+	-- A player in the village and the countryside not forced loaded (the #249 playtest).
+	localplayer = {{"work", 0.33, 400, "centre"}},
 	fieldtavern = {{"work", 0.33, 1200, "near", false, "far"}, {"tavern", 0.66, 300, "near"}},
 	fieldsleep = {{"work", 0.33, 1200, "near", false, "far"}, {"sleep", 0.8333, 420, "near"}},
 }
@@ -187,7 +189,10 @@ function flock.run(area, emit, done)
 		core.set_timeofday(phase[2])
 		holiday_now = phase[5] and true or false
 		player_pos = phase[4] == "away" and {x = center.x + 400, y = center.y, z = center.z} or nil
+		if phase[4] == "centre" then player_pos = {x = center.x, y = center.y, z = center.z} end
 		local shepherds, sheep_by = scan()
+		-- The area's centre may be well above the ground; the player stands on it.
+		if phase[4] == "centre" and shepherds[1] then player_pos.y = shepherds[1].pos.y end
 		-- A "far" phase ends 25 s after the first shepherd has walked 55 or more from the village
 		-- (or when its seconds are up): the jump then finds one really out in the field.
 		if phase[6] == "far" then
@@ -259,6 +264,23 @@ function flock.run(area, emit, done)
 	end
 	-- A player would have the countryside about the village loaded (a shepherd walks out 60-75
 	-- nodes): generate and force-load it first, or the far stops stand on unloaded ground.
+	-- "centre" phases (lv_probe_flock_phases = localplayer): a player standing in the village, and
+	-- the engine's find_nodes_in_area, which sees loaded blocks only, shown nothing beyond 40
+	-- nodes of it, as in play, where the far corners of the village are often not loaded
+	-- (unloading the blocks for real would also stop the entities in them).
+	if PHASES[1][4] == "centre" then
+		local real = core.find_nodes_in_area
+		core.find_nodes_in_area = function(minp, maxp, names, grouped)
+			local found, counts = real(minp, maxp, names, grouped)
+			if grouped then return found, counts end
+			local kept = {}
+			for _, p in ipairs(found or {}) do
+				if flat(p, center) <= 40 then kept[#kept + 1] = p end
+			end
+			return kept, counts
+		end
+		core.log("action", "[lv_flock] local player: find_nodes_in_area shows only 40 nodes about the village")
+	end
 	if not PHASES[1][6] then return core.after(1, step) end
 	local lo = {x = center.x - 100, y = center.y - 24, z = center.z - 100}
 	local hi = {x = center.x + 100, y = center.y + 40, z = center.z + 100}
