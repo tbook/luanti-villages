@@ -31,6 +31,14 @@ local DAYS = {
 		{"bell", 0.45, 90, "near", true}, {"tavern", 0.58, 60, "near", true}},
 	-- Only the first work stage, to see whether a shepherd leaves its loom.
 	work = {{"work", 0.33, 420, "near"}},
+	-- Ten minutes out in the field (#249), then a jump to the tavern or to bed: do they get there?
+	-- The sixth field "far": the phase ends once a shepherd has been 55+ from the village for 25 s.
+	-- The return margin: out in the field, then the last 10 minutes of work (13200 ticks: 115 s before the end at time_speed 72), then the tavern.
+	fieldreturn = {{"work", 0.33, 420, "near"}, {"work", 13200 / 24000, 110, "near"}, {"tavern", 0.66, 120, "near"}},
+	-- A player in the village and the countryside not forced loaded (the #249 playtest).
+	localplayer = {{"work", 0.33, 400, "centre"}},
+	fieldtavern = {{"work", 0.33, 1200, "near", false, "far"}, {"tavern", 0.66, 300, "near"}},
+	fieldsleep = {{"work", 0.33, 1200, "near", false, "far"}, {"sleep", 0.8333, 420, "near"}},
 }
 local days = DAYS[core.settings:get("lv_probe_flock_phases") or ""]
 if days then PHASES = days end
@@ -131,11 +139,14 @@ function flock.run(area, emit, done)
 	local maxp = {x = area.x2, y = area.y2, z = area.z2}
 	local center = {x = (minp.x + maxp.x) / 2, y = (minp.y + maxp.y) / 2, z = (minp.z + maxp.z) / 2}
 	local radius = math.max(maxp.x - minp.x, maxp.z - minp.z) / 2 + 40
+	-- A stranded shepherd is 60-75 out: keep looking at it there.
+	if PHASES[1][6] then radius = radius + 100 end
 	local common = core.get_modpath("living_villages") and dofile(core.get_modpath("living_villages") .. "/common.lua")
 	local extra = tonumber(core.settings:get("lv_probe_flock_extra")) or 0
 	local added = extra > 0 and add_shepherds(area, extra) or {}
 	core.log("action", "[lv_flock] synthetic shepherds added: " .. #added)
-	local t, phase_index, phase_t = 0, 1, 0
+	local t, phase_index, phase_t, far_for = 0, 1, 0, 0
+	local started_far = {}
 	local samples, frozen = {}, {}
 	local peak = {}
 	local hazards = {wet = 0, hurt = 0, wet_sheep = 0, hurt_sheep = 0, events = {}}
@@ -199,7 +210,26 @@ function flock.run(area, emit, done)
 		core.set_timeofday(phase[2])
 		holiday_now = phase[5] and true or false
 		player_pos = phase[4] == "away" and {x = center.x + 400, y = center.y, z = center.z} or nil
+		if phase[4] == "centre" then player_pos = {x = center.x, y = center.y, z = center.z} end
 		local shepherds, sheep_by = scan()
+		-- The area's centre may be well above the ground; the player stands on it.
+		if phase[4] == "centre" and shepherds[1] then player_pos.y = shepherds[1].pos.y end
+		-- A "far" phase ends 25 s after the first shepherd has walked 55 or more from the village
+		-- (or when its seconds are up): the jump then finds one really out in the field.
+		if phase[6] == "far" then
+			local out = false
+			for _, s in ipairs(shepherds) do
+				local id = s.e._id
+				if started_far[id] == nil then started_far[id] = flat(s.pos, center) >= 55 end
+				if not started_far[id] and flat(s.pos, center) >= 55 then out = true end
+			end
+			far_for = out and far_for + 1 or 0
+			if far_for >= 25 then
+				far_for = 0
+				core.log("action", string.format("[lv_flock] t=%d a shepherd is out in the field: next phase", t))
+				phase_t = phase[3]
+			end
+		end
 		if t % 5 == 0 then
 			local row = {t = t, phase = phase[1], shepherds = {}}
 			local total = 0
@@ -214,6 +244,12 @@ function flock.run(area, emit, done)
 					state = s.e.state, order = s.e.order, sheep = #d, d = d,
 					loom = s.e._jobsite and round1(vector.distance(s.pos, s.e._jobsite)), bed = s.e._bed and round1(vector.distance(s.pos, s.e._bed)),
 					sleeping = s.e._villages_sleeping or nil,
+					route = s.e._villages_tavern_route and {s.e._villages_tavern_route.status, s.e._villages_tavern_route.reason,
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.status,
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.searched} or nil,
+					bedroute = s.e._villages_bed_route and {s.e._villages_bed_route.status, s.e._villages_bed_route.reason,
+						s.e._villages_bed_route.planner and s.e._villages_bed_route.planner.status,
+						s.e._villages_bed_route.planner and s.e._villages_bed_route.planner.searched} or nil,
 				}
 				peak[s.e._id] = math.max(peak[s.e._id] or 0, #d)
 			end
@@ -247,7 +283,40 @@ function flock.run(area, emit, done)
 		if phase_t >= phase[3] then phase_index, phase_t = phase_index + 1, 0 end
 		core.after(1, step)
 	end
-	core.after(1, step)
+	-- A player would have the countryside about the village loaded (a shepherd walks out 60-75
+	-- nodes): generate and force-load it first, or the far stops stand on unloaded ground.
+	-- "centre" phases (lv_probe_flock_phases = localplayer): a player standing in the village, and
+	-- the engine's find_nodes_in_area, which sees loaded blocks only, shown nothing beyond 40
+	-- nodes of it, as in play, where the far corners of the village are often not loaded
+	-- (unloading the blocks for real would also stop the entities in them).
+	if PHASES[1][4] == "centre" then
+		local real = core.find_nodes_in_area
+		core.find_nodes_in_area = function(minp, maxp, names, grouped)
+			local found, counts = real(minp, maxp, names, grouped)
+			if grouped then return found, counts end
+			local kept = {}
+			for _, p in ipairs(found or {}) do
+				if flat(p, center) <= 40 then kept[#kept + 1] = p end
+			end
+			return kept, counts
+		end
+		core.log("action", "[lv_flock] local player: find_nodes_in_area shows only 40 nodes about the village")
+	end
+	if not PHASES[1][6] then return core.after(1, step) end
+	local lo = {x = center.x - 100, y = center.y - 24, z = center.z - 100}
+	local hi = {x = center.x + 100, y = center.y + 40, z = center.z + 100}
+	core.emerge_area(lo, hi, function(_, _, remaining)
+		if remaining ~= 0 then return end
+		for bx = math.floor(lo.x / 16), math.floor(hi.x / 16) do
+			for by = math.floor(lo.y / 16), math.floor(hi.y / 16) do
+				for bz = math.floor(lo.z / 16), math.floor(hi.z / 16) do
+					core.forceload_block({x = bx * 16, y = by * 16, z = bz * 16}, true)
+				end
+			end
+		end
+		core.log("action", "[lv_flock] countryside loaded")
+		core.after(5, step)
+	end)
 end
 
 return flock

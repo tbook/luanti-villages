@@ -88,4 +88,20 @@ while queue.pending() > 0 do queue.step(); slices = slices + 1; time = time + 0.
 assert(result and #result == #direct, "a paused search finds the same route")
 assert(slices > 2, "and takes several steps to do it: " .. slices)
 assert(queue.stats.jobs == before + 1)
+-- A failed search returns nil, nil, reason, nil, report: all of it reaches done (the holes in
+-- the result table once cut the reason and the report off).
+local got
+queue.submit(function() return nil, nil, "no route", nil, {status = "search_limit"} end, function(...)
+	got = {n = select("#", ...), ...}
+end)
+while queue.pending() > 0 do queue.step() end
+assert(got and got.n == 5 and got[3] == "no route", "reason arrives")
+assert(got[5] and got[5].status == "search_limit", "and the report")
+-- Trailing nils must arrive too: the old unpack(result, 2) delivered nothing for this.
+local tail
+queue.submit(function() return nil, nil, "no route", nil, nil end, function(...)
+	tail = {n = select("#", ...), ...}
+end)
+while queue.pending() > 0 do queue.step() end
+assert(tail and tail[3] == "no route", "the reason arrives when the report is nil")
 print("route_queue.lua: ok")

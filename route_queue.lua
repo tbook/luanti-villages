@@ -52,6 +52,10 @@ function queue.submit(fn, done, opts)
 	return job
 end
 
+local function pack(...)
+	return {n = select("#", ...), ...}
+end
+
 function queue.step(budget_seconds)
 	local started = queue.clock()
 	local deadline = started + (budget_seconds or budget())
@@ -65,7 +69,9 @@ function queue.step(budget_seconds)
 		else
 			ran = true
 			running, slice_end = job, math.min(deadline, queue.clock() + SLICE_SECONDS)
-			local result = {coroutine.resume(job.co)}
+			-- Packed with its length: a failed search returns nil, nil, reason, so the table has
+			-- holes and #result may stop before the reason and the report.
+			local result = pack(coroutine.resume(job.co))
 			running = nil
 			if not result[1] then
 				core.log("warning", "[living_villages] route job failed: " .. tostring(result[2]))
@@ -73,7 +79,7 @@ function queue.step(budget_seconds)
 			elseif coroutine.status(job.co) == "dead" then
 				stats.jobs = stats.jobs + 1
 				stats.max_wait = math.max(stats.max_wait, queue.clock() - job.queued_at)
-				job.done(unpack(result, 2))
+				job.done(unpack(result, 2, result.n))
 			else
 				table.insert(pending, job)
 			end
