@@ -200,4 +200,7 @@ pretend player). `LV_PROBE_FLOCK_EXTRA=N` adds N synthetic shepherds, each with 
 The `"type":"flock"` line has `samples` (every 5 s: each shepherd's stage, position, state and its
 flock's sorted distances), `frozen` (how far each shepherd and sheep moved while frozen), `cost`
 (calls and milliseconds of the villager and sheep `do_custom` wrappers), `peak` and `hazards`
-(sheep-seconds seen in liquid or hurt).
+(`hurt` and `wet`: sheep-seconds seen below full health or in liquid. A sheep never heals, so one hurt sheep adds a
+second for every second left of the run; `hurt_sheep` and `wet_sheep` count each sheep once, and `events` (first 40)
+gives when, where (`pos`, and `from`, its place at the previous sample) and, for hurt, the hit points and mcl_mobs' `old_y`,
+the height its fall damage is measured from, #248).

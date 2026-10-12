@@ -383,12 +383,18 @@ assert(edge.state == "stand" and flock.states[edge].rest_until, "a sheep at a dr
 -- 9. Far behind: set down beside the shepherd if no one sees it, not if someone does.
 local lost = make_sheep(60, 0)
 lost._villages_shepherd = c._id
+-- mcl_mobs takes fall damage from the drop between old_y (the last height it stood still
+-- at) and where it stands (physics.lua check_falling): a sheep lifted from a hill must not
+-- carry its old height down with it (#248).
+lost.old_y = 17
 players = {{pos = {x = 56, y = 0, z = 0}}, {pos = {x = 0, y = 0, z = 0}}}
 tick(c, 11)
 assert(lost.pos.x == 60, "a lost sheep in sight is not moved")
+assert(lost.old_y == 17, "a sheep left where it stands keeps its record")
 players = {{pos = {x = 0, y = 0, z = 0}}}
 tick(c, 2)
 assert(flat(lost.pos, c.pos) <= 7, "out of sight it is set down by the shepherd")
+assert(lost.old_y == lost.pos.y, "a sheep set down is not taken to have fallen from where it was")
 players = {{pos = {x = 0, y = 0, z = 0}}}
 
 -- 10. The shepherd reloaded: a new entity with the same id finds the flock again.
