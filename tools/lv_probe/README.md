@@ -102,6 +102,11 @@ start of the watch (`gathered` is how many). Without it the watch shows the natu
 `stand_samples` (adults seen, and standing, at 2 s steps) against `conversations.groups`. `lv_probe_well_all = 1` makes every adult go to the well (re-armed every 30 s, so a long watch sees many stays); `stays_talked` counts stays with a conversation (each member of a group counts); `at_well` samples what adults about the well are doing. `lv_probe_tod = 0.45` in the same
 extra conf holds the bell stage (a holiday world day) instead of the morning.
 
+The bell stage (#246) adds `wells.bell`: `bound` (villagers that took a bell), `arrived` (reached it), `gave_up` (a bell passed
+over, "the walk took too long" or no route), `samples` (bell-stage samples of a villager bound to a bell, 2 s steps) and
+`job_walk_samples` (of those, samples spent walking to a workstation: vanilla's job search for the unemployed, which runs
+by day whatever the stage, so a fresh village's villagers go back and forth between the bell and free workstations).
+
 ## Plant census (#214, #224)
 
 Every result has `natural.plants` and `after.plants` (`plants.lua`): counts over the village area of

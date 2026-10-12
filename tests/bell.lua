@@ -226,4 +226,36 @@ tick(stuck, 3)
 assert(#gopaths == before, "a bell passed over is not tried again at once")
 answer = true
 
+-- A villager that has arrived and is then walked off by its job search is not timed
+-- against the bell walk (#246); one still on its way to the bell is, and a job search
+-- that is only planning does not stop that clock.
+local function seconds(self, count, step)
+	for _ = 1, count do
+		now = now + step
+		def.do_custom(self, step)
+	end
+end
+now = now + 1000
+local hunter = villager(11, 4)
+tick(hunter)
+assert(hunter._villages_bell and hunter._villages_bell.arrived, "it arrives")
+hunter.state = "gowp"
+hunter._villages_job_search_route = {status = "travelling"}
+seconds(hunter, 100, 1)
+assert(hunter._villages_bell and not hunter._villages_bell.skipped, "an errand after arriving is not a late walk")
+assert(hunter._villages_bell, "it still has the gathering")
+hunter.state, hunter._villages_job_search_route = "stand", nil
+tick(hunter)
+assert(hunter._villages_bell.arrived and hunter._villages_wander_anchor, "back at the bell it gathers again")
+
+local detour = villager(-5, 30)
+tick(detour)
+assert(detour._villages_bell and not detour._villages_bell.arrived)
+detour._villages_job_search_route = {status = "travelling"}
+seconds(detour, 100, 1)
+assert(detour._villages_bell, "a job search interrupting the walk does not time it out")
+detour._villages_job_search_route = nil
+seconds(detour, 120, 1)
+assert(detour._villages_bell == nil, "a walk of its own that goes nowhere is still given up")
+
 print("ok")

@@ -32,6 +32,10 @@ function wells.watch(minp, maxp)
 	local summary = {samples = 0, max_bound = 0, max_arrived = 0, max_near = 0, rim = {count = 0, samples = {}},
 		first_arrival = nil, wells = {}}
 	local groups, talkers = {}, {}
+	-- The bell gathering (#127, #246): villagers that took a bell, that arrived at it, that gave it up,
+	-- and the bell-stage samples spent walking to a workstation instead (vanilla's job search).
+	local bell_ids = {}
+	local bell = {samples = 0, job_walk_samples = 0, bound = 0, arrived = 0, gave_up = 0}
 	-- lv_probe_gather = 1: at the first sample move the adults together onto open ground
 	-- about the first one, 2 nodes apart, so conversations can form in a village whose
 	-- few villagers would never stand near each other. The remaining watch is unchanged.
@@ -119,6 +123,21 @@ function wells.watch(minp, maxp)
 					talker.talking, talker.left_at, talker.left_pos = false, elapsed, pos
 				elseif talker and talker.left_pos and vector.distance(pos, talker.left_pos) > 0.5 then
 					talker.moved = true
+				end
+				if e._villages_bell_skipped and next(e._villages_bell_skipped) then
+					bell_ids[e._id] = bell_ids[e._id] or {}
+					bell_ids[e._id].gave_up = true
+				end
+				if e._villages_bell then
+					local record = bell_ids[e._id] or {}
+					bell_ids[e._id] = record
+					record.bound = true
+					if e._villages_bell.arrived then record.arrived = record.arrived or elapsed end
+					bell.samples = bell.samples + 1
+					local search = e._villages_job_search_route
+					if e.state == "gowp" and search and search.status == "travelling" then
+						bell.job_walk_samples = bell.job_walk_samples + 1
+					end
 				end
 				if e._villages_well then
 					bound = bound + 1
@@ -218,6 +237,12 @@ function wells.watch(minp, maxp)
 			for _, talker in pairs(talkers) do if talker.talking then n = n + 1 end end
 			return n
 		end)(), frozen = frozen}
+		for _, record in pairs(bell_ids) do
+			if record.bound then bell.bound = bell.bound + 1 end
+			if record.arrived then bell.arrived = bell.arrived + 1 end
+			if record.gave_up then bell.gave_up = bell.gave_up + 1 end
+		end
+		if bell.samples > 0 or bell.gave_up > 0 then summary.bell = bell end
 		summary.villagers_bound, summary.villagers_arrived, summary.villagers_left = bound_n, arrived_n, left_n
 		summary.stays = stays
 		return summary
