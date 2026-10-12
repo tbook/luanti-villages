@@ -172,7 +172,16 @@ local function walk_limit(self, center)
 	return math.min(WALK_MAX, WALK_BASE + WALK_PER_NODE * distance)
 end
 
-local function join(self, pos)
+-- A walk the bell did not start: after arriving, nothing of the gathering's is walking,
+-- and an unemployed villager's search for a workstation (vanilla's get_a_job, any time
+-- by day) walks it off on its own errand (#246).
+local function own_walk(self, bell)
+	if bell.arrived then return false end
+	local search = self._villages_job_search_route
+	return not (search and search.status == "travelling")
+end
+
+local function join(self, pos, dtime)
 	local bell = self._villages_bell
 	-- A bell that has been taken down is no longer a place to gather: look for
 	-- another.
@@ -196,7 +205,10 @@ local function join(self, pos)
 	if self.state == "gowp" then
 		-- On the way to its spot: keep it held, and let the walk finish.
 		hold_spot(self, bell)
-		if now() - bell.since > bell.limit then
+		if not own_walk(self, bell) then
+			-- Not timed: its clock stands still while another errand walks it.
+			bell.since = bell.since + dtime
+		elseif now() - bell.since > bell.limit then
 			skip(self, bell.pos, "the walk took too long")
 			leave(self)
 		end
@@ -283,7 +295,7 @@ local function install(def)
 			return result
 		end
 		local pos = self.object:get_pos()
-		if pos then join(self, pos) end
+		if pos then join(self, pos, dtime) end
 		-- Vanilla's player scan turns jumping off near a player, which would
 		-- leave a villager someone is watching unable to climb a step on its
 		-- way (as at the church, church.lua).
