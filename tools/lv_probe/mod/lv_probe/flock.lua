@@ -33,8 +33,8 @@ local DAYS = {
 	work = {{"work", 0.33, 420, "near"}},
 	-- Ten minutes out in the field (#249), then a jump to the tavern or to bed: do they get there?
 	-- The sixth field "far": the phase ends once a shepherd has been 55+ from the village for 25 s.
-	-- The return margin: out in the field, then the last 10 minutes of work (15400 ticks), then the tavern.
-	fieldreturn = {{"work", 0.33, 420, "near"}, {"work", 15400 / 24000, 300, "near"}, {"tavern", 0.66, 120, "near"}},
+	-- The return margin: out in the field, then the last 10 minutes of work (13200 ticks: 115 s before the end at time_speed 72), then the tavern.
+	fieldreturn = {{"work", 0.33, 420, "near"}, {"work", 13200 / 24000, 110, "near"}, {"tavern", 0.66, 120, "near"}},
 	fieldtavern = {{"work", 0.33, 1200, "near", false, "far"}, {"tavern", 0.66, 300, "near"}},
 	fieldsleep = {{"work", 0.33, 1200, "near", false, "far"}, {"sleep", 0.8333, 420, "near"}},
 }

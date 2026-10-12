@@ -61,10 +61,14 @@ local FIELD_STEP_MIN, FIELD_STEP_MAX = 8, 12
 local FIELD_LINGER_MIN, FIELD_LINGER_MAX = 20, 30
 local BUILDING_SCAN, BUILDING_SCAN_HEIGHT = 56, 32
 local tune = {field = true}
--- The last 10 game minutes (1000 ticks to the hour) of the work stage: no new stop, and a shepherd
--- out in the field goes back to the loom, so it is in the village when the tavern, home and
--- sleep stages begin (a trip home from 60-75 out is not one the planner always finds, #252).
-local RETURN_TICKS = 1000 / 6
+-- The return margin: a shepherd out in the field goes back to the loom, and starts no new stop,
+-- once the work stage ends within 1.5 walks home plus RETURN_SLACK real seconds (at least
+-- RETURN_MIN, at most RETURN_MAX), so it is in the village when the tavern, home and sleep stages
+-- begin (a trip home from 60-75 out is not one the planner always finds, #252). A herd is not
+-- started in the last RETURN_MIN seconds at all. Game ticks go by time_speed (ticks per real
+-- second = time_speed / 3.6; default 72).
+local RETURN_SLACK, RETURN_MIN, RETURN_MAX, WALK_SPEED = 20, 60, 180, 1.2
+local DEFAULT_TIME_SPEED = 72
 -- Bell cell key -> distance of its village's farthest door or bed, or the scan under way.
 local reach_cache = {}
 local LOOM_RADIUS = 12
@@ -492,9 +496,17 @@ local function end_herd(self, session)
 	session.herd = nil
 end
 
--- Whether the work stage ends within RETURN_TICKS (by the villager's own timetable).
-local function winding_down(self)
-	local tod = (core.get_timeofday() + RETURN_TICKS / 24000) % 1
+-- Whether the work stage ends within the return margin from pos (by the villager's own
+-- timetable). With `starting` only the shortest margin counts (a herd about to begin).
+local function winding_down(self, pos, starting)
+	local seconds = RETURN_MIN
+	local loom = self._jobsite
+	if not starting and loom and pos then
+		local speed = tonumber(self.walk_velocity) or WALK_SPEED
+		seconds = math.max(RETURN_MIN, math.min(RETURN_MAX, 1.5 * flat(pos, loom) / speed + RETURN_SLACK))
+	end
+	local time_speed = core.settings and tonumber(core.settings:get("time_speed")) or DEFAULT_TIME_SPEED
+	local tod = (core.get_timeofday() + seconds * time_speed / 3.6 / 24000) % 1
 	return common.schedule_stage(tod, self) ~= "work"
 end
 
@@ -526,7 +538,7 @@ local function herd_tick(self, session, pos, bell)
 	local now = session.clock
 	local herd = session.herd
 	if not herd then
-		if now < (session.area_check or 0) or winding_down(self) then return end
+		if now < (session.area_check or 0) or winding_down(self, pos, true) then return end
 		-- Looked up again every AREA_TTL seconds (a bell may be built or taken down) and when
 		-- a bed turns up (it bounds the radius); a shepherd with none grazes without one.
 		local area = session.area
@@ -559,7 +571,7 @@ local function herd_tick(self, session, pos, bell)
 		set_band(herd.area)
 		if herd.area.scanning then return end
 	end
-	if winding_down(self) then
+	if winding_down(self, pos) then
 		if herd.phase == "out" then
 			local loom = self._jobsite
 			core.log("action", string.format("[living_villages] shepherd %s heads for its loom at the end of the work stage, %s from it",

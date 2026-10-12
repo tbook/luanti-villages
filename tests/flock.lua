@@ -804,6 +804,27 @@ time = 15400 / 24000
 tick(rover, 12)
 assert(#gopaths == 0 and flock.sessions[rover].herd == nil, "no herd is started in the last minutes")
 time = 10000 / 24000
+-- The margin is real seconds: 1.5 walks home at 1.2 nodes/s plus 20 s (60 s at least), turned into
+-- ticks by time_speed (ticks per real second = time_speed / 3.6).
+local function heads_home(distance, seconds_left, time_speed)
+	settings.time_speed = tostring(time_speed)
+	local r = fresh()
+	next_stop(r)
+	r.pos.x, r.pos.z, r.state = 2 + distance, 0, "stand"
+	tick(r, 2)
+	assert(flock.sessions[r].herd.phase == "out")
+	time = (15500 - seconds_left * time_speed / 3.6) / 24000
+	tick(r, 1)
+	local home = flock.sessions[r].herd.phase == "loom"
+	settings.time_speed = nil
+	return home
+end
+for _, speed in ipairs({72, 144, 36}) do
+	assert(heads_home(68, 100, speed), "70 out, 100 s left at time_speed " .. speed .. ": back to the loom")
+	assert(not heads_home(68, 130, speed), "70 out, 130 s left at time_speed " .. speed .. ": still out")
+	assert(not heads_home(5, 100, speed), "5 out, 100 s left at time_speed " .. speed .. ": still out")
+	assert(heads_home(5, 50, speed), "5 out, 50 s left at time_speed " .. speed .. ": back to the loom")
+end
 -- A stage change while out in the field ends the herd.
 rover = fresh()
 next_stop(rover)
