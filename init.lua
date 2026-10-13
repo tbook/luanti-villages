@@ -519,15 +519,6 @@ core.register_on_mods_loaded(function()
 		local result = far_trips.call(self, common.as_villager, self, original_custom, self, dtime)
 		if result == false then return false end
 
-		-- Children should not have any profession (#262): vanilla's get_a_job
-		-- (called from do_activity within original_custom above) might have
-		-- assigned one, so clear it here rather than trying to intercept it
-		-- before assignment. Children with an assigned profession (from a save)
-		-- stay unemployed while they are young.
-		if self.child and self._profession and self._profession ~= "unemployed" then
-			self._profession = "unemployed"
-		end
-
 		tick_visual(self)
 
 		local bed, node = claimed_bed(self)
@@ -557,6 +548,8 @@ core.register_on_mods_loaded(function()
 	install_fisherman(def)
 	keeper.install(def)
 	cleric.install(def)
+	-- Outside every role above, so none of them sees a child with a job (#262).
+	dofile(core.get_modpath("living_villages") .. "/child_jobs.lua").install(def)
 	-- One copy of seat.lua, so that its reservations cover both the tavern's
 	-- chairs and the church's.
 	local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
