@@ -14,7 +14,6 @@
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
-local pond_size_qualifies = common.pond_size_qualifies
 -- A trade list with one traded entry, in the form core.deserialize reads.
 local TRADED = "return {{traded_once = true, tier = 0}}"
 local FISH_SEARCH_RADIUS = 32
@@ -122,13 +121,20 @@ end
 local SHORE_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 local WATER_POND_FILL_CAP = 32
+-- Daily fishing requires 2x3+ ponds with at least 6 tiles, rejecting bent
+-- channels, 2x2 wells, and thin one-wide strips (#259).
+local DAILY_WATER_POND_MIN_TILES = 6
 
 -- Flood fill outward over contiguous surface water to determine pond size (#259).
--- Used to ensure daily fishing spot selection requires 2x3+ ponds, matching
--- the promotion requirement. Returns the pond's dimensions.
-local function get_pond_size(start, minp, maxp)
-	local visited = {}
-	visited[start.x .. ":" .. start.y .. ":" .. start.z] = true
+-- Used to ensure daily fishing spot selection requires 2x3+ ponds with at least
+-- 6 tiles. Returns count, span_x, span_z, visited table (shared for efficiency).
+local function get_pond_size(start, minp, maxp, shared_visited)
+	local visited = shared_visited or {}
+	local key = start.x .. ":" .. start.y .. ":" .. start.z
+	if visited[key] then
+		return 0, 0, 0, visited  -- Already visited, part of another pond
+	end
+	visited[key] = true
 	local queue, head = {start}, 1
 	local count = 1
 	local min_x, max_x, min_z, max_z = start.x, start.x, start.z, start.z
@@ -137,11 +143,11 @@ local function get_pond_size(start, minp, maxp)
 		head = head + 1
 		for _, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
 			local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
-			local key = neighbor.x .. ":" .. neighbor.y .. ":" .. neighbor.z
+			local nkey = neighbor.x .. ":" .. neighbor.y .. ":" .. neighbor.z
 			local in_bounds = neighbor.x >= minp.x and neighbor.x <= maxp.x
 				and neighbor.z >= minp.z and neighbor.z <= maxp.z
-			if not visited[key] and in_bounds then
-				visited[key] = true
+			if not visited[nkey] and in_bounds then
+				visited[nkey] = true
 				if common.is_surface_water(neighbor) then
 					count = count + 1
 					min_x, max_x = math.min(min_x, neighbor.x), math.max(max_x, neighbor.x)
@@ -152,7 +158,16 @@ local function get_pond_size(start, minp, maxp)
 			end
 		end
 	end
-	return max_x - min_x + 1, max_z - min_z + 1
+	return count, max_x - min_x + 1, max_z - min_z + 1, visited
+end
+
+-- Check if a pond qualifies for daily fishing: 2x3+ with at least 6 tiles
+-- (rejects bent channels, 2x2 wells, and one-wide strips) (#259).
+local function pond_qualifies_for_daily_fishing(count, span_x, span_z)
+	if count < DAILY_WATER_POND_MIN_TILES then return false end
+	local min_span = math.min(span_x, span_z)
+	local max_span = math.max(span_x, span_z)
+	return min_span >= 2 and max_span >= 3
 end
 
 -- navigation.lua's approaches() only checks a fishing spot's own four
@@ -188,21 +203,27 @@ end
 
 -- The nearest surface water tile within range is only an anchor: navigation.lua
 -- turns it into an actual stand by finding an open, supported position
--- cardinally adjacent to it (#72). The pond must be at least 2x3 or larger
--- to qualify for fishing (#259).
+-- cardinally adjacent to it (#72). The pond must be 2x3+ with >= 6 tiles
+-- to qualify for daily fishing (#259). Optimization: skip pond size check for
+-- tiles farther than best, share visited set to avoid refilling same pond.
 local function nearest_water(self)
 	local pos = self.object:get_pos()
 	if not pos then return nil end
 	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - FISH_BELOW_BAND, z = pos.z - FISH_SEARCH_RADIUS}
 	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
 	local best, best_distance
+	local visited = {}  -- Shared across all candidates to avoid refilling same pond
 	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
 		if common.is_surface_water(site) and has_open_approach(site) then
-			-- Check pond size: must be at least 2x3 or larger (#259)
-			local span_x, span_z = get_pond_size(site, minp, maxp)
-			if pond_size_qualifies(span_x, span_z) then
-				local distance = vector.distance(pos, site)
-				if not best_distance or distance < best_distance then best, best_distance = site, distance end
+			local distance = vector.distance(pos, site)
+			-- Skip size check for tiles farther than best (optimization)
+			if not best_distance or distance < best_distance then
+				-- Check pond size: must be 2x3+ with >= 6 tiles for daily fishing (#259)
+				local count, span_x, span_z, new_visited = get_pond_size(site, minp, maxp, visited)
+				visited = new_visited  -- Update shared visited set
+				if pond_qualifies_for_daily_fishing(count, span_x, span_z) then
+					best, best_distance = site, distance
+				end
 			end
 		end
 	end

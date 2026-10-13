@@ -326,10 +326,93 @@ do
 	assert(not nitwit._villages_fisherman)
 end
 
+-- 7a: Daily fishing pond requirements (#259). Ponds must be 2x3+ with >= 6
+-- tiles, rejecting 2x2 wells, bent channels, and one-wide strips.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+
+	-- 2x2 well must be rejected
+	do
+		water_sites = {{x = 10, y = 0, z = 0}}
+		for x = 10, 11 do
+			for z = 0, 1 do
+				place({x = x, y = 0, z = z}, "mcl_core:water_source")
+			end
+		end
+		local fisherman = {
+			_id = "f7a1", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function() error("must not travel: 2x2 well should be rejected") end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(not fisherman._villages_fish_target, "a 2x2 well must not qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- One-wide bent channel (4 tiles in 2x3 box) must be rejected
+	do
+		water_sites = {{x = 15, y = 0, z = 0}}
+		place({x = 15, y = 0, z = 0}, "mcl_core:water_source")
+		place({x = 15, y = 0, z = 1}, "mcl_core:water_source")
+		place({x = 15, y = 0, z = 2}, "mcl_core:water_source")
+		place({x = 16, y = 0, z = 2}, "mcl_core:water_source")
+		local fisherman = {
+			_id = "f7a2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function() error("must not travel: bent channel should be rejected") end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(not fisherman._villages_fish_target, "a one-wide bent channel must not qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- 2x3 pond must be accepted
+	do
+		for x = 20, 21 do
+			for z = 0, 2 do
+				place({x = x, y = 0, z = z}, "mcl_core:water_source")
+			end
+		end
+		water_sites = {{x = 20, y = 0, z = 0}}
+		local gopath_called = false
+		local fisherman = {
+			_id = "f7a3", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function(self, target) gopath_called = true; self.state = "gowp"; return true end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(fisherman._villages_fish_target and gopath_called, "a 2x3 pond must qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- 3x2 pond must be accepted (different orientation)
+	do
+		for x = 25, 27 do
+			for z = 0, 1 do
+				place({x = x, y = 0, z = z}, "mcl_core:water_source")
+			end
+		end
+		water_sites = {{x = 25, y = 0, z = 0}}
+		local gopath_called = false
+		local fisherman = {
+			_id = "f7a4", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function(self, target) gopath_called = true; self.state = "gowp"; return true end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(fisherman._villages_fish_target and gopath_called, "a 3x2 pond must qualify for daily fishing")
+		water_sites = {}
+	end
+
+	timeofday = 0
+end
+
 -- 8. #72: a working fisherman with no route in progress and qualifying water
 -- nearby is sent toward the nearest surface-water tile; navigation.lua turns
 -- that anchor into an actual shoreline stand. Both ponds must meet the 2x3
--- minimum size requirement (#259).
+-- minimum size requirement for daily fishing (#259).
 do
 	local gopath_target
 	local def = new_def(function() end)
