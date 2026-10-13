@@ -518,6 +518,16 @@ core.register_on_mods_loaded(function()
 		-- a keeper keeps different hours from everyone else (#22).
 		local result = far_trips.call(self, common.as_villager, self, original_custom, self, dtime)
 		if result == false then return false end
+
+		-- Children should not have any profession (#262): vanilla's get_a_job
+		-- (called from do_activity within original_custom above) might have
+		-- assigned one, so clear it here rather than trying to intercept it
+		-- before assignment. Children with an assigned profession (from a save)
+		-- stay unemployed while they are young.
+		if self.child and self._profession and self._profession ~= "unemployed" then
+			self._profession = "unemployed"
+		end
+
 		tick_visual(self)
 
 		local bed, node = claimed_bed(self)
