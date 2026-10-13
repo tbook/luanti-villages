@@ -518,6 +518,7 @@ core.register_on_mods_loaded(function()
 		-- a keeper keeps different hours from everyone else (#22).
 		local result = far_trips.call(self, common.as_villager, self, original_custom, self, dtime)
 		if result == false then return false end
+
 		tick_visual(self)
 
 		local bed, node = claimed_bed(self)
@@ -547,6 +548,8 @@ core.register_on_mods_loaded(function()
 	install_fisherman(def)
 	keeper.install(def)
 	cleric.install(def)
+	-- Outside every role above, so none of them sees a child with a job (#262).
+	dofile(core.get_modpath("living_villages") .. "/child_jobs.lua").install(def)
 	-- One copy of seat.lua, so that its reservations cover both the tavern's
 	-- chairs and the church's.
 	local seat = dofile(core.get_modpath("living_villages") .. "/seat.lua")
