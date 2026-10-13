@@ -517,6 +517,12 @@ local function evaluate_fisherman_promotion(self)
 	promotion_pending[self] = true
 	route_queue.submit(function() return job_search_target(self) end, function(selection)
 		promotion_pending[self] = nil
+		-- Kept for the diagnostic form: a free workstation is what stops a
+		-- bedded villager by a large pond from becoming a fisherman (#259).
+		self._villages_promotion_station = {
+			site = selection and {x = selection.site.x, y = selection.site.y, z = selection.site.z} or false,
+			at = core.get_gametime(),
+		}
 		if selection or self._jobsite or not eligible_for_promotion(self) then return end
 		self._profession = "fisherman"
 		self._villages_fisherman = true

@@ -175,6 +175,7 @@ assert(shown.form:find("Fishing status: fishing", 1, true))
 assert(shown.form:find("Fish target: (40.0, 0.0, 0.0)", 1, true))
 assert(shown.form:find("Fish route: arrived at (39.0, 0.0, 0.0)", 1, true), shown.form)
 assert(shown.form:find("Fishing session: wait (next phase in 10s)", 1, true))
+assert(shown.form:find("Free workstation reachable: not checked yet", 1, true))
 assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span (qualifies for promotion)", 1, true))
 assert(shown.form:find(
 	"Water at fish target: largest pond near fish target: 2 tiles, 2x1 span (too small to qualify)", 1, true))
