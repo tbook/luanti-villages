@@ -175,7 +175,7 @@ assert(shown.form:find("Fishing status: fishing", 1, true))
 assert(shown.form:find("Fish target: (40.0, 0.0, 0.0)", 1, true))
 assert(shown.form:find("Fish route: arrived at (39.0, 0.0, 0.0)", 1, true), shown.form)
 assert(shown.form:find("Fishing session: wait (next phase in 10s)", 1, true))
-assert(shown.form:find("Free workstation reachable: not checked yet", 1, true))
+assert(shown.form:find("Free workstation reachable: n/a", 1, true), "a fisherman is not waiting on a workstation")
 assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span (qualifies for promotion)", 1, true))
 assert(shown.form:find(
 	"Water at fish target: largest pond near fish target: 2 tiles, 2x1 span (too small to qualify)", 1, true))
@@ -300,6 +300,33 @@ local unsupported_fisherman = {
 lookup("stack", player, {type = "object", ref = unsupported_fisherman})
 assert(shown.form:find("Nearest fish candidate: (60.0, 0.0, 0.0) [", 1, true), shown.form)
 assert(shown.form:find("not supported (air)", 1, true), shown.form)
+
+-- "Free workstation reachable" reports the promotion check's recorded answer
+-- for an unemployed villager only (#259).
+local function unemployed_with(record, extra)
+	return {
+		get_luaentity = function()
+			local entity = {
+				name = "mobs_mc:villager", _id = "villager-12", _profession = "unemployed",
+				_villages_promotion_station = record,
+				object = {
+					get_pos = function() return {x = 60, y = 0, z = 0} end,
+					get_properties = function() return nil end,
+				},
+			}
+			for key, value in pairs(extra or {}) do entity[key] = value end
+			return entity
+		end,
+	}
+end
+lookup("stack", player, {type = "object", ref = unemployed_with(nil)})
+assert(shown.form:find("Free workstation reachable: not checked yet", 1, true), shown.form)
+lookup("stack", player, {type = "object", ref = unemployed_with({site = {x = 7, y = 0, z = 8}, at = 0})})
+assert(shown.form:find("Free workstation reachable: yes, at (7.0, 0.0, 8.0) (blocks fisherman promotion", 1, true), shown.form)
+lookup("stack", player, {type = "object", ref = unemployed_with({site = false, at = 0})})
+assert(shown.form:find("Free workstation reachable: no (checked", 1, true), shown.form)
+lookup("stack", player, {type = "object", ref = unemployed_with({site = {x = 7, y = 0, z = 8}, at = 0}, {_profession = "farmer"})})
+assert(shown.form:find("Free workstation reachable: n/a", 1, true), shown.form)
 
 local visitor = {
 	is_player = function() return true end,

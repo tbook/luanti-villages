@@ -1180,6 +1180,9 @@ settle()
 assert(promoted_entity._profession == "fisherman", "a 3x3 pond must qualify for promotion")
 assert(promoted_entity._villages_fisherman == true, "promotion must set the fisherman guard flag immediately")
 assert(water_scans == 1)
+assert(promoted_entity._villages_promotion_station
+	and promoted_entity._villages_promotion_station.site == false,
+	"a promotion must record that no free workstation was found")
 
 -- Idempotent, and the cooldown suppresses a rescan on the very next tick.
 promotion_def.do_custom(promoted_entity, 0.1)
@@ -1277,6 +1280,9 @@ settle()
 assert(workstation_entity._profession == "unemployed", "a reachable workstation must suppress promotion")
 assert(not workstation_entity._villages_fisherman)
 assert(water_scans == 1, "water is checked before the workstation search")
+local blocked = workstation_entity._villages_promotion_station
+assert(blocked and blocked.site and blocked.site.x == 20 and blocked.site.z == 0,
+	"the blocking workstation must be recorded for the diagnostic")
 search_sites = {}
 jobsite_claimed = true
 clear_pond()

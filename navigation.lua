@@ -747,7 +747,7 @@ local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
 	"_villages_fish_route", "_villages_job_search_route", "_villages_goto_route",
 	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
-	"_villages_follow", "_villages_follow_failed",
+	"_villages_follow", "_villages_follow_failed", "_villages_promotion_station",
 }
 
 local function install(def)
@@ -800,6 +800,7 @@ local function install(def)
 		self._villages_fish_target = nil
 		self._villages_job_search_route = nil
 		self._villages_goto_route = nil
+		self._villages_promotion_station = nil
 		if had_managed_route then stop(self) end
 		return result
 	end

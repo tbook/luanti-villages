@@ -436,6 +436,9 @@ end
 -- instead of letting it become a fisherman. Read-only: the check itself runs
 -- from the route queue, so this reports its recorded answer.
 local function free_workstation_status(villager)
+	if villager._villages_fisherman or (villager._profession or "unemployed") ~= "unemployed" then
+		return "n/a (not an unemployed villager)"
+	end
 	local record = villager._villages_promotion_station
 	if type(record) ~= "table" then
 		return "not checked yet (needs a claimed bed, a 3x3 pond near it and work hours)"
