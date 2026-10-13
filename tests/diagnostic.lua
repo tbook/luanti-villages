@@ -322,6 +322,12 @@ end
 lookup("stack", player, {type = "object", ref = unemployed_with(nil)})
 assert(shown.form:find("Promotion gates: unemployed yes, adult yes, claimed bed NO, work hours", 1, true), shown.form)
 assert(shown.form:find("Free workstation reachable: not checked yet", 1, true), shown.form)
+assert(shown.form:find("Promotion check: not reached since load, not scheduled", 1, true), shown.form)
+lookup("stack", player, {type = "object", ref = unemployed_with(nil, {
+	_villages_promotion_reached = 0, _villages_fisherman_check = 0, _villages_promotion_pending = true,
+})})
+assert(shown.form:find("Promotion check: last reached", 1, true), shown.form)
+assert(shown.form:find("workstation search queued", 1, true), shown.form)
 lookup("stack", player, {type = "object", ref = unemployed_with({site = {x = 7, y = 0, z = 8}, at = 0})})
 assert(shown.form:find("Free workstation reachable: yes, at (7.0, 0.0, 8.0) (blocks fisherman promotion", 1, true), shown.form)
 lookup("stack", player, {type = "object", ref = unemployed_with({site = false, at = 0})})

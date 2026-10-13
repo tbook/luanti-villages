@@ -435,6 +435,27 @@ end
 -- routable workstation within the job-search range keeps a villager unemployed
 -- instead of letting it become a fisherman. Read-only: the check itself runs
 -- from the route queue, so this reports its recorded answer.
+-- When navigation.lua's promotion check last ran, when it runs next, and
+-- whether its workstation search is still queued (#259). "never reached"
+-- means the villager has not got as far as the check since it loaded.
+local function promotion_timing(villager)
+	local now = core.get_gametime()
+	local reached = villager._villages_promotion_reached
+	local due = villager._villages_fisherman_check
+	local parts = {}
+	table.insert(parts, reached and string.format("last reached %ds ago", math.max(0, now - reached))
+		or "not reached since load")
+	if due and due > now then
+		table.insert(parts, string.format("next check in %ds", due - now))
+	elseif due then
+		table.insert(parts, string.format("check due (%ds overdue)", now - due))
+	else
+		table.insert(parts, "not scheduled")
+	end
+	if villager._villages_promotion_pending then table.insert(parts, "workstation search queued") end
+	return table.concat(parts, ", ")
+end
+
 local function free_workstation_status(villager)
 	if villager._villages_fisherman or (villager._profession or "unemployed") ~= "unemployed" then
 		return "n/a (not an unemployed villager)"
@@ -554,6 +575,7 @@ local function show(player, villager)
 		"Fishing session: " .. fish_session_status(villager),
 		"Water near bed: " .. water_status(villager._bed, "bed"),
 		"Promotion gates: " .. promotion_gates(villager),
+		"Promotion check: " .. promotion_timing(villager),
 		"Free workstation reachable: " .. free_workstation_status(villager),
 		"Water at fish target: " .. water_status(villager._villages_fish_target, "fish target"),
 		"Nearest fish candidate: "
