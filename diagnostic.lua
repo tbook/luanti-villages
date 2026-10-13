@@ -450,6 +450,18 @@ local function free_workstation_status(villager)
 	return string.format("no (checked %ds ago)", ago)
 end
 
+-- Which of the fisherman-promotion gates (navigation.lua, #71) a villager
+-- passes, in the order the check applies them. Bed claims come from vanilla,
+-- which only assigns one at night, so a villager placed by day has no bed
+-- until its first night.
+local function promotion_gates(villager)
+	if villager._villages_fisherman then return "already a fisherman" end
+	local function yn(ok) return ok and "yes" or "NO" end
+	return string.format("unemployed %s, adult %s, claimed bed %s, work hours %s",
+		yn((villager._profession or "unemployed") == "unemployed"), yn(not villager.child),
+		yn(bed_status(villager) == "valid claim"), yn(is_work_time(villager)))
+end
+
 local function inspectable_node(pos)
 	local node = core.get_node_or_nil(pos)
 	if not node then return nil end
@@ -541,6 +553,7 @@ local function show(player, villager)
 		"Fish planner trail: " .. planner_trail(villager._villages_fish_route),
 		"Fishing session: " .. fish_session_status(villager),
 		"Water near bed: " .. water_status(villager._bed, "bed"),
+		"Promotion gates: " .. promotion_gates(villager),
 		"Free workstation reachable: " .. free_workstation_status(villager),
 		"Water at fish target: " .. water_status(villager._villages_fish_target, "fish target"),
 		"Nearest fish candidate: "
