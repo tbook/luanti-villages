@@ -4,6 +4,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
+local pond_size_qualifies = common.pond_size_qualifies
 local is_sleep_time = common.is_sleep_time
 local is_work_time = common.is_work_time
 local is_home_time = common.is_home_time
@@ -18,14 +19,11 @@ local BIRTH_INTERVAL_DAYS = 2
 local LAST_BIRTH = "villages_last_birth"
 -- Mirror navigation.lua's own promotion-pond thresholds (#71) so this
 -- reports the same pond a fisherman's promotion check would have seen.
--- navigation.lua exposes no public surface beyond its def-installer, and
--- this file must stay read-only, so this is its own small copy rather than
--- a shared call into it.
 local WATER_SEARCH_RADIUS = 24
 local WATER_BELOW_BAND = 6
 local WATER_ABOVE_BAND = 2
-local WATER_POND_MIN_SPAN = 3
-local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
+-- A qualifying pond must be at least 2x3 or 3x2 (2 nodes in one direction,
+-- 3+ nodes in the other), not just 2x2 wells (#259).
 local WATER_POND_FILL_CAP = 32
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 -- Mirror fisherman.lua's own day-to-day search radius, and ask the same
@@ -299,8 +297,7 @@ local function measure_water(anchor)
 		local site_key = site.x .. ":" .. site.y .. ":" .. site.z
 		if not visited[site_key] and common.is_surface_water(site) then
 			local count, span_x, span_z = flood_fill_pond(site, minp, maxp, visited)
-			local qualifies = count >= WATER_POND_MIN_COUNT and span_x >= WATER_POND_MIN_SPAN
-				and span_z >= WATER_POND_MIN_SPAN
+			local qualifies = pond_size_qualifies(span_x, span_z)
 			if not best or (qualifies and not best.qualifies)
 				or (qualifies == best.qualifies and count > best.count) then
 				best = {count = count, span_x = span_x, span_z = span_z, qualifies = qualifies}

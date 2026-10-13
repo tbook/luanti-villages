@@ -1196,6 +1196,14 @@ settle()
 assert(small_pool_entity._profession == "unemployed", "a 2x2 pool must not qualify for promotion")
 clear_pond()
 
+-- A 2x3 pond must now qualify for promotion (#259).
+place_pond(5, 6, -1, 1, 0)
+local min_pool_entity = new_promotion_entity()
+promotion_def.do_custom(min_pool_entity, 0.1)
+settle()
+assert(min_pool_entity._profession == "fisherman", "a 2x3 pond must qualify for promotion")
+clear_pond()
+
 -- A one-wide channel can hold more tiles than a 3x3 pond while still being
 -- too narrow to fish from; the span check, not just the tile count, must
 -- reject it.

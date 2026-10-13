@@ -42,11 +42,11 @@ local deferred_door_closes = {}
 -- water, and how large a contiguous surface-water pond must be to qualify.
 -- Asymmetric vertically: a lake below a bed built on higher ground is
 -- common, water hanging above one is rare (overhangs, waterfalls).
+-- A qualifying pond must be at least 2x3 or 3x2 (2 nodes in one direction,
+-- 3+ nodes in the other), not just 2x2 wells (#259).
 local WATER_SEARCH_RADIUS = 24
 local WATER_BELOW_BAND = 6
 local WATER_ABOVE_BAND = 2
-local WATER_POND_MIN_SPAN = 3
-local WATER_POND_MIN_COUNT = WATER_POND_MIN_SPAN * WATER_POND_MIN_SPAN
 local WATER_POND_FILL_CAP = 32
 -- job_search_target plans a route to every free workstation within 48 nodes,
 -- so one search can take hundreds of milliseconds. At a few seconds'
@@ -416,6 +416,7 @@ end
 
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 local is_surface_water = common.is_surface_water
+local pond_size_qualifies = common.pond_size_qualifies
 
 -- Flood fill outward over contiguous surface water at a single water level,
 -- capped so one villager's promotion check cannot be made arbitrarily
@@ -453,9 +454,8 @@ local function flood_fill_pond(start, minp, maxp, visited)
 	return count, max_x - min_x + 1, max_z - min_z + 1
 end
 
--- A qualifying body of water is bigger than a 2x2 pool in both horizontal
--- directions, not merely a long, one-wide channel that happens to satisfy a
--- raw tile count.
+-- A qualifying body of water meets the minimum size requirement (2x3 or larger),
+-- not merely a long, one-wide channel that happens to satisfy a raw tile count.
 local function qualifying_water(bed)
 	local minp = {x = bed.x - WATER_SEARCH_RADIUS, y = bed.y - WATER_BELOW_BAND, z = bed.z - WATER_SEARCH_RADIUS}
 	local maxp = {x = bed.x + WATER_SEARCH_RADIUS, y = bed.y + WATER_ABOVE_BAND, z = bed.z + WATER_SEARCH_RADIUS}
@@ -465,7 +465,7 @@ local function qualifying_water(bed)
 		local key = site.x .. ":" .. site.y .. ":" .. site.z
 		if not visited[key] and is_surface_water(site) then
 			local count, span_x, span_z = flood_fill_pond(site, minp, maxp, visited)
-			if count >= WATER_POND_MIN_COUNT and span_x >= WATER_POND_MIN_SPAN and span_z >= WATER_POND_MIN_SPAN then
+			if pond_size_qualifies(span_x, span_z) then
 				return true
 			end
 		end
