@@ -25,23 +25,32 @@ local TRADED = "return {{traded_once = true, tier = 0}}"
 
 local M = {}
 
+-- True once `_jobsite` is released. A node in an unloaded mapblock cannot be
+-- read or written: keep both the claim and `_jobsite` and try again next
+-- tick, rather than forget a claim nothing else would ever clear. A generic
+-- child with `_jobsite` set searches for nothing (the stand-in trade list).
 local function release_claim(self)
 	local jobsite = self._jobsite
-	if not jobsite then return end
+	if not jobsite then return true end
+	if not core.get_node_or_nil(jobsite) then return false end
 	local meta = core.get_meta(jobsite)
 	if meta and self._id and meta:get_string("villager") == self._id then
 		meta:set_string("villager", "")
 	end
 	self._jobsite = nil
+	return true
 end
+
+-- Routes the old job left in flight (keeper.lua clears the same on a takeover).
+local ROUTE_FIELDS = {
+	"_villages_job_route", "_villages_job_search_route",
+	"_villages_farm_route", "_villages_fish_route",
+}
 
 -- Makes `self` (a child) a generic villager again; true if anything changed.
 function M.make_generic(self)
 	local changed = false
-	if self._jobsite then
-		release_claim(self)
-		changed = true
-	end
+	if self._jobsite and release_claim(self) then changed = true end
 	if self._profession ~= "unemployed" and self._profession ~= "nitwit" then
 		self._profession = "unemployed"
 		changed = true
@@ -55,6 +64,9 @@ function M.make_generic(self)
 			self[flag] = nil
 			changed = true
 		end
+	end
+	if changed then
+		for _, field in ipairs(ROUTE_FIELDS) do self[field] = nil end
 	end
 	return changed
 end

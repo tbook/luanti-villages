@@ -229,6 +229,24 @@ local thief = make_villager("thief", {child = true, _profession = "farmer", _job
 entity_def.do_custom(thief, 1)
 assert(thief._jobsite == nil and claimed_by(composter) == "other")
 
+-- A claim in an unloaded mapblock is kept, and released once it loads.
+reset()
+metadata[key(composter)] = {villager = "far"}
+local far = make_villager("far", {
+	child = true, _profession = "farmer", _jobsite = composter,
+	_villages_job_route = {status = "walking"},
+})
+local loaded_node = nodes[key(composter)]
+nodes[key(composter)] = nil
+entity_def.do_custom(far, 1)
+assert(far._jobsite == composter, "an unreadable jobsite must not be forgotten")
+assert(claimed_by(composter) == "far", "the claim stays until it can be released")
+assert(far._profession == "unemployed")
+nodes[key(composter)] = loaded_node
+entity_def.do_custom(far, 1)
+assert(far._jobsite == nil and claimed_by(composter) == "", "released once the block loads")
+assert(far._villages_job_route == nil, "a leftover job route is dropped")
+
 -- A nitwit child stays a nitwit.
 reset()
 local nit = make_villager("nit", {child = true, _profession = "nitwit"})
