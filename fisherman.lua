@@ -119,6 +119,50 @@ local function should_flag(self)
 end
 
 local SHORE_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+-- Cap on one flood fill. A pond that reaches it is far past the minimum.
+local WATER_POND_FILL_CAP = 64
+
+-- A daily fishing pond contains a solid 2x3 (or 3x2) block of surface water
+-- (#259). Judging the bounding box or the tile count instead lets a bent
+-- one-wide channel through.
+local function has_solid_block(tiles)
+	for _, tile in pairs(tiles) do
+		local function has(dx, dz) return tiles[(tile.x + dx) .. ":" .. tile.y .. ":" .. (tile.z + dz)] end
+		if has(1, 0) and has(0, 1) and has(1, 1)
+			and ((has(2, 0) and has(2, 1)) or (has(0, 2) and has(1, 2))) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Flood fill over contiguous surface water at one level, from start, within
+-- minp/maxp. Returns the set of tiles reached (keyed "x:y:z"), capped at
+-- WATER_POND_FILL_CAP, and whether they hold a 2x3 block.
+local function measure_pond(start, minp, maxp)
+	local function key(p) return p.x .. ":" .. p.y .. ":" .. p.z end
+	local tiles, seen = {[key(start)] = start}, {[key(start)] = true}
+	local queue, head, count = {start}, 1, 1
+	while queue[head] and count < WATER_POND_FILL_CAP do
+		local pos = queue[head]
+		head = head + 1
+		for _, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
+			local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
+			local nkey = key(neighbor)
+			if not seen[nkey] and neighbor.x >= minp.x and neighbor.x <= maxp.x
+				and neighbor.z >= minp.z and neighbor.z <= maxp.z then
+				seen[nkey] = true
+				if common.is_surface_water(neighbor) then
+					tiles[nkey] = neighbor
+					count = count + 1
+					queue[#queue + 1] = neighbor
+				end
+			end
+		end
+	end
+	return tiles, has_solid_block(tiles)
+end
 
 -- navigation.lua's approaches() only checks a fishing spot's own four
 -- cardinal neighbors (cardinal_only), at the anchor tile's own height and
@@ -153,17 +197,27 @@ end
 
 -- The nearest surface water tile within range is only an anchor: navigation.lua
 -- turns it into an actual stand by finding an open, supported position
--- cardinally adjacent to it (#72).
+-- cardinally adjacent to it (#72). The pond must hold a 2x3 block of
+-- water to qualify for daily fishing (#259).
 local function nearest_water(self)
 	local pos = self.object:get_pos()
 	if not pos then return nil end
 	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - FISH_BELOW_BAND, z = pos.z - FISH_SEARCH_RADIUS}
 	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
 	local best, best_distance
+	-- Verdict per water tile already measured, so each pond is filled once
+	-- and every tile of it (including a nearer one) gets the same answer.
+	local qualifies = {}
 	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
-		if common.is_surface_water(site) and has_open_approach(site) then
-			local distance = vector.distance(pos, site)
-			if not best_distance or distance < best_distance then best, best_distance = site, distance end
+		local distance = vector.distance(pos, site)
+		if (not best_distance or distance < best_distance)
+			and common.is_surface_water(site) and has_open_approach(site) then
+			local key = site.x .. ":" .. site.y .. ":" .. site.z
+			if qualifies[key] == nil then
+				local tiles, ok = measure_pond(site, minp, maxp)
+				for tile_key in pairs(tiles) do qualifies[tile_key] = ok end
+			end
+			if qualifies[key] then best, best_distance = site, distance end
 		end
 	end
 	return best
@@ -393,6 +447,12 @@ return function(def)
 	end
 
 	def.do_custom = function(self, dtime)
+		-- A villager a barrel employed after it loaded is flagged here; the
+		-- flag was otherwise only restored on activation, so it would not
+		-- fish until its block reloaded.
+		if not self._villages_fisherman and should_flag(self) then
+			self._villages_fisherman = true
+		end
 		if not self._villages_fisherman then
 			return original_custom(self, dtime)
 		end

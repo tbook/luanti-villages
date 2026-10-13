@@ -326,17 +326,177 @@ do
 	assert(not nitwit._villages_fisherman)
 end
 
+-- 7a: Daily fishing pond requirements (#259). Ponds must be 2x3+ with >= 6
+-- tiles, rejecting 2x2 wells, bent channels, and one-wide strips.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+
+	-- 2x2 well must be rejected
+	do
+		water_sites = {{x = 10, y = 0, z = 0}}
+		for x = 10, 11 do
+			for z = 0, 1 do
+				place({x = x, y = 0, z = z}, "mcl_core:water_source")
+			end
+		end
+		local fisherman = {
+			_id = "f7a1", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function() error("must not travel: 2x2 well should be rejected") end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(not fisherman._villages_fish_target, "a 2x2 well must not qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- One-wide bent channel (4 tiles in 2x3 box) must be rejected
+	do
+		water_sites = {{x = 15, y = 0, z = 0}}
+		place({x = 15, y = 0, z = 0}, "mcl_core:water_source")
+		place({x = 15, y = 0, z = 1}, "mcl_core:water_source")
+		place({x = 15, y = 0, z = 2}, "mcl_core:water_source")
+		place({x = 16, y = 0, z = 2}, "mcl_core:water_source")
+		local fisherman = {
+			_id = "f7a2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function() error("must not travel: bent channel should be rejected") end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(not fisherman._villages_fish_target, "a one-wide bent channel must not qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- 2x3 pond must be accepted
+	do
+		for x = 20, 21 do
+			for z = 0, 2 do
+				place({x = x, y = 0, z = z}, "mcl_core:water_source")
+			end
+		end
+		water_sites = {{x = 20, y = 0, z = 0}}
+		local gopath_called = false
+		local fisherman = {
+			_id = "f7a3", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function(self, target) gopath_called = true; self.state = "gowp"; return true end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(fisherman._villages_fish_target and gopath_called, "a 2x3 pond must qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- 3x2 pond must be accepted (different orientation)
+	do
+		for x = 25, 27 do
+			for z = 0, 1 do
+				place({x = x, y = 0, z = z}, "mcl_core:water_source")
+			end
+		end
+		water_sites = {{x = 25, y = 0, z = 0}}
+		local gopath_called = false
+		local fisherman = {
+			_id = "f7a4", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function(self, target) gopath_called = true; self.state = "gowp"; return true end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(fisherman._villages_fish_target and gopath_called, "a 3x2 pond must qualify for daily fishing")
+		water_sites = {}
+	end
+
+	timeofday = 0
+end
+
+-- 7b: #259 playtest. A real, irregular pond (about 10x5, ragged edges) is
+-- fished, at its nearest approachable tile even when a farther tile of the
+-- same pond is listed first; a long one-wide channel with a bend (count and
+-- bounding box both large) is not.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	local shape = {
+		"..XXX.....",
+		".XXXXXXX..",
+		"XXXXXXXXXX",
+		".XXXXXXXX.",
+		"...XXXX...",
+	}
+	local sites = {{x = 29, y = 0, z = 12}}
+	for r, row in ipairs(shape) do
+		for c = 1, #row do
+			if row:sub(c, c) == "X" then
+				local tile = {x = 20 + c - 1, y = 0, z = 10 + r - 1}
+				place(tile, "mcl_core:water_source")
+				table.insert(sites, tile)
+			end
+		end
+	end
+	water_sites = sites
+	local gopath_target
+	local fisherman = {
+		_id = "f7b1", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target) gopath_target = target; self.state = "gowp"; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	local target = fisherman._villages_fish_target
+	assert(target and target.x == 20 and target.z == 12,
+		"an irregular pond must be fished at its nearest tile")
+	assert(gopath_target and gopath_target.x == 20 and gopath_target.z == 12)
+
+	-- A one-wide channel with a right-angle bend: 9 tiles, 5x5 bounding box.
+	local channel = {}
+	for x = 20, 24 do table.insert(channel, {x = x, y = 0, z = 20}) end
+	for z = 21, 24 do table.insert(channel, {x = 24, y = 0, z = z}) end
+	for _, tile in ipairs(channel) do place(tile, "mcl_core:water_source") end
+	water_sites = channel
+	local bent = {
+		_id = "f7b2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function() error("must not travel: a bent one-wide channel is not a pond") end,
+	}
+	def.do_custom(bent, 0.1)
+	assert(not bent._villages_fish_target, "a bent one-wide channel must not qualify")
+	water_sites, timeofday = {}, 0
+end
+
+-- 7c: a villager a barrel employed after it loaded fishes without waiting for
+-- its block to reload: the flag is set from the profession.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	local hired = {_id = "f7c", _profession = "fisherman", _jobsite = {x = 5, y = 0, z = 5}}
+	def.do_custom(hired, 0.1)
+	assert(hired._villages_fisherman, "a barrel-employed fisherman must be flagged without a reload")
+	local child = {_id = "f7c2", _profession = "fisherman", child = true}
+	def.do_custom(child, 0.1)
+	assert(not child._villages_fisherman)
+end
+
 -- 8. #72: a working fisherman with no route in progress and qualifying water
 -- nearby is sent toward the nearest surface-water tile; navigation.lua turns
--- that anchor into an actual shoreline stand.
+-- that anchor into an actual shoreline stand. Both ponds must meet the 2x3
+-- minimum size requirement for daily fishing (#259).
 do
 	local gopath_target
 	local def = new_def(function() end)
 	dofile("fisherman.lua")(def)
 	timeofday, now = 0.4, 100
+	-- Create two 2x3 ponds: one far away, one near
 	water_sites = {{x = 12, y = 0, z = 0}, {x = 3, y = 0, z = 0}}
-	place({x = 12, y = 0, z = 0}, "mcl_core:water_source")
-	place({x = 3, y = 0, z = 0}, "mcl_core:water_source")
+	for x = 11, 12 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
+	for x = 2, 3 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
 	local fisherman = {
 		_id = "f8", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -357,6 +517,7 @@ end
 -- cardinal approach) is skipped in favor of a farther tile that actually has
 -- a shore, instead of being picked by straight-line distance alone and then
 -- retrying "no safe standing space" against the same doomed tile forever.
+-- Both ponds must meet the 2x3 minimum size requirement (#259).
 do
 	local gopath_target
 	local def = new_def(function() end)
@@ -365,15 +526,21 @@ do
 	-- Coordinates well outside every other test's placements in this file
 	-- (place() writes into a shared, never-cleared node table), but still
 	-- within FISH_SEARCH_RADIUS (32) of the villager's position below.
+	-- Create a 3x3 mid_lake (fully surrounded with no dry approach)
 	local mid_lake = {x = 25, y = 0, z = 0}
-	local shore = {x = 30, y = 0, z = 0}
-	water_sites = {mid_lake, shore}
 	place(mid_lake, "mcl_core:water_source")
 	place({x = 26, y = 0, z = 0}, "mcl_core:water_source")
 	place({x = 24, y = 0, z = 0}, "mcl_core:water_source")
 	place({x = 25, y = 0, z = 1}, "mcl_core:water_source")
 	place({x = 25, y = 0, z = -1}, "mcl_core:water_source")
-	place(shore, "mcl_core:water_source")
+	-- Create a 2x3 shore pond with a proper shore
+	local shore = {x = 30, y = 0, z = 0}
+	for x = 30, 31 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
+	water_sites = {mid_lake, shore}
 	local fisherman = {
 		_id = "f8a", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -394,7 +561,8 @@ end
 -- solid wall right at the water's edge is dry but not open, so a water tile
 -- boxed in by a two-high wall on all four sides (too tall to stand on top
 -- of, unlike a single-block ledge -- see 8a3) must still be skipped for one
--- with an actual approachable (open and supported) neighbor.
+-- with an actual approachable (open and supported) neighbor. Both ponds must
+-- meet the 2x3 minimum size requirement (#259).
 do
 	local gopath_target
 	local def = new_def(function() end)
@@ -402,15 +570,32 @@ do
 	timeofday, now = 0.4, 100
 	-- Within FISH_SEARCH_RADIUS (32) of the villager below, and outside
 	-- every other test's placements in this file.
-	local walled_lake = {x = 15, y = 0, z = 0}
-	local shore = {x = 20, y = 0, z = 0}
-	water_sites = {walled_lake, shore}
-	place(walled_lake, "mcl_core:water_source")
-	for _, wall in ipairs({{16, 0}, {14, 0}, {15, 1}, {15, -1}}) do
-		place({x = wall[1], y = 0, z = wall[2]}, "mcl_core:stone")
-		place({x = wall[1], y = 1, z = wall[2]}, "mcl_core:stone")
+	-- Create a 2x3 walled lake and a 2x3 shore
+	for x = 14, 15 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
 	end
-	place(shore, "mcl_core:water_source")
+	-- Wall in the walled lake on all four cardinal sides
+	for z = 0, 2 do
+		place({x = 13, y = 0, z = z}, "mcl_core:stone")
+		place({x = 13, y = 1, z = z}, "mcl_core:stone")
+		place({x = 16, y = 0, z = z}, "mcl_core:stone")
+		place({x = 16, y = 1, z = z}, "mcl_core:stone")
+	end
+	for x = 14, 15 do
+		place({x = x, y = 0, z = 3}, "mcl_core:stone")
+		place({x = x, y = 1, z = 3}, "mcl_core:stone")
+		place({x = x, y = 0, z = -1}, "mcl_core:stone")
+		place({x = x, y = 1, z = -1}, "mcl_core:stone")
+	end
+	-- Create a 2x3 shore pond
+	for x = 19, 20 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
+	water_sites = {{x = 14, y = 0, z = 0}, {x = 19, y = 0, z = 0}}
 	local fisherman = {
 		_id = "f8a2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -421,9 +606,9 @@ do
 		end,
 	}
 	def.do_custom(fisherman, 0.1)
-	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 20,
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 19,
 		"a water tile walled in by solid (non-liquid but non-open) blocks must be skipped")
-	assert(gopath_target and gopath_target.x == 20)
+	assert(gopath_target and gopath_target.x == 19)
 	timeofday, water_sites = 0, {}
 end
 
@@ -432,21 +617,24 @@ end
 -- the water's own y level, so the stand is on top of that ground, not
 -- beside it): a water tile whose only dry neighbors are like this must
 -- still be picked, not rejected for having nothing open at the water's own
--- height.
+-- height. Pond must meet the 2x3 minimum size requirement (#259).
 do
 	local gopath_target
 	local def = new_def(function() end)
 	dofile("fisherman.lua")(def)
 	timeofday, now = 0.4, 100
 	-- Within FISH_SEARCH_RADIUS (32) of the villager below, and outside
-	-- every other test's placements in this file.
-	local beach_lake = {x = 8, y = 0, z = 0}
-	water_sites = {beach_lake}
-	place(beach_lake, "mcl_core:water_source")
-	-- Sand right at the water's own height on every side: not open (it is
-	-- walkable ground, not air), so only standing on top of it -- one block
-	-- up -- is a valid approach.
-	for _, sand in ipairs({{9, 0}, {7, 0}, {8, 1}, {8, -1}}) do
+	-- every other test's placements in this file. Create a 2x3 beach pond.
+	for x = 7, 8 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
+	water_sites = {{x = 7, y = 0, z = 0}}
+	-- Sand right at the water's own height on cardinal neighbors of the left edge:
+	-- not open (it is walkable ground, not air), so only standing on top of it --
+	-- one block up -- is a valid approach.
+	for _, sand in ipairs({{6, 0}, {6, 1}, {6, 2}}) do
 		place({x = sand[1], y = 0, z = sand[2]}, "mcl_core:sand")
 	end
 	local fisherman = {
@@ -459,27 +647,32 @@ do
 		end,
 	}
 	def.do_custom(fisherman, 0.1)
-	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 8,
+	assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == 7,
 		"a water tile with only a raised (sand-at-water-level) shore must still be picked")
 	-- gopath is handed the water anchor itself here; navigation.lua's own
 	-- approaches() (raised_ok, tested in tests/navigation.lua) is what turns
 	-- it into the actual one-block-up stand.
-	assert(gopath_target and gopath_target.x == 8)
+	assert(gopath_target and gopath_target.x == 7)
 	timeofday, water_sites = 0, {}
 end
 
 -- 8b: the vertical search is asymmetric, matching navigation.lua's
 -- promotion search: a lake below the villager's own standing height is
 -- common, water above is rare, so downward reach (6) is wider than upward
--- reach (2).
+-- reach (2). Ponds must meet the 2x3 minimum size requirement (#259).
 do
 	local gopath_target
 	local def = new_def(function() end)
 	dofile("fisherman.lua")(def)
 	timeofday, now = 0.4, 100
+	-- Create 2x3 ponds at different heights
 	local below = {x = 3, y = -6, z = 0}
+	for x = 3, 4 do
+		for z = 0, 2 do
+			place({x = x, y = below.y, z = z}, "mcl_core:water_source")
+		end
+	end
 	water_sites = {below}
-	place(below, "mcl_core:water_source")
 	ground_levels[-7] = true
 	local fisherman = {
 		_id = "f8b", _villages_fisherman = true, _profession = "fisherman", state = "stand",
@@ -493,8 +686,12 @@ do
 	water_sites = {}
 
 	local too_deep = {x = 3, y = -7, z = 0}
+	for x = 3, 4 do
+		for z = 0, 2 do
+			place({x = x, y = too_deep.y, z = z}, "mcl_core:water_source")
+		end
+	end
 	water_sites = {too_deep}
-	place(too_deep, "mcl_core:water_source")
 	local deep_fisherman = {
 		_id = "f8c", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -505,8 +702,12 @@ do
 	water_sites = {}
 
 	local above = {x = 3, y = 2, z = 0}
+	for x = 3, 4 do
+		for z = 0, 2 do
+			place({x = x, y = above.y, z = z}, "mcl_core:water_source")
+		end
+	end
 	water_sites = {above}
-	place(above, "mcl_core:water_source")
 	ground_levels[1] = true
 	local above_fisherman = {
 		_id = "f8d", _villages_fisherman = true, _profession = "fisherman", state = "stand",
@@ -519,8 +720,12 @@ do
 	water_sites = {}
 
 	local too_high = {x = 3, y = 3, z = 0}
+	for x = 3, 4 do
+		for z = 0, 2 do
+			place({x = x, y = too_high.y, z = z}, "mcl_core:water_source")
+		end
+	end
 	water_sites = {too_high}
-	place(too_high, "mcl_core:water_source")
 	local high_fisherman = {
 		_id = "f8e", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -652,12 +857,17 @@ do
 end
 
 -- #73: arrival at the stand faces the water and starts a fishing session in
--- its "cast" phase.
+-- its "cast" phase. Pond must meet the 2x3 minimum size requirement (#259).
 do
 	local def = new_def(function() end)
 	dofile("fisherman.lua")(def)
 	timeofday, now = 0.4, 700
 	local water = {x = 5, y = 0, z = 0}
+	for x = 5, 6 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -671,7 +881,6 @@ do
 	-- Go through the travel-trigger branch itself, so the target comes from
 	-- nearest_water() just as it would on a real trip.
 	water_sites = {water}
-	place(water, "mcl_core:water_source")
 	def.do_custom(fisherman, 0.1)
 	assert(fisherman._villages_fish_session and fisherman._villages_fish_session.phase == "cast")
 	assert(fisherman._villages_fish_session.phase_ends_at == now + 2)
@@ -685,13 +894,17 @@ end
 
 -- #73: a completed cast/wait/reel cycle spawns and removes a bobber once,
 -- and unlocks a locked trade at or below the current tier while leaving a
--- higher tier alone.
+-- higher tier alone. Pond must meet the 2x3 minimum size requirement (#259).
 do
 	local def = new_def(function() end)
 	dofile("fisherman.lua")(def)
 	timeofday, now = 0.4, 800
 	local water = {x = 5, y = 0, z = 0}
-	place(water, "mcl_core:water_source")
+	for x = 5, 6 do
+		for z = 0, 2 do
+			place({x = x, y = 0, z = z}, "mcl_core:water_source")
+		end
+	end
 	local trades = {
 		affordable = {tier = 1, locked = true, trade_counter = 5},
 		expensive = {tier = 2, locked = true, trade_counter = 1},
