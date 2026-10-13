@@ -110,8 +110,9 @@ for t in tests/*.lua; do lua5.1 "$t"; done
 
 ## License
 
-The code is licensed under GPL-3.0; see [`LICENSE`](LICENSE). The sleeping position, bed
+The code and bundled media are distributed under GPL-3.0; see [`LICENSE`](LICENSE).
+Upstream media notices and credits are retained in [`LICENSE-media.md`](LICENSE-media.md).
+The sleeping position, bed
 occupancy, pose, and wake-up behavior are adapted from Mineclonia's `mobs_mc/villager.lua`.
 The villager model and textures come from Mineclonia, and the pulpit texture is a recolored
-VoxeLibre texture; see [`LICENSE-media.md`](LICENSE-media.md) for
-their licenses and credits.
+VoxeLibre texture.
