@@ -42,7 +42,6 @@ local deferred_door_closes = {}
 -- water, and how large a contiguous surface-water pond must be to qualify.
 -- Asymmetric vertically: a lake below a bed built on higher ground is
 -- common, water hanging above one is rare (overhangs, waterfalls).
--- Promotion requires 3x3+ ponds; daily fishing requires 2x3+ (#259).
 local WATER_SEARCH_RADIUS = 24
 local WATER_BELOW_BAND = 6
 local WATER_ABOVE_BAND = 2
@@ -417,7 +416,6 @@ end
 
 local WATER_NEIGHBOR_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 local is_surface_water = common.is_surface_water
-local pond_size_qualifies = common.pond_size_qualifies
 
 -- Flood fill outward over contiguous surface water at a single water level,
 -- capped so one villager's promotion check cannot be made arbitrarily
@@ -457,7 +455,7 @@ end
 
 -- A qualifying body of water is bigger than a 2x2 pool in both horizontal
 -- directions, not merely a long, one-wide channel that happens to satisfy a
--- raw tile count. Promotion requires 3x3+ (#71); daily fishing uses 2x3+ (#259).
+-- raw tile count.
 local function qualifying_water(bed)
 	local minp = {x = bed.x - WATER_SEARCH_RADIUS, y = bed.y - WATER_BELOW_BAND, z = bed.z - WATER_SEARCH_RADIUS}
 	local maxp = {x = bed.x + WATER_SEARCH_RADIUS, y = bed.y + WATER_ABOVE_BAND, z = bed.z + WATER_SEARCH_RADIUS}

@@ -409,6 +409,73 @@ do
 	timeofday = 0
 end
 
+-- 7b: #259 playtest. A real, irregular pond (about 10x5, ragged edges) is
+-- fished, at its nearest approachable tile even when a farther tile of the
+-- same pond is listed first; a long one-wide channel with a bend (count and
+-- bounding box both large) is not.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	timeofday, now = 0.4, 100
+	local shape = {
+		"..XXX.....",
+		".XXXXXXX..",
+		"XXXXXXXXXX",
+		".XXXXXXXX.",
+		"...XXXX...",
+	}
+	local sites = {{x = 29, y = 0, z = 12}}
+	for r, row in ipairs(shape) do
+		for c = 1, #row do
+			if row:sub(c, c) == "X" then
+				local tile = {x = 20 + c - 1, y = 0, z = 10 + r - 1}
+				place(tile, "mcl_core:water_source")
+				table.insert(sites, tile)
+			end
+		end
+	end
+	water_sites = sites
+	local gopath_target
+	local fisherman = {
+		_id = "f7b1", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function(self, target) gopath_target = target; self.state = "gowp"; return true end,
+	}
+	def.do_custom(fisherman, 0.1)
+	local target = fisherman._villages_fish_target
+	assert(target and target.x == 20 and target.z == 12,
+		"an irregular pond must be fished at its nearest tile")
+	assert(gopath_target and gopath_target.x == 20 and gopath_target.z == 12)
+
+	-- A one-wide channel with a right-angle bend: 9 tiles, 5x5 bounding box.
+	local channel = {}
+	for x = 20, 24 do table.insert(channel, {x = x, y = 0, z = 20}) end
+	for z = 21, 24 do table.insert(channel, {x = 24, y = 0, z = z}) end
+	for _, tile in ipairs(channel) do place(tile, "mcl_core:water_source") end
+	water_sites = channel
+	local bent = {
+		_id = "f7b2", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+		gopath = function() error("must not travel: a bent one-wide channel is not a pond") end,
+	}
+	def.do_custom(bent, 0.1)
+	assert(not bent._villages_fish_target, "a bent one-wide channel must not qualify")
+	water_sites, timeofday = {}, 0
+end
+
+-- 7c: a villager a barrel employed after it loaded fishes without waiting for
+-- its block to reload: the flag is set from the profession.
+do
+	local def = new_def(function() end)
+	dofile("fisherman.lua")(def)
+	local hired = {_id = "f7c", _profession = "fisherman", _jobsite = {x = 5, y = 0, z = 5}}
+	def.do_custom(hired, 0.1)
+	assert(hired._villages_fisherman, "a barrel-employed fisherman must be flagged without a reload")
+	local child = {_id = "f7c2", _profession = "fisherman", child = true}
+	def.do_custom(child, 0.1)
+	assert(not child._villages_fisherman)
+end
+
 -- 8. #72: a working fisherman with no route in progress and qualifying water
 -- nearby is sent toward the nearest surface-water tile; navigation.lua turns
 -- that anchor into an actual shoreline stand. Both ponds must meet the 2x3

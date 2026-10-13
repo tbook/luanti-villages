@@ -333,15 +333,6 @@ M = {
 		local above = core.get_node_or_nil({x = pos.x, y = pos.y + 1, z = pos.z})
 		return above ~= nil and above.name == "air"
 	end,
-	-- Check if a pond's dimensions meet the minimum size requirement for fishing:
-	-- 2x3 or larger (2 nodes in one direction, 3+ in the other). Used by both
-	-- fisherman promotion (navigation.lua) and daily fishing spot selection
-	-- (fisherman.lua) to enforce #259.
-	pond_size_qualifies = function(span_x, span_z)
-		local min_span = math.min(span_x, span_z)
-		local max_span = math.max(span_x, span_z)
-		return min_span >= 2 and max_span >= 3
-	end,
 	workstation_profession = function(name)
 		return workstation_professions[name]
 			or (core.get_item_group(name, "cauldron") > 0 and "leatherworker")
