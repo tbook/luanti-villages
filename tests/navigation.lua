@@ -19,6 +19,8 @@ local water_source_nodes = {}
 local water_scans = 0
 local raised_shore_nodes = {}
 local logged = {}
+-- Values for core.settings:get, by name.
+local setting_values = {}
 -- Route planning runs from the route queue's globalstep (#162); settle() lets
 -- every pending search finish.
 local function settle()
@@ -45,7 +47,7 @@ minetest = {
 		["mcl_core:water_flowing"] = {liquidtype = "flowing"},
 	},
 	settings = {
-		get = function() return nil end,
+		get = function(_, name) return setting_values[name] end,
 		get_bool = function(_, _, default) return default end,
 	},
 	get_timeofday = function() return timeofday end,
@@ -131,7 +133,8 @@ local def = {
 	on_activate = function() end,
 	do_custom = function() end,
 }
-dofile("navigation.lua")(def)
+local install_nav, nav = dofile("navigation.lua")
+install_nav(def)
 
 local entity = {
 	_bed = {x = 0, y = 0, z = 0}, state = "stand",
@@ -1592,9 +1595,60 @@ do
 		"a target 55 away is planned: " .. tostring(far._villages_goto_route.status))
 	local unreachable = new_entity()
 	unreachable.object = far.object
+	-- The cap is five times the setting; a small one keeps this search quick.
+	setting_values.living_villages_route_max_nodes = "1024"
 	assert(planner_def.gopath(unreachable, {x = -2663 + 300, y = 0, z = 266}, nil, true) ~= nil)
 	settle()
 	assert(unreachable._villages_goto_route.status == "retry", "the widened box is still capped")
+
+	-- Far searches that find nothing are not repeated every 30 s (#252): the wait
+	-- doubles with each failure to a cap, and starts over after the villager has
+	-- moved 20 nodes or found a route.
+	local first_retry = unreachable._villages_goto_route.retry_at - now
+	assert(first_retry == 30, "first failure waits 30 s: " .. tostring(first_retry))
+	now = now + 31
+	assert(planner_def.gopath(unreachable, {x = -2663 + 300, y = 0, z = 266}, nil, true) ~= nil)
+	settle()
+	assert(unreachable._villages_goto_route.status == "retry")
+	assert(unreachable._villages_goto_route.retry_at - now == 60, "second failure waits 60 s")
+	assert(unreachable._villages_far_failed.count == 2)
+	assert(nav.backoff_seconds(1) == 30 and nav.backoff_seconds(3) == 120
+		and nav.backoff_seconds(4) == 240 and nav.backoff_seconds(9) == 240, "the wait doubles to a cap")
+	-- Moved far from where it failed: starts over.
+	unreachable.object = {get_pos = function() return {x = -2663 + 100, y = 0.5, z = 266} end, set_velocity = function() end}
+	now = now + 61
+	assert(planner_def.gopath(unreachable, {x = -2663 + 400, y = 0, z = 266}, nil, true) ~= nil)
+	settle()
+	assert(unreachable._villages_far_failed.count == 1, "a villager that moved starts over")
+	setting_values.living_villages_route_max_nodes = nil
+
+	-- The node budget grows with the distance (#252).
+	assert(nav.nodes_for_reach(10) == 4096 and nav.nodes_for_reach(48) == 4096, "up to 48 is the setting")
+	assert(nav.nodes_for_reach(96) == 16384, "twice as far, four times the nodes")
+	assert(nav.nodes_for_reach(70) > 4096 and nav.nodes_for_reach(70) < nav.nodes_for_reach(80))
+	assert(nav.nodes_for_reach(500) == 20480, "capped at five times the setting")
+	setting_values.living_villages_route_max_nodes = "1000"
+	assert(nav.nodes_for_reach(48) == 1000 and nav.nodes_for_reach(500) == 5000, "the setting is respected")
+	setting_values.living_villages_route_max_nodes = nil
+
+	-- A trip that needs more than the setting's nodes but less than its scaled
+	-- budget is found: a wall across the way forces a long detour.
+	local wall_keys = {}
+	for z = -60, 59 do
+		for y = 0, 1 do
+			local key = "35:" .. y .. ":" .. z
+			raised_shore_nodes[key], wall_keys[#wall_keys + 1] = "stone", key
+		end
+	end
+	local detour = new_entity()
+	detour.object = {get_pos = function() return {x = 0, y = 0.5, z = 0} end, set_velocity = function() end}
+	assert(planner_def.gopath(detour, {x = 70, y = 0, z = 0}, nil, true))
+	settle()
+	assert(detour._villages_goto_route.status == "travelling",
+		"a long detour is planned: " .. tostring(detour._villages_goto_route.status) .. " " .. tostring(detour._villages_goto_route.reason))
+	assert(detour._villages_goto_route.planner.searched > 4096,
+		"it needed more than the base budget: " .. tostring(detour._villages_goto_route.planner.searched))
+	for _, key in ipairs(wall_keys) do raised_shore_nodes[key] = nil end
 
 	-- A search still queued for one trip does not overwrite the next trip's route.
 	local switcher = new_entity(true)

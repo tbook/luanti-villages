@@ -33,7 +33,9 @@ living_villages_route_budget_ms (Route planning budget per step, ms) float 4 0.5
 # target farther than this is still reached: the search widens to cover it,
 # with a margin of 16, up to a fixed cap of 128 whatever this is set to.
 living_villages_route_range (Route planner range) int 48 8 96
-# The most positions one route search expands before giving up.
+# The most positions one route search expands before giving up. Trips more
+# than 48 nodes out get more, in proportion to the square of the distance, up
+# to five times this (#252).
 living_villages_route_max_nodes (Route planner node cap) int 4096 256 32768
 
 # Game days a villager child takes to grow up (#177). VoxeLibre's own is

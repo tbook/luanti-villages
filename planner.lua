@@ -22,6 +22,15 @@ local function heuristic(a, b)
 	return math.abs(a.x - b.x) + math.abs(a.z - b.z) + math.abs(a.y - b.y) * 1.25
 end
 
+-- Among equal estimates, the entry that has come further (larger g) goes first.
+-- On open ground every cell inside the box between start and goal ties on f, and
+-- breaking those ties arbitrarily expands the whole box (about width x depth
+-- nodes: a 75-node trip on a hillside ran out of its budget, #252). Preferring
+-- the deepest entry follows one shortest route and only widens at obstacles.
+local function before(a, b)
+	return a.f < b.f or (a.f == b.f and a.g > b.g)
+end
+
 -- Heap entries are immutable snapshots. A better route to an open position
 -- pushes a new entry instead of mutating one that is already in the heap;
 -- stale snapshots are discarded when popped.
@@ -30,7 +39,7 @@ local function push(heap, entry)
 	local i = #heap
 	while i > 1 do
 		local parent = math.floor(i / 2)
-		if heap[parent].f <= entry.f then break end
+		if not before(entry, heap[parent]) then break end
 		heap[i] = heap[parent]
 		i = parent
 	end
@@ -45,8 +54,8 @@ local function pop(heap)
 		local i = 1
 		while i * 2 <= #heap do
 			local child = i * 2
-			if child + 1 <= #heap and heap[child + 1].f < heap[child].f then child = child + 1 end
-			if heap[child].f >= last.f then break end
+			if child + 1 <= #heap and before(heap[child + 1], heap[child]) then child = child + 1 end
+			if not before(heap[child], last) then break end
 			heap[i] = heap[child]
 			i = child
 		end
