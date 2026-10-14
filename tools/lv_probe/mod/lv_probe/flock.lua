@@ -175,7 +175,7 @@ function flock.reach(center, emit, done)
 	-- navigation.lua's budget for a trip this far: 4096 up to 48 out, then with the square of the
 	-- distance, to five times that.
 	local function scaled_budget(start)
-		local reach = math.max(math.abs(goal.x - start.x), math.abs(goal.y - start.y), math.abs(goal.z - start.z))
+		local reach = math.abs(goal.x - start.x) + math.abs(goal.z - start.z)
 		return math.floor(math.min(4096 * 5, math.max(4096, 4096 * (reach / 48) ^ 2)))
 	end
 	local rows = {}

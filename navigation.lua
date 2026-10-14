@@ -35,17 +35,26 @@ local function planner_max_nodes()
 end
 -- A far trip needs more nodes than a near one. Over hill ground a route is
 -- several times longer than the straight line (a 70 node trip took 250 to 310
--- steps and 4500 to 8500 expanded nodes, #252), and a box twice as far out holds
--- four times the cells. The budget is the setting up to 48 nodes out and grows
--- with the square of the distance past that, to five times the setting. Searches
--- are time-sliced (route_queue.lua), so a larger one waits longer; it does not
--- stall the server.
+-- steps and 4500 to 8600 expanded nodes, #252), and route length follows the
+-- Manhattan distance. The budget is the setting up to 48 nodes (|dx| + |dz|) to
+-- the nearest target, then grows with the square of the distance, to five times
+-- the setting. Searches are time-sliced (route_queue.lua), so a larger one
+-- waits longer; it does not stall the server.
 local BUDGET_FULL_REACH = 48
 local BUDGET_MAX_FACTOR = 5
 local function nodes_for_reach(reach)
 	local base = planner_max_nodes()
 	local scaled = base * (reach / BUDGET_FULL_REACH) ^ 2
 	return math.floor(math.min(base * BUDGET_MAX_FACTOR, math.max(base, scaled)))
+end
+-- A far search that found no route is not repeated every 30 s: the wait doubles
+-- with each consecutive failure, to FAR_BACKOFF_MAX, and starts over once the
+-- villager has moved FAR_BACKOFF_RESET nodes from where it last failed, or
+-- found a route.
+local FAR_BACKOFF_MAX = 240
+local FAR_BACKOFF_RESET = 20
+local function backoff_seconds(failures)
+	return math.min(FAR_BACKOFF_MAX, FAILURE_WAIT * 2 ^ (failures - 1))
 end
 local PATHFINDING = "gowp"
 local DOOR_USE_RADIUS = 2.5
@@ -345,7 +354,8 @@ local function plan_stair_route(self, candidates, avoid)
 		local reach = math.max(math.abs(target.x - start.x), math.abs(target.y - start.y),
 			math.abs(target.z - start.z))
 		range = math.max(range, math.min(RANGE_CAP, reach + RANGE_MARGIN))
-		nearest_reach = math.min(nearest_reach or reach, reach)
+		local manhattan = math.abs(target.x - start.x) + math.abs(target.z - start.z)
+		nearest_reach = math.min(nearest_reach or manhattan, manhattan)
 	end
 	local path, visited, status, details = planner.find_path(start, can_stand, function(pos)
 		return targets[pos.x .. ":" .. pos.y .. ":" .. pos.z] ~= nil
@@ -364,7 +374,7 @@ local function plan_stair_route(self, candidates, avoid)
 		end,
 	})
 	local report = {
-		start = vector.new(start), candidates = {}, status = status, searched = visited,
+		start = vector.new(start), candidates = {}, status = status, searched = visited, reach = nearest_reach,
 		closest = details and details.closest and vector.new(details.closest) or nil,
 		closest_distance = details and details.closest_distance or nil,
 		closest_cost = details and details.closest_cost or nil,
@@ -647,6 +657,7 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 			if not route then return end
 			if target and path then
 				route.status, route.planner = "travelling", report
+				self._villages_far_failed = nil
 				route.replans = opts.replans
 				route.target = vector.new(target)
 				if start_route(self, target, path,
@@ -656,9 +667,22 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 					return
 				end
 			end
-			-- Like vanilla's gopath, hold off asking again for a while.
-			self._pf_last_failed = os.time()
-			fail(self, route_field, failure or opts.reason, opts.fail_target, nil, report)
+			-- Like vanilla's gopath, hold off asking again for a while; longer for a far
+			-- trip that keeps failing.
+			local wait
+			local pos = self.object:get_pos()
+			if report and report.reach and report.reach > BUDGET_FULL_REACH
+				and (report.status == "unreachable" or report.status == "search_limit") then
+				local last = self._villages_far_failed
+				local count = last and pos and vector.distance(last.pos, pos) < FAR_BACKOFF_RESET and last.count or 0
+				count = count + 1
+				self._villages_far_failed = {count = count, pos = pos and vector.new(pos)}
+				wait = backoff_seconds(count)
+			else
+				self._villages_far_failed = nil
+			end
+			self._pf_last_failed = os.time() + ((wait or FAILURE_WAIT) - FAILURE_WAIT)
+			fail(self, route_field, failure or opts.reason, opts.fail_target, wait, report)
 		end, {
 			valid = function() return current() and self.object:get_pos() ~= nil end,
 			on_error = function(message)
@@ -1160,4 +1184,5 @@ local function install(def)
 	end
 end
 
-return install
+-- The second value is for the tests.
+return install, {nodes_for_reach = nodes_for_reach, backoff_seconds = backoff_seconds}
