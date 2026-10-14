@@ -387,6 +387,18 @@ tick(c, 11) -- it is found at the next scan
 step_sheep(3)
 assert(edge.state == "stand" and flock.states[edge].rest_until, "a sheep at a drop rests")
 
+-- 8b. A flock sheep wandering on vanilla's rules does not walk off a ledge (#255).
+local wander = make_sheep(0, 40)
+wander._villages_shepherd = c._id
+wander.object.get_velocity = function() return {x = 0, y = -0.9, z = 1} end -- walking +z
+for z = 42, 50 do for y = -3, -1 do nodes[key({x = 0, y = y, z = z})] = nil end end
+wander.state = "walk"
+sheep_def.do_custom(wander, 0.1)
+assert(wander.state == "walk", "a sheep with ground ahead keeps walking")
+for y = -3, -1 do nodes[key({x = 0, y = y, z = 41})] = nil end
+sheep_def.do_custom(wander, 0.1)
+assert(wander.state == "stand", "a wandering sheep stops at a drop")
+
 -- 9. Far behind: set down beside the shepherd if no one sees it, not if someone does.
 local lost = make_sheep(60, 0)
 lost._villages_shepherd = c._id
