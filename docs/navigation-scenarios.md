@@ -126,6 +126,12 @@ the water's edge and starts a fishing session. Promotion is for life: the
 `Fisherman flag` and profession must stay set even after the lake is later
 drained or built over.
 
+Fisherman is a fallback only: a villager promotes only when no reachable
+workstation within the job-search range (48 nodes) is free. While one is, the
+villager walks to it for a normal job instead, and the Lookup Tool's
+`Free workstation reachable` line says `yes, at ...`. Test this scenario with
+every workstation claimed or out of range.
+
 ## 12. A lake filled in or frozen while a fisherman is using it
 
 Send a fisherman to its stand and let it start a session (`Fishing session`

@@ -431,6 +431,58 @@ local function nearest_fish_candidate(pos)
 		pos_string(best), total, total == 1 and "" or "s", table.concat(lines, " | "))
 end
 
+-- What navigation.lua's last fisherman-promotion check found (#259): a free,
+-- routable workstation within the job-search range keeps a villager unemployed
+-- instead of letting it become a fisherman. Read-only: the check itself runs
+-- from the route queue, so this reports its recorded answer.
+-- When navigation.lua's promotion check last ran, when it runs next, and
+-- whether its workstation search is still queued (#259). "never reached"
+-- means the villager has not got as far as the check since it loaded.
+local function promotion_timing(villager)
+	local now = core.get_gametime()
+	local reached = villager._villages_promotion_reached
+	local due = villager._villages_fisherman_check
+	local parts = {}
+	table.insert(parts, reached and string.format("last reached %ds ago", math.max(0, now - reached))
+		or "not reached since load")
+	if due and due > now then
+		table.insert(parts, string.format("next check in %ds", due - now))
+	elseif due then
+		table.insert(parts, string.format("check due (%ds overdue)", now - due))
+	else
+		table.insert(parts, "not scheduled")
+	end
+	if villager._villages_promotion_pending then table.insert(parts, "workstation search queued") end
+	return table.concat(parts, ", ")
+end
+
+local function free_workstation_status(villager)
+	if villager._villages_fisherman or (villager._profession or "unemployed") ~= "unemployed" then
+		return "n/a (not an unemployed villager)"
+	end
+	local record = villager._villages_promotion_station
+	if type(record) ~= "table" then
+		return "not checked yet (needs a claimed bed, a 3x3 pond near it and work hours)"
+	end
+	local ago = math.max(0, core.get_gametime() - (record.at or 0))
+	if record.site then
+		return string.format("yes, at %s (blocks fisherman promotion; checked %ds ago)", pos_string(record.site), ago)
+	end
+	return string.format("no (checked %ds ago)", ago)
+end
+
+-- Which of the fisherman-promotion gates (navigation.lua, #71) a villager
+-- passes, in the order the check applies them. Bed claims come from vanilla,
+-- which only assigns one at night, so a villager placed by day has no bed
+-- until its first night.
+local function promotion_gates(villager)
+	if villager._villages_fisherman then return "already a fisherman" end
+	local function yn(ok) return ok and "yes" or "NO" end
+	return string.format("unemployed %s, adult %s, claimed bed %s, work hours %s",
+		yn((villager._profession or "unemployed") == "unemployed"), yn(not villager.child),
+		yn(bed_status(villager) == "valid claim"), yn(is_work_time(villager)))
+end
+
 local function inspectable_node(pos)
 	local node = core.get_node_or_nil(pos)
 	if not node then return nil end
@@ -522,6 +574,9 @@ local function show(player, villager)
 		"Fish planner trail: " .. planner_trail(villager._villages_fish_route),
 		"Fishing session: " .. fish_session_status(villager),
 		"Water near bed: " .. water_status(villager._bed, "bed"),
+		"Promotion gates: " .. promotion_gates(villager),
+		"Promotion check: " .. promotion_timing(villager),
+		"Free workstation reachable: " .. free_workstation_status(villager),
 		"Water at fish target: " .. water_status(villager._villages_fish_target, "fish target"),
 		"Nearest fish candidate: "
 			.. (villager._villages_fisherman and nearest_fish_candidate(pos) or "n/a (not a fisherman)"),

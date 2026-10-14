@@ -495,6 +495,9 @@ local promotion_pending = setmetatable({}, {__mode = "k"})
 local function evaluate_fisherman_promotion(self)
 	if not eligible_for_promotion(self) then return end
 	local now = core.get_gametime()
+	-- For the diagnostic form: when this check last ran at all, and whether
+	-- its search is still queued.
+	self._villages_promotion_reached = now
 	-- The check runs only at work time, so every deadline lapses overnight and
 	-- after a load; resuming them all at once would put every eligible villager
 	-- in the same tick's search. Spread the first check after a gap instead.
@@ -515,14 +518,25 @@ local function evaluate_fisherman_promotion(self)
 	-- queue (#162), and the villager is promoted when it comes back empty.
 	if promotion_pending[self] then return end
 	promotion_pending[self] = true
+	self._villages_promotion_pending = true
 	route_queue.submit(function() return job_search_target(self) end, function(selection)
 		promotion_pending[self] = nil
+		self._villages_promotion_pending = nil
+		-- Kept for the diagnostic form: a free workstation is what stops a
+		-- bedded villager by a large pond from becoming a fisherman (#259).
+		self._villages_promotion_station = {
+			site = selection and {x = selection.site.x, y = selection.site.y, z = selection.site.z} or false,
+			at = core.get_gametime(),
+		}
 		if selection or self._jobsite or not eligible_for_promotion(self) then return end
 		self._profession = "fisherman"
 		self._villages_fisherman = true
 	end, {
 		valid = function() return self.object:get_pos() ~= nil end,
-		on_error = function() promotion_pending[self] = nil end,
+		on_error = function()
+			promotion_pending[self] = nil
+			self._villages_promotion_pending = nil
+		end,
 	})
 end
 
@@ -741,7 +755,8 @@ local TRIP_FIELDS = {
 	"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
 	"_villages_fish_route", "_villages_job_search_route", "_villages_goto_route",
 	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
-	"_villages_follow", "_villages_follow_failed",
+	"_villages_follow", "_villages_follow_failed", "_villages_promotion_station",
+	"_villages_promotion_reached", "_villages_promotion_pending",
 }
 
 local function install(def)
@@ -794,6 +809,9 @@ local function install(def)
 		self._villages_fish_target = nil
 		self._villages_job_search_route = nil
 		self._villages_goto_route = nil
+		self._villages_promotion_station = nil
+		self._villages_promotion_reached = nil
+		self._villages_promotion_pending = nil
 		if had_managed_route then stop(self) end
 		return result
 	end
