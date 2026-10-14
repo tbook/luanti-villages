@@ -399,6 +399,31 @@ for y = -3, -1 do nodes[key({x = 0, y = y, z = 41})] = nil end
 sheep_def.do_custom(wander, 0.1)
 assert(wander.state == "stand", "a wandering sheep stops at a drop")
 
+-- Cases where the ledge check must not stand the sheep.
+local function wanderer(vx, vy, vz, tweak)
+	local w = make_sheep(0, 40)
+	w._villages_shepherd = c._id
+	w.object.get_velocity = function() return {x = vx, y = vy, z = vz} end
+	w.state = "walk"
+	if tweak then tweak(w) end
+	sheep_def.do_custom(w, 0.1)
+	table.remove(objects) -- keep it out of later scans
+	return w
+end
+-- (the drop is still at z 41; the cell is solid at z 40)
+assert(wanderer(0, -0.9, 0, nil).state == "walk", "near-zero velocity does not stand")
+assert(wanderer(0, -3, 1, nil).state == "walk", "a fast fall is not stood")
+assert(wanderer(0, -0.9, 1, function(w) w.standing_in = "default:water" end).state == "walk",
+	"a sheep in water keeps walking")
+assert(wanderer(0, -0.9, 1, function(w) w.standing_on = "air" end).state == "walk",
+	"a sheep off the ground keeps walking")
+assert(wanderer(0, -0.9, 1, nil).state == "stand", "control: the drop stands it")
+assert(wanderer(0, -0.9, 1, function(w) flock.states[w] = {blocked = 0, pull = {x = 0, y = 0, z = -100, left = 5, check_at = 5, last = {x = 0, z = 40}}} end).state == "walk",
+	"a pulled sheep is the pull's, not the ledge check's (it walks away from the drop)")
+nodes[key({x = 0, y = -2, z = 41})] = "mcl_core:stone" -- a one-block drop, not two
+assert(wanderer(0, -0.9, 1, nil).state == "walk", "a 1-block drop keeps walking")
+nodes[key({x = 0, y = -2, z = 41})] = nil
+
 -- 9. Far behind: set down beside the shepherd if no one sees it, not if someone does.
 local lost = make_sheep(60, 0)
 lost._villages_shepherd = c._id

@@ -826,6 +826,12 @@ local function stop_at_ledge(self)
 	local v = self.object:get_velocity()
 	-- Standing on ground reads about -0.9 (gravity each step); a fall is faster.
 	if not v or v.y < -2.5 or v.y > 2.5 then return end
+	-- Swimming, or not on the ground: water is not walkable, so every cell ahead would
+	-- read as a drop and pin the sheep.
+	local function def_of(name) return name and core.registered_nodes[name] end
+	if is_liquid(def_of(self.standing_in)) then return end
+	local on = def_of(self.standing_on)
+	if self.standing_on and not (on and on.walkable) then return end
 	local pos = self.object:get_pos()
 	if not pos then return end
 	-- The direction it is moving, not the one it faces: vanilla turns over several steps
