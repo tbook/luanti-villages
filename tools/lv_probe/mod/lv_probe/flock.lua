@@ -133,6 +133,78 @@ local function add_shepherds(area, count)
 	return added
 end
 
+-- lv_probe_flock_reach = true (#252): no day is run. From ground cells 15-80 nodes out of the village, in
+-- sixteen directions, the planner searches for the village centre as navigation.lua does (the
+-- same box, Manhattan heuristic) with a 4096 node budget (`game`), with the budget navigation.lua now
+-- uses for the distance (`scaled`), and with one large enough to say whether a route exists at all
+-- (`full`). One "reach" record: per start {status, nodes, steps, ms} of each.
+function flock.reach(center, emit, done)
+	local cells = dofile(core.get_modpath("living_villages") .. "/cells.lua")
+	local planner = dofile(core.get_modpath("living_villages") .. "/planner.lua")
+	local function ground_at(x, z)
+		for y = center.y + 40, center.y - 24, -1 do
+			local n = core.get_node_or_nil({x = x, y = y, z = z})
+			if n and n.name ~= "air" and n.name ~= "ignore" then
+				local up = {x = x, y = y + 1, z = z}
+				if cells.can_stand(up) then return up end
+				return nil
+			end
+		end
+	end
+	-- The goal is a cell near the village's bell (the village floor; the topmost ground at the
+	-- centre may be a hilltop).
+	local goal
+	local bells = {}
+	for _, obj in ipairs(core.get_objects_inside_radius(center, 200)) do
+		local e = obj:get_luaentity()
+		if e and e.name == VILLAGER then bells[#bells + 1] = vector.round(obj:get_pos()) end
+	end
+	-- (the villagers about the village centre; the nearest one's surroundings give the goal)
+	table.sort(bells, function(a, b) return flat(a, center) < flat(b, center) end)
+	for _, bell in ipairs(bells) do
+		for dx = -4, 4 do
+			for dz = -4, 4 do
+				for dy = -3, 1 do
+					local c = {x = bell.x + dx, y = bell.y + dy, z = bell.z + dz}
+					if not goal and cells.can_stand(c) then goal = c end
+				end
+			end
+		end
+	end
+	assert(goal, "no cell to route to (" .. #(bells or {}) .. " bells)")
+	-- navigation.lua's budget for a trip this far: 4096 up to 48 out, then with the square of the
+	-- distance, to five times that.
+	local function scaled_budget(start)
+		local reach = math.max(math.abs(goal.x - start.x), math.abs(goal.y - start.y), math.abs(goal.z - start.z))
+		return math.floor(math.min(4096 * 5, math.max(4096, 4096 * (reach / 48) ^ 2)))
+	end
+	local rows = {}
+	local function search(start, budget)
+		local reach = math.max(math.abs(goal.x - start.x), math.abs(goal.y - start.y), math.abs(goal.z - start.z))
+		local range = math.max(48, math.min(128, reach + 16))
+		local began = os.clock()
+		local path, visited, status = planner.find_path(start, cells.can_stand,
+			function(p) return p.x == goal.x and p.y == goal.y and p.z == goal.z end,
+			{range = range, max_nodes = budget, clear = cells.can_move,
+				heuristic = function(p) return planner.heuristic(p, goal) end})
+		return {status, visited, path and #path or nil, math.floor((os.clock() - began) * 1000)}
+	end
+	for _, r in ipairs({15, 30, 50, 60, 70, 80}) do
+		for k = 0, 15 do
+			local angle = k * math.pi / 8
+			local start = ground_at(math.floor(center.x + math.cos(angle) * r + 0.5),
+				math.floor(center.z + math.sin(angle) * r + 0.5))
+			if start then
+				rows[#rows + 1] = {r = r, k = k, start = {start.x, start.y, start.z},
+					game = search(start, 4096), scaled = search(start, scaled_budget(start)),
+					full = search(start, 200000)}
+			end
+		end
+	end
+	emit({type = "reach", goal = {goal.x, goal.y, goal.z}, rows = rows})
+	return done()
+end
+
 -- Steps once a second through PHASES; emits one record when done.
 function flock.run(area, emit, done)
 	local minp = {x = area.x1, y = area.y1, z = area.z1}
@@ -246,7 +318,16 @@ function flock.run(area, emit, done)
 					sleeping = s.e._villages_sleeping or nil,
 					route = s.e._villages_tavern_route and {s.e._villages_tavern_route.status, s.e._villages_tavern_route.reason,
 						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.status,
-						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.searched} or nil,
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.searched,
+						-- Where the search got to (#252): how far the nearest cell it reached was from the goal,
+						-- that cell, the start and the first target.
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.closest_distance,
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.closest and
+							{round1(s.e._villages_tavern_route.planner.closest.x), round1(s.e._villages_tavern_route.planner.closest.y), round1(s.e._villages_tavern_route.planner.closest.z)},
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.start and
+							{round1(s.e._villages_tavern_route.planner.start.x), round1(s.e._villages_tavern_route.planner.start.y), round1(s.e._villages_tavern_route.planner.start.z)},
+						s.e._villages_tavern_route.planner and s.e._villages_tavern_route.planner.candidates and s.e._villages_tavern_route.planner.candidates[1] and
+							{round1(s.e._villages_tavern_route.planner.candidates[1].x), round1(s.e._villages_tavern_route.planner.candidates[1].y), round1(s.e._villages_tavern_route.planner.candidates[1].z)}} or nil,
 					bedroute = s.e._villages_bed_route and {s.e._villages_bed_route.status, s.e._villages_bed_route.reason,
 						s.e._villages_bed_route.planner and s.e._villages_bed_route.planner.status,
 						s.e._villages_bed_route.planner and s.e._villages_bed_route.planner.searched} or nil,
@@ -315,6 +396,7 @@ function flock.run(area, emit, done)
 			end
 		end
 		core.log("action", "[lv_flock] countryside loaded")
+		if core.settings:get_bool("lv_probe_flock_reach", false) then return flock.reach(center, emit, done) end
 		core.after(5, step)
 	end)
 end

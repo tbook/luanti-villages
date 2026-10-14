@@ -1587,7 +1587,11 @@ do
 	local unreachable = new_entity()
 	unreachable.object = far.object
 	assert(planner_def.gopath(unreachable, {x = -2663 + 300, y = 0, z = 266}, nil, true) ~= nil)
-	settle()
+	-- A target this far gets the largest node budget (#252), so the search runs longer.
+	for _ = 1, 20 do
+		if unreachable._villages_goto_route.status ~= "planning" then break end
+		settle()
+	end
 	assert(unreachable._villages_goto_route.status == "retry", "the widened box is still capped")
 
 	-- A search still queued for one trip does not overwrite the next trip's route.

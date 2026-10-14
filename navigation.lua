@@ -33,6 +33,20 @@ local RANGE_CAP = 128
 local function planner_max_nodes()
 	return tonumber(core.settings and core.settings:get("living_villages_route_max_nodes")) or 4096
 end
+-- A far trip needs more nodes than a near one. Over hill ground a route is
+-- several times longer than the straight line (a 70 node trip took 250 to 310
+-- steps and 4500 to 8500 expanded nodes, #252), and a box twice as far out holds
+-- four times the cells. The budget is the setting up to 48 nodes out and grows
+-- with the square of the distance past that, to five times the setting. Searches
+-- are time-sliced (route_queue.lua), so a larger one waits longer; it does not
+-- stall the server.
+local BUDGET_FULL_REACH = 48
+local BUDGET_MAX_FACTOR = 5
+local function nodes_for_reach(reach)
+	local base = planner_max_nodes()
+	local scaled = base * (reach / BUDGET_FULL_REACH) ^ 2
+	return math.floor(math.min(base * BUDGET_MAX_FACTOR, math.max(base, scaled)))
+end
 local PATHFINDING = "gowp"
 local DOOR_USE_RADIUS = 2.5
 -- Door closes must outlive the villager that scheduled them: an entity can be
@@ -326,16 +340,18 @@ local function plan_stair_route(self, candidates, avoid)
 		return cells.can_stand(pos)
 	end
 	local range = planner_range()
+	local nearest_reach
 	for _, target in pairs(targets) do
 		local reach = math.max(math.abs(target.x - start.x), math.abs(target.y - start.y),
 			math.abs(target.z - start.z))
 		range = math.max(range, math.min(RANGE_CAP, reach + RANGE_MARGIN))
+		nearest_reach = math.min(nearest_reach or reach, reach)
 	end
 	local path, visited, status, details = planner.find_path(start, can_stand, function(pos)
 		return targets[pos.x .. ":" .. pos.y .. ":" .. pos.z] ~= nil
 	end, {
 		range = range,
-		max_nodes = planner_max_nodes(),
+		max_nodes = nodes_for_reach(nearest_reach),
 		checkpoint = route_queue.checkpoint,
 		heuristic = distance_to_target,
 		distance = distance_to_target,

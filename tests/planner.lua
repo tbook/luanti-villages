@@ -138,4 +138,15 @@ local none_round, _, none_round_status = planner.find_path({x = 1, y = 1, z = 0}
 	{range = 8, gate = is_gate, crossing = straight_only})
 assert(not none_round and none_round_status == "unreachable")
 
+-- Open ground: every cell between start and goal ties on f, and the search must
+-- follow one route rather than fill the box (#252). A 70 x 60 trip took about
+-- 4000 expansions before ties went to the deeper entry.
+local far_goal = {x = 70, y = 1, z = 60}
+local far_path, far_visited, far_status = planner.find_path({x = 0, y = 1, z = 0},
+	function(pos) return pos.y == 1 and pos.x >= -5 and pos.x <= 75 and pos.z >= -5 and pos.z <= 65 end,
+	function(pos) return pos.x == far_goal.x and pos.z == far_goal.z end,
+	{range = 128, max_nodes = 4096, heuristic = function(pos) return planner.heuristic(pos, far_goal) end})
+assert(far_status == "found" and far_path and #far_path == 131)
+assert(far_visited <= 200, "visited " .. far_visited)
+
 print("planner.lua: ok")
