@@ -819,6 +819,30 @@ local function pull_step(self, st, dtime)
 	return true
 end
 
+-- A flock sheep wandering by vanilla's rules: vanilla only looks for a drop as a stand
+-- turns into a walk, one node ahead, and a walk never checks again, so a sheep left on a
+-- platform (the pull rests at its edge) steps off it later (#255). Stand it instead.
+local function stop_at_ledge(self)
+	local v = self.object:get_velocity()
+	-- Standing on ground reads about -0.9 (gravity each step); a fall is faster.
+	if not v or v.y < -2.5 or v.y > 2.5 then return end
+	-- Swimming, or not on the ground: water is not walkable, so every cell ahead would
+	-- read as a drop and pin the sheep.
+	local function def_of(name) return name and core.registered_nodes[name] end
+	if is_liquid(def_of(self.standing_in)) then return end
+	local on = def_of(self.standing_on)
+	if self.standing_on and not (on and on.walkable) then return end
+	local pos = self.object:get_pos()
+	if not pos then return end
+	-- The direction it is moving, not the one it faces: vanilla turns over several steps
+	-- after it sets the velocity.
+	local speed = math.sqrt(v.x * v.x + v.z * v.z)
+	if speed < 0.1 then return end
+	if unsafe_ahead(self, pos, v.x / speed, v.z / speed) == "drop" then
+		self:stand()
+	end
+end
+
 local function install_sheep(def)
 	local original_custom = def.do_custom
 	local original_die = def.on_die
@@ -833,6 +857,10 @@ local function install_sheep(def)
 		local result
 		if original_custom then result = original_custom(self, dtime) end
 		local st = states[self]
+		if result ~= false and self._villages_shepherd and self.state == "walk"
+			and not (st and st.pull) then
+			stop_at_ledge(self)
+		end
 		if not st or not st.pull or result == false then return result end
 		-- Skip do_states: its wander would turn the sheep off the shepherd.
 		if pull_step(self, st, dtime) then return false end
