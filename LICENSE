@@ -1,3 +1,11 @@
+Living Villages includes code adapted from Mineclonia's
+`mods/ENTITIES/mobs_mc/villager.lua`, which is licensed under the GNU General
+Public License, version 3 (GPL-3.0). The remaining code in this mod is also
+distributed under GPL-3.0.
+
+The bundled media has additional upstream licenses and credits. See
+[`LICENSE-media.md`](LICENSE-media.md) for the media-specific notices.
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

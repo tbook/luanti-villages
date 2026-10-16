@@ -1,0 +1,4 @@
+# Keep development tooling and CI out of source archives and ContentDB packages.
+/tests/ export-ignore
+/tools/ export-ignore
+/.github/ export-ignore
