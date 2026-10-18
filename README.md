@@ -72,7 +72,7 @@ ordinary stairs and wooden doors. Iron doors still block them.
 
 - [VoxeLibre](https://content.luanti.org/packages/wuzzy/mineclone2/) 0.92.3. Other versions
   may work but haven't been tested.
-- These VoxeLibre mods, all included in the game: `mobs_mc`, `mcl_beds`, `mcl_villages`,
+- These VoxeLibre mods: `mobs_mc`, `mcl_beds`, `mcl_villages`,
   `mcl_decor`, and `mcl_itemframes`.
 - Optional: `doc_identifier` (the Lookup Tool) and `mcl_fishing`.
 
