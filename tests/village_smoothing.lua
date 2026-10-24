@@ -46,9 +46,9 @@ assert(t.violations == 0, "slope walkable, got " .. t.violations)
 
 -- Protected columns stay byte-for-byte at their source height and constrain
 -- the skirt slope as fixed neighbors.
-local protected = {{x0 = -5, z0 = -4, x1 = -4, z1 = 5}}
+local protected = {{x0 = -5, z0 = -4, x1 = -4, z1 = 5, margin = 1}}
 t = smoothing.targets(pads, flat(14), cfg, protected)
-for z = -4, 5 do
+for z = -5, 6 do
 	assert(t.at(-5, z) == 14 and t.was(-5, z) == 14 and t.pad(-5, z) == nil, "protected column is fixed")
 end
 
@@ -355,6 +355,15 @@ local fake = {
 			end end end
 			return data
 		end
+		function vm:set_data(data)
+			local va = VoxelArea:new({MinEdge = a, MaxEdge = b})
+			for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
+				local name = names[data[va:index(x, y, z)]]
+				local k = x .. "," .. y .. "," .. z
+				if name ~= at(x, y, z) then world[k] = name end
+			end end end
+		end
+		function vm:write_to_map() end
 		return vm
 	end,
 }
@@ -433,16 +442,27 @@ assert(joined:find("unloaded blocks skipped", 1, true), "reports skipped blocks"
 -- node in those inclusive XZ columns stays identical while neighboring terrain
 -- remains eligible for smoothing and hole filling.
 local protected_columns = {}
+-- A real tree in the smoothing zone reaches into the protected columns.
+world["12,14,1"] = "mcl_core:dirt_with_grass"
+for y = 15, 19 do world["12," .. y .. ",1"] = "mcl_core:tree" end
+for dx = -2, 2 do for dz = -2, 2 do for y = 19, 20 do
+	local x, z = 12 + dx, 1 + dz
+	local k = x .. "," .. y .. "," .. z
+	if not world[k] then world[k] = "mcl_core:leaves" end
+end end end
 for x = 13, 14 do for z = 0, 2 do for y = -20, 24 do
 	protected_columns[key(x, y, z)] = at(x, y, z)
 end end end
 local protected_plan = plan_of({0, 0, 10, "mcl_core:dirt_with_grass"},
 	{40, 0, 14, "mcl_core:dirt_with_grass"}, {80, 0, 20, "mcl_core:dirt_with_grass"})
-local protected_env = setmetatable({clear_trees = function() end}, {__index = env})
+local protected_env = setmetatable({clear_trees = function(zone, protected)
+	return fragments.clear_trees(zone, nil, fake, protected)
+end}, {__index = env})
 local ok, report = smoothing.terraform(protected_plan, nil, protected_env, nil, {
 	no_fallback = true, protected = {{x0 = 13, z0 = 0, x1 = 14, z1 = 2}},
 })
 assert(ok and report and report.unloaded_blocks >= 0, "external pipeline returns stats")
+assert(at(12, 17, 1) == "air", "real tree cleanup ran in the combined pipeline")
 for x = 13, 14 do for z = 0, 2 do for y = -20, 24 do
 	assert(at(x, y, z) == protected_columns[key(x, y, z)], "protected pipeline column changed: " .. key(x, y, z))
 end end end
@@ -452,5 +472,19 @@ assert(smoothing.terraform({}, nil, env) == false and fell, "fallback on empty p
 fell = nil
 local external_ok, external_reason = smoothing.terraform({}, nil, env, nil, {no_fallback = true})
 assert(external_ok == false and external_reason == "empty plan" and not fell, "external API reports failure without vanilla fallback")
+
+-- An external call rejects an unloaded mapblock before tree cleanup can write.
+local cleared = 0
+local unloaded_env = setmetatable({
+	load_node = function(pos)
+		if pos.x < -30 then return {name = "ignore"} end
+		return {name = at(pos.x, pos.y, pos.z)}
+	end,
+	clear_trees = function() cleared = cleared + 1 end,
+}, {__index = env})
+local unloaded_ok, unloaded_reason = smoothing.terraform(
+	plan_of({-40, 0, 10, "mcl_core:dirt_with_grass"}), nil, unloaded_env, nil, {no_fallback = true})
+assert(unloaded_ok == false and unloaded_reason:find("unloaded terrain", 1, true), "unloaded external terrain is reported")
+assert(cleared == 0 and world["-40,10,0"] == nil, "unloaded preflight fails before writes")
 
 print("village_smoothing: ok")

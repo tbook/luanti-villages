@@ -182,9 +182,14 @@ assert(writes == 1)
 map = {}
 tree(0, 0)
 local protected_before = {}
-for y = 0, 8 do protected_before[y] = at(0, y, 0) end
-fragments.clear_trees({box(-1, 0, -1, 1, 8, 1)}, nil, engine(), {{x0 = 0, z0 = 0, x1 = 0, z1 = 0}})
-for y = 0, 8 do assert(at(0, y, 0) == protected_before[y], "protected tree column unchanged at y=" .. y) end
+for x = 0, 1 do
+	protected_before[x] = {}
+	for y = 0, 8 do protected_before[x][y] = at(x, y, 0) end
+end
+fragments.clear_trees({box(-1, 0, -1, 1, 8, 1)}, nil, engine(), {{x0 = 0, z0 = 0, x1 = 0, z1 = 0, margin = 1}})
+for x = 0, 1 do for y = 0, 8 do
+	assert(at(x, y, 0) == protected_before[x][y], "protected tree column unchanged at " .. x .. "," .. y)
+end end
 
 -- Only a leaf of the tree inside the zone still removes the whole tree.
 map = {}

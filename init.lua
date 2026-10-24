@@ -611,11 +611,28 @@ do
 	local api = rawget(_G, "living_villages") or {}
 	_G.living_villages = api
 	local fragments = dofile(core.get_modpath("living_villages") .. "/village_fragments.lua")
+	local terrain_settlements = rawget(_G, "settlements")
+	local terrain_mcl_vars = rawget(_G, "mcl_vars")
 	api.terrain = {
-		terraform = function(plan, pr, env, options)
+		terraform = function(plan, pr, options)
 			local opts = {}
 			for key, value in pairs(options or {}) do opts[key] = value end
 			opts.no_fallback = true
+			local overrides = opts.env or {}
+			local env = {
+				engine = overrides.engine or core,
+				settlements = overrides.settlements or terrain_settlements,
+			}
+			for key, value in pairs(overrides) do env[key] = value end
+			local engine = env.engine
+			local structure_test = fragments.structure_test(engine)
+			env.load_node = env.load_node or (terrain_mcl_vars and function(pos) return terrain_mcl_vars.get_node(pos) end)
+			env.scan = env.scan or function(area)
+				return fragments.scan_structures(area, structure_test, engine)
+			end
+			env.clear_trees = env.clear_trees or function(zone, protected)
+				return fragments.clear_trees(zone, nil, engine, protected)
+			end
 			return smoothing.terraform(plan, pr, env, opts.config, opts)
 		end,
 		targets = smoothing.targets,

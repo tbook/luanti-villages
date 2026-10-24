@@ -481,7 +481,12 @@ function M.terraform(plan, pr, env, config, options)
 	config = config or M.config
 	local engine = env.engine
 	options = options or {}
-	local schematic_table = options.schematic_table or env.settlements.schematic_table
+	local settlements = env.settlements or {}
+	local schematic_table = options.schematic_table or settlements.schematic_table
+	local surface_mat = options.surface_mat or settlements.surface_mat
+	local terrain_env = setmetatable({
+		settlements = {surface_mat = surface_mat},
+	}, {__index = env})
 	local pads, why = M.pads(plan, schematic_table, config)
 	local function fall_back(reason)
 		if options.no_fallback then return false, reason end
@@ -490,6 +495,8 @@ function M.terraform(plan, pr, env, config, options)
 		return false
 	end
 	if not pads or #pads == 0 then return fall_back(why or "empty plan") end
+	if type(surface_mat) ~= "table" then return fall_back("surface material table is unavailable") end
+	if type(env.load_node) ~= "function" then return fall_back("node loading service is unavailable") end
 	local area = area_of(pads, config)
 
 	local started = engine.get_us_time and engine.get_us_time()
@@ -505,12 +512,18 @@ function M.terraform(plan, pr, env, config, options)
 	end}, {__index = engine})
 	-- Trees are cleared out to the same reach as the smoothing, and the tree fill
 	-- may run on sideways past it, so load a bit further than the area.
-	local margin = fragments.config.cap_radius
+	local margin = math.max(fragments.config.cap_radius,
+		(fragments.config.orphan_margin or 0) + (fragments.config.leaf_reach or 0))
 	local loading = {
-		minp = {x = area.minp.x - margin, y = area.minp.y, z = area.minp.z - margin},
-		maxp = {x = area.maxp.x + margin, y = area.maxp.y, z = area.maxp.z + margin},
+		minp = {x = area.minp.x - margin, y = area.minp.y - fragments.config.cap_height, z = area.minp.z - margin},
+		maxp = {x = area.maxp.x + margin, y = area.maxp.y + fragments.config.cap_height, z = area.maxp.z + margin},
 	}
 	local missing = M.load_area(loading, config, env)
+	local hole_area = holes.area(pads)
+	local hole_missing = M.load_area(hole_area, config, env)
+	if options.no_fallback and (missing > 0 or hole_missing > 0) then
+		return false, ("unloaded terrain: %d tree/smoothing blocks and %d hole blocks unavailable"):format(missing, hole_missing)
+	end
 
 	local zone = {}
 	for _, p in ipairs(pads) do
@@ -530,7 +543,7 @@ function M.terraform(plan, pr, env, config, options)
 	end
 	include_box(tree_stats and tree_stats.written)
 
-	local lookup, reason = terrain.heights(area, env.settlements.surface_mat, engine, true)
+	local lookup, reason = terrain.heights(area, surface_mat, engine, true)
 	if not lookup then return fall_back(reason) end
 	-- Structures (ruined portals, outposts) are not terrain: leave them and the
 	-- ground just around them alone. The planner keeps them only a few blocks from
@@ -561,10 +574,8 @@ function M.terraform(plan, pr, env, config, options)
 			started and (", " .. math.floor((engine.get_us_time() - started) / 1000) .. " ms") or ""))
 
 	-- Then the holes the smoothing leaves: the gaps between buildings and where paths go.
-	local hole_area = holes.area(pads)
-	local hole_missing = M.load_area(hole_area, config, env)
 	local hole_started = engine.get_us_time and engine.get_us_time()
-	local hole_env = setmetatable({engine = writer}, {__index = env})
+	local hole_env = setmetatable({engine = writer, settlements = terrain_env.settlements}, {__index = env})
 	local plan, hole_reason = holes.run(pads, hole_area, hole_env, nil, options.protected)
 	if plan then
 		engine.log("action", ("[living_villages] holes: %d columns filled, %d ramped (%d nodes), %d dropped over a limit, steps over 1 block %d -> %d, %d unloaded blocks skipped%s")
@@ -572,6 +583,7 @@ function M.terraform(plan, pr, env, config, options)
 				hole_started and (", " .. math.floor((engine.get_us_time() - hole_started) / 1000) .. " ms") or ""))
 	else
 		engine.log("warning", "[living_villages] holes not filled: " .. tostring(hole_reason))
+		if options.no_fallback then return false, "hole filling failed: " .. tostring(hole_reason) end
 	end
 	if written.minp.x == math.huge then written = nil end
 	local stats = {changed = stats.changed, cut = stats.cut, filled = stats.filled, steepest = stats.steepest,

@@ -8,18 +8,32 @@ and protected rectangles use inclusive endpoints.
 
 ```lua
 local terrain = living_villages.terrain
-local ok, result = terrain.terraform(plan, pr, env, {
-	config = config,                 -- optional smoothing settings
-	schematic_table = schematics,    -- optional; defaults to settlements' table
-	protected = {{x0=0, z0=0, x1=8, z1=8, margin=1}},
+local plan = {{
+	name = "my_building",
+	pos = {x = 100, y = 12, z = 100}, -- y is the surface Y
+	rotat = "0",
+	surface_mat = "mcl_core:dirt_with_grass",
+}}
+local schematics = {{name = "my_building", hwidth = 5, hdepth = 7, hheight = 6}}
+local ok, result = living_villages.terrain.terraform(plan, nil, {
+	schematic_table = schematics,
+	protected = {{x0 = 80, z0 = 80, x1 = 95, z1 = 95, margin = 1}},
 })
+if not ok then minetest.log("warning", result) end
 ```
 
+Use the actual dimensions of each schematic in `hwidth`, `hdepth`, and
+`hheight`. The example assumes the target map area is already loaded.
+
 `plan` is a list of settlement-style entries (`pos`, `name`, `rotat`, and
-`surface_mat`). `env` supplies `engine`, `settlements.surface_mat`, `load_node`,
-`scan`, and `clear_trees`; `settlements` can be supplied for its surface material
-table. The API never calls VoxeLibre's original terraform. It returns `false,
-reason` when it cannot load or plan the work, and `true, stats` on success.
+`surface_mat`). The API uses the loaded engine, settlements, and `mcl_vars` globals
+to read terrain and clear trees. A custom schematic table does not require a
+settlements table; supply `surface_mat` if settlements is unavailable. Advanced
+callers may inject an `env` table with `engine`, `settlements`, `load_node`,
+`scan`, and `clear_trees`. The API never calls VoxeLibre's original terraform.
+It returns `false, reason` when required terrain is unavailable or planning
+fails, and `true, stats` on success. It checks the whole smoothing, tree, and hole
+area for unloaded mapblocks before writing any terrain.
 `stats` contains changed/cut/filled columns, steep steps and walls, tree removals,
 hole fills and ramps, unloaded block counts, and `written`, the inclusive
 `minp`/`maxp` XYZ bounds of nodes written by tree cleanup, smoothing, and hole
