@@ -398,26 +398,188 @@ function M.targets(pads, height_at, config, protected)
 	return result
 end
 
--- The box read and written: the pads and the radius around them, from
--- `below` under the lowest pad to `above` over the highest.
-local function area_of(pads, config)
-	local area
-	for _, p in ipairs(pads) do
-		local reach = config.margin + config.radius
-		local box = {
-			minp = {x = p.x0 - reach, y = p.y - config.below, z = p.z0 - reach},
-			maxp = {x = p.x1 + reach, y = p.y + config.above, z = p.z1 + reach},
-		}
-		if not area then
-			area = box
-		else
-			for _, axis in ipairs({"x", "y", "z"}) do
-				area.minp[axis] = math.min(area.minp[axis], box.minp[axis])
-				area.maxp[axis] = math.max(area.maxp[axis], box.maxp[axis])
-			end
-		end
+local function merge_box(area, box)
+	if not box then return area end
+	if not area then
+		return {minp = {x = box.minp.x, y = box.minp.y, z = box.minp.z},
+			maxp = {x = box.maxp.x, y = box.maxp.y, z = box.maxp.z}}
+	end
+	for _, axis in ipairs({"x", "y", "z"}) do
+		area.minp[axis] = math.min(area.minp[axis], box.minp[axis])
+		area.maxp[axis] = math.max(area.maxp[axis], box.maxp[axis])
 	end
 	return area
+end
+
+-- Shared bounds for the actual stages and the public pre-emerge query. Keep the
+-- boxes that each stage uses separate for loading and work, then take their union
+-- plus direct column reads/writes that can leave those stage boxes.
+local function bounds_for_pads(pads, config, hole_config)
+	local area, zones
+	local reach = config.margin + config.radius
+	for _, p in ipairs(pads) do
+		local box = {minp = {x = p.x0 - reach, y = p.y - config.below, z = p.z0 - reach},
+			maxp = {x = p.x1 + reach, y = p.y + config.above, z = p.z1 + reach}}
+		area = merge_box(area, box)
+		zones = zones or {}
+		zones[#zones + 1] = {minp = {x = p.x0 - reach, y = 0, z = p.z0 - reach},
+			maxp = {x = p.x1 + reach, y = 0, z = p.z1 + reach}}
+	end
+	if not area then return nil, "empty plan" end
+	local hole_area = holes.area(pads, hole_config)
+	for _, zone in ipairs(zones) do
+		zone.minp.y, zone.maxp.y = area.minp.y, area.maxp.y
+	end
+	local tree_margin = math.max(fragments.config.cap_radius,
+		(fragments.config.orphan_margin or 0) + (fragments.config.leaf_reach or 0))
+	local tree_area = {
+		minp = {x = area.minp.x - tree_margin, y = area.minp.y - fragments.config.cap_height,
+			z = area.minp.z - tree_margin},
+		maxp = {x = area.maxp.x + tree_margin, y = area.maxp.y + fragments.config.cap_height,
+			z = area.maxp.z + tree_margin},
+	}
+	local whole = merge_box(nil, tree_area)
+	whole = merge_box(whole, hole_area)
+	-- Smoothing can fill twenty nodes below its target. Hole filling treats a
+	-- bottomless shaft as area.minp.y - 1, then its lava fill reaches twenty lower.
+	local max_target = -math.huge
+	for _, p in ipairs(pads) do
+		max_target = math.max(max_target, p.y)
+	end
+	whole.minp.y = math.min(whole.minp.y, area.minp.y - config.cap - 20,
+		hole_area.minp.y - 21)
+	-- put_decor probes/clears growth up to 32 nodes above the new surface. A
+	-- cliff ramp may raise a hole column by cliff_rise beyond its spill height.
+	whole.maxp.y = math.max(whole.maxp.y, area.maxp.y + config.cut_clear,
+		max_target + config.cap + 32,
+		hole_area.maxp.y + (hole_config.cliff_rise or 0) + 32)
+	return {smoothing = area, tree = tree_area, holes = hole_area, zones = zones, union = whole}
+end
+
+local function integer(value)
+	return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
+		and value % 1 == 0
+end
+
+local function validate_config(config, hole_config)
+	if type(config) ~= "table" then return nil, "config must be a table" end
+	if type(hole_config) ~= "table" then return nil, "hole config is unavailable" end
+	for _, key in ipairs({"margin", "radius", "cap", "below", "above", "structure_margin", "cut_clear"}) do
+		if not integer(config[key]) or config[key] < 0 then return nil, "invalid config." .. key end
+	end
+	if not integer(config.wall) or config.wall < 1 then return nil, "invalid config.wall" end
+	if not integer(config.block) or config.block < 1 then return nil, "invalid config.block" end
+	for _, key in ipairs({"margin", "below", "above", "cliff_rise"}) do
+		if not integer(hole_config[key]) or hole_config[key] < 0 then return nil, "invalid hole_config." .. key end
+	end
+	return true
+end
+
+local function validate_protected(protected)
+	if protected == nil then return true end
+	if type(protected) ~= "table" then return nil, "protected must be a list" end
+	local count, max_key = 0, 0
+	for key, rect in pairs(protected) do
+		if not integer(key) or key < 1 or type(rect) ~= "table" then
+			return nil, "protected must be a dense list of rectangles"
+		end
+		count, max_key = count + 1, math.max(max_key, key)
+		for _, field in ipairs({"x0", "z0", "x1", "z1"}) do
+			if not integer(rect[field]) then return nil, "invalid protected rectangle " .. key .. ": " .. field end
+		end
+		if rect.x0 > rect.x1 or rect.z0 > rect.z1 then
+			return nil, "invalid protected rectangle " .. key .. ": bounds are reversed"
+		end
+		if rect.margin ~= nil and (not integer(rect.margin) or rect.margin < 0) then
+			return nil, "invalid protected rectangle " .. key .. ": margin"
+		end
+	end
+	if count ~= max_key then return nil, "protected must be a dense list of rectangles" end
+	return true
+end
+
+local function prepare_plan(plan, schematics, surface_y)
+	if type(plan) ~= "table" or #plan == 0 then return nil, "empty plan" end
+	if type(schematics) ~= "table" then return nil, "schematic table is required" end
+	local length, count = 0, 0
+	for key in pairs(plan) do
+		if not integer(key) or key < 1 then return nil, "plan must be a dense list" end
+		length, count = math.max(length, key), count + 1
+	end
+	if count ~= length or length ~= #plan then return nil, "plan must be a dense list" end
+	if surface_y ~= nil then
+		if type(surface_y) ~= "table" or not integer(surface_y.min) or not integer(surface_y.max)
+				or surface_y.min > surface_y.max then
+			return nil, "surface_y must contain inclusive integer min and max"
+		end
+	end
+	local copied = {}
+	for index, entry in ipairs(plan) do
+		if type(entry) ~= "table" or type(entry.name) ~= "string" or type(entry.pos) ~= "table"
+				or not integer(entry.pos.x) or not integer(entry.pos.z) then
+			return nil, "invalid plan entry " .. index
+		end
+		if entry.rotat ~= nil and entry.rotat ~= "0" and entry.rotat ~= "90"
+				and entry.rotat ~= "180" and entry.rotat ~= "270" then
+			return nil, "invalid rotation for " .. entry.name
+		end
+		local found
+		for _, schematic in ipairs(schematics) do
+			if type(schematic) == "table" and schematic.name == entry.name then
+				found = schematic
+				break
+			end
+		end
+		if not found then return nil, "unknown building " .. entry.name end
+		for _, key in ipairs({"hwidth", "hdepth", "hheight"}) do
+			if not integer(found[key]) or found[key] < 1 then
+				return nil, "invalid schematic " .. entry.name .. ": " .. key
+			end
+		end
+		local low, high = entry.pos.y, entry.pos.y
+		if entry.pos.y == nil then
+			if not surface_y then return nil, "plan entry " .. entry.name .. " needs pos.y or surface_y" end
+			low, high = surface_y.min, surface_y.max
+		elseif not integer(entry.pos.y) then
+			return nil, "invalid surface y for " .. entry.name
+		end
+		for _, y in ipairs({low, high}) do
+			local copy = {name = entry.name, rotat = entry.rotat,
+				pos = {x = entry.pos.x, y = y, z = entry.pos.z}, surface_mat = entry.surface_mat}
+			copied[#copied + 1] = copy
+		end
+	end
+	return copied
+end
+
+local function mapblock_bounds(box)
+	local function down(value) return math.floor(value / 16) * 16 end
+	local function up(value) return math.floor(value / 16) * 16 + 15 end
+	return {minp = {x = down(box.minp.x), y = down(box.minp.y), z = down(box.minp.z)},
+		maxp = {x = up(box.maxp.x), y = up(box.maxp.y), z = up(box.maxp.z)}}
+end
+
+-- The read-only, deterministic query used before a caller emerges its area.
+function M.volume(plan, schematic_table, options, engine)
+	if options == nil then options = {} end
+	if type(options) ~= "table" then return nil, "options must be a table" end
+	if options.env ~= nil and type(options.env) ~= "table" then return nil, "options.env must be a table" end
+	engine = engine or (options.env and options.env.engine) or core
+	if type(engine) ~= "table" then return nil, "engine must be a table" end
+	local config = options.config or M.config
+	local hole_config = holes.configured(engine)
+	local valid, reason = validate_config(config, hole_config)
+	if not valid then return nil, reason end
+	valid, reason = validate_protected(options.protected)
+	if not valid then return nil, reason end
+	local prepared
+	prepared, reason = prepare_plan(plan, schematic_table, options.surface_y)
+	if not prepared then return nil, reason end
+	local pads
+	pads, reason = M.pads(prepared, schematic_table, config)
+	if not pads then return nil, reason end
+	local bounds = bounds_for_pads(pads, config, hole_config)
+	return mapblock_bounds(bounds.union)
 end
 
 -- Loads the mapblocks of the area that exist, one probe per block, and returns
@@ -497,7 +659,14 @@ function M.terraform(plan, pr, env, config, options)
 	if not pads or #pads == 0 then return fall_back(why or "empty plan") end
 	if type(surface_mat) ~= "table" then return fall_back("surface material table is unavailable") end
 	if type(env.load_node) ~= "function" then return fall_back("node loading service is unavailable") end
-	local area = area_of(pads, config)
+	local hole_config = holes.configured(engine)
+	local valid
+	valid, why = validate_config(config, hole_config)
+	if not valid then return fall_back(why) end
+	local bounds
+	bounds, why = bounds_for_pads(pads, config, hole_config)
+	if not bounds then return fall_back(why) end
+	local area = bounds.smoothing
 
 	local started = engine.get_us_time and engine.get_us_time()
 	local written = {minp = {x = math.huge, y = math.huge, z = math.huge},
@@ -512,28 +681,14 @@ function M.terraform(plan, pr, env, config, options)
 	end}, {__index = engine})
 	-- Trees are cleared out to the same reach as the smoothing, and the tree fill
 	-- may run on sideways past it, so load a bit further than the area.
-	local margin = math.max(fragments.config.cap_radius,
-		(fragments.config.orphan_margin or 0) + (fragments.config.leaf_reach or 0))
-	local loading = {
-		minp = {x = area.minp.x - margin, y = area.minp.y - fragments.config.cap_height, z = area.minp.z - margin},
-		maxp = {x = area.maxp.x + margin, y = area.maxp.y + fragments.config.cap_height, z = area.maxp.z + margin},
-	}
-	local missing = M.load_area(loading, config, env)
-	local hole_area = holes.area(pads)
+	local missing = M.load_area(bounds.tree, config, env)
+	local hole_area = bounds.holes
 	local hole_missing = M.load_area(hole_area, config, env)
 	if options.no_fallback and (missing > 0 or hole_missing > 0) then
 		return false, ("unloaded terrain: %d tree/smoothing blocks and %d hole blocks unavailable"):format(missing, hole_missing)
 	end
 
-	local zone = {}
-	for _, p in ipairs(pads) do
-		local reach = config.margin + config.radius
-		zone[#zone + 1] = {
-			minp = {x = p.x0 - reach, y = area.minp.y, z = p.z0 - reach},
-			maxp = {x = p.x1 + reach, y = area.maxp.y, z = p.z1 + reach},
-		}
-	end
-	local tree_stats = env.clear_trees(zone, options.protected)
+	local tree_stats = env.clear_trees(bounds.zones, options.protected)
 	local function include_box(box)
 		if not box then return end
 		for _, axis in ipairs({"x", "y", "z"}) do
@@ -576,7 +731,7 @@ function M.terraform(plan, pr, env, config, options)
 	-- Then the holes the smoothing leaves: the gaps between buildings and where paths go.
 	local hole_started = engine.get_us_time and engine.get_us_time()
 	local hole_env = setmetatable({engine = writer, settlements = terrain_env.settlements}, {__index = env})
-	local plan, hole_reason = holes.run(pads, hole_area, hole_env, nil, options.protected)
+	local plan, hole_reason = holes.run(pads, hole_area, hole_env, hole_config, options.protected)
 	if plan then
 		engine.log("action", ("[living_villages] holes: %d columns filled, %d ramped (%d nodes), %d dropped over a limit, steps over 1 block %d -> %d, %d unloaded blocks skipped%s")
 			:format(#plan.cells - plan.ramped, plan.ramped, plan.nodes, plan.dropped, plan.cliffs_before, plan.cliffs_after, hole_missing,

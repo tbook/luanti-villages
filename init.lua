@@ -614,6 +614,11 @@ do
 	local terrain_settlements = rawget(_G, "settlements")
 	local terrain_mcl_vars = rawget(_G, "mcl_vars")
 	api.terrain = {
+		volume = function(plan, schematic_table, options)
+			local env = type(options) == "table" and options.env
+			local engine = type(env) == "table" and env.engine or core
+			return smoothing.volume(plan, schematic_table, options, engine)
+		end,
 		terraform = function(plan, pr, options)
 			local opts = {}
 			for key, value in pairs(options or {}) do opts[key] = value end

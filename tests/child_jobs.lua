@@ -144,6 +144,16 @@ mcl_mobs = {mob_class = {
 
 dofile("init.lua")
 
+-- The public candidate query is wired through init.lua and needs no map read,
+-- emerge, or private module access.
+local public_volume, public_volume_reason = living_villages.terrain.volume({
+	{name = "candidate", pos = {x = 0, z = 0}, rotat = "90"},
+}, {{name = "candidate", hwidth = 5, hdepth = 7, hheight = 6}}, {
+	surface_y = {min = 10, max = 12},
+})
+assert(public_volume and not public_volume_reason and public_volume.minp.x < 0
+	and public_volume.maxp.y > 12, "public API returns a candidate volume without loaded-world services")
+
 local function make_villager(id, fields)
 	local props = {mesh = "old.b3d", textures = {"old.png"}}
 	local self = {name = "mobs_mc:villager", _id = id, _profession = "unemployed"}
