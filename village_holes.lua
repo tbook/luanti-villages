@@ -404,13 +404,21 @@ M.is_ice = is_ice
 -- unloaded one are skipped. `env` has settlements.surface_mat, engine and, optionally,
 -- scan (village_fragments.scan_structures over an area). Returns the plan, or nil
 -- and a reason.
-function M.run(pads, area, env, config)
+function M.run(pads, area, env, config, protected)
 	local engine = env.engine
 	config = config or M.configured(engine)
 	local lookup, reason = terrain.heights(area, env.settlements.surface_mat, engine, true)
 	if not lookup then return nil, reason end
 	local structures = env.scan and env.scan(area)
 	local m, ring = config.structure_margin, config.ring
+	local function is_protected(x, z)
+		for _, rect in ipairs(protected or {}) do
+			local margin = rect.margin or 0
+			if x >= rect.x0 - margin and x <= rect.x1 + margin
+					and z >= rect.z0 - margin and z <= rect.z1 + margin then return true end
+		end
+		return false
+	end
 	local function in_yard(x, z, p, extra)
 		return x >= p.yx0 - extra and x <= p.yx1 + extra and z >= p.yz0 - extra and z <= p.yz1 + extra
 	end
@@ -438,6 +446,7 @@ function M.run(pads, area, env, config)
 			return false
 		end,
 		protected = function(x, z)
+			if is_protected(x, z) then return true end
 			for _, p in ipairs(pads) do
 				if in_yard(x, z, p, 0) then return true end
 			end

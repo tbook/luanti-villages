@@ -173,8 +173,23 @@ local total = count("mcl_core:tree") + count("mcl_core:leaves")
 local stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine())
 assert(stats.seeds == 1 and stats.clipped == 0, "one fill, " .. stats.seeds)
 assert(stats.removed == total, "all " .. total .. " nodes removed, got " .. stats.removed)
+assert(stats.written and stats.written.minp.x <= -2 and stats.written.maxp.x >= 2,
+	"tree cleanup reports its actual write bounds")
 assert(count("mcl_core:tree") == 0 and count("mcl_core:leaves") == 0, "no stub or floating leaf")
 assert(writes == 1)
+
+-- A tree fill and the follow-up cleanup never write into a protected column.
+map = {}
+tree(0, 0)
+local protected_before = {}
+for x = 0, 1 do
+	protected_before[x] = {}
+	for y = 0, 8 do protected_before[x][y] = at(x, y, 0) end
+end
+fragments.clear_trees({box(-1, 0, -1, 1, 8, 1)}, nil, engine(), {{x0 = 0, z0 = 0, x1 = 0, z1 = 0, margin = 1}})
+for x = 0, 1 do for y = 0, 8 do
+	assert(at(x, y, 0) == protected_before[x][y], "protected tree column unchanged at " .. x .. "," .. y)
+end end
 
 -- Only a leaf of the tree inside the zone still removes the whole tree.
 map = {}

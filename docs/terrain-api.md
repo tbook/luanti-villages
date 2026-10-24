@@ -1,0 +1,52 @@
+# Terrain API
+
+`living_villages.terrain` is available after Living Villages loads. It exposes the
+small set of terrain helpers used by mods that place their own buildings.
+
+Coordinates use world X/Z columns. Pad `y` is the surface Y. Building footprints
+and protected rectangles use inclusive endpoints.
+
+```lua
+local terrain = living_villages.terrain
+local plan = {{
+	name = "my_building",
+	pos = {x = 100, y = 12, z = 100}, -- y is the surface Y
+	rotat = "0",
+	surface_mat = "mcl_core:dirt_with_grass",
+}}
+local schematics = {{name = "my_building", hwidth = 5, hdepth = 7, hheight = 6}}
+local ok, result = living_villages.terrain.terraform(plan, nil, {
+	schematic_table = schematics,
+	protected = {{x0 = 80, z0 = 80, x1 = 95, z1 = 95, margin = 1}},
+})
+if not ok then minetest.log("warning", result) end
+```
+
+Use the actual dimensions of each schematic in `hwidth`, `hdepth`, and
+`hheight`. The example assumes the target map area is already loaded.
+
+`plan` is a list of settlement-style entries (`pos`, `name`, `rotat`, and
+`surface_mat`). The API uses the loaded engine, settlements, and `mcl_vars` globals
+to read terrain and clear trees. A custom schematic table does not require a
+settlements table; supply `surface_mat` if settlements is unavailable. Advanced
+callers may inject an `env` table with `engine`, `settlements`, `load_node`,
+`scan`, and `clear_trees`. The API never calls VoxeLibre's original terraform.
+It returns `false, reason` when required terrain is unavailable or planning
+fails, and `true, stats` on success. It checks the whole smoothing, tree, and hole
+area for unloaded mapblocks before writing any terrain.
+`stats` contains changed/cut/filled columns, steep steps and walls, tree removals,
+hole fills and ramps, unloaded block counts, and `written`, the inclusive
+`minp`/`maxp` XYZ bounds of nodes written by tree cleanup, smoothing, and hole
+filling (nil if no nodes changed).
+
+`pads(plan, schematic_table, config)` and `targets(pads, height_at, config,
+protected)` are pure planning helpers. `pads` returns footprint and yard boxes;
+each pad's `y` is the surface Y. `targets` calls `height_at(x,z)` and returns
+height lookups and smoothing diagnostics. `structure_test(engine, extra_words)`
+returns a predicate that identifies structure node names.
+
+`terraform` writes terrain and clears trees. `pads`, `targets`, and
+`structure_test` do not read or write the world. Protected rectangles are tables
+with inclusive `x0`, `z0`, `x1`, `z1`; optional nonnegative `margin` expands the
+rectangle. They remain fixed slope constraints and are excluded from tree cleanup,
+smoothing, hole filling, and ramps.

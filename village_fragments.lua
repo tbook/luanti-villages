@@ -167,7 +167,7 @@ end
 -- blocks (#224), and so do vines hanging on a removed node, with the vines
 -- under them (`vines`, #225; a vine on a standing node stays), and so does the top half of a two-high plant left
 -- on a removed leaf (`plant_tops`: its bottom half was under the leaves).
-function M.clear_trees(zone, config, engine)
+function M.clear_trees(zone, config, engine, protected)
 	engine = engine or core
 	config = config or M.config
 	local radius, height = config.cap_radius, config.cap_height
@@ -179,7 +179,17 @@ function M.clear_trees(zone, config, engine)
 		hi.x, hi.y, hi.z = math.max(hi.x, box.maxp.x), math.max(hi.y, box.maxp.y), math.max(hi.z, box.maxp.z)
 	end
 	local stats = {seeds = 0, removed = 0, clipped = 0, snow = 0, growth = 0, vines = 0, plant_tops = 0,
-		floating = 0, orphans = 0, cocoa = 0}
+		floating = 0, orphans = 0, cocoa = 0, written = nil}
+	local function mark(x, y, z)
+		local b = stats.written
+		if not b then
+			b = {minp = {x = x, y = y, z = z}, maxp = {x = x, y = y, z = z}}
+			stats.written = b
+		else
+			b.minp.x, b.minp.y, b.minp.z = math.min(b.minp.x, x), math.min(b.minp.y, y), math.min(b.minp.z, z)
+			b.maxp.x, b.maxp.y, b.maxp.z = math.max(b.maxp.x, x), math.max(b.maxp.y, y), math.max(b.maxp.z, z)
+		end
+	end
 	if not lo then return stats end
 	local margin = config.orphan_margin or M.config.orphan_margin
 	local reach = config.leaf_reach or M.config.leaf_reach
@@ -303,6 +313,14 @@ function M.clear_trees(zone, config, engine)
 		end
 		return false
 	end
+	local function is_protected(x, z)
+		for _, rect in ipairs(protected or {}) do
+			local margin = rect.margin or 0
+			if x >= rect.x0 - margin and x <= rect.x1 + margin
+					and z >= rect.z0 - margin and z <= rect.z1 + margin then return true end
+		end
+		return false
+	end
 
 	-- One fill from a seed. Returns the visited nodes and whether it hit the cap.
 	local function fill(sx, sy, sz)
@@ -318,7 +336,7 @@ function M.clear_trees(zone, config, engine)
 						and nx >= emin.x and nx <= emax.x and ny >= emin.y and ny <= emax.y
 						and nz >= emin.z and nz <= emax.z then
 					local index = va:index(nx, ny, nz)
-					if not seen[index] and is_tree(data[index]) then
+				if not seen[index] and not is_protected(nx, nz) and is_tree(data[index]) then
 						if math.max(math.abs(nx - sx), math.abs(nz - sz)) > radius or math.abs(ny - sy) > height then
 							capped = true -- the tree runs on past the limit
 						else
@@ -335,6 +353,8 @@ function M.clear_trees(zone, config, engine)
 
 	local gone = {} -- tree nodes removed, for the vines that hung on them
 	local function remove(x, y, z)
+		if is_protected(x, z) then return false end
+		mark(x, y, z)
 		data[va:index(x, y, z)] = air
 		stats.removed = stats.removed + 1
 		gone[#gone + 1] = {x, y, z}
@@ -342,18 +362,21 @@ function M.clear_trees(zone, config, engine)
 			local above = va:index(x, y + 1, z)
 			if is_snow_layer(data[above]) then
 				data[above] = air
+				mark(x, y + 1, z)
 				stats.snow = stats.snow + 1
 			elseif is_plant_top(data[above]) then
 				data[above] = air
+				mark(x, y + 1, z)
 				stats.plant_tops = stats.plant_tops + 1
 			end
 		end
+		return true
 	end
 	for z = lo.z, hi.z do
 		for y = lo.y, hi.y do
 			for x = lo.x, hi.x do
 				if x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z
-						and in_zone(x, y, z) then
+						and in_zone(x, y, z) and not is_protected(x, z) then
 					local index = va:index(x, y, z)
 					if is_tree(data[index]) then
 						stats.seeds = stats.seeds + 1
@@ -364,6 +387,7 @@ function M.clear_trees(zone, config, engine)
 						end
 					elseif is_stalk(data[index]) then
 						data[index] = air
+						mark(x, y, z)
 						stats.growth = stats.growth + 1
 					end
 				end
@@ -436,12 +460,16 @@ function M.clear_trees(zone, config, engine)
 					end end end
 				end
 			end
-			if not held then
-				for _, n in ipairs(piece) do
-					remove(n[1], n[2], n[3])
-					dirty[(n[3] - emin.z) * stride + (n[1] - emin.x)] = true
+			if not held and not is_protected(t[1], t[3]) then
+				local safe = true
+				for _, n in ipairs(piece) do if is_protected(n[1], n[3]) then safe = false break end end
+				if safe then
+					for _, n in ipairs(piece) do
+						remove(n[1], n[2], n[3])
+						dirty[(n[3] - emin.z) * stride + (n[1] - emin.x)] = true
+					end
+					stats.floating = stats.floating + #piece
 				end
-				stats.floating = stats.floating + #piece
 			end
 		end
 	end
@@ -479,7 +507,7 @@ function M.clear_trees(zone, config, engine)
 	end
 	for _, l in ipairs(leaves) do
 		local x, y, z = l[1], l[2], l[3]
-		if near_zone(x, y, z) and not has_trunk_near(x, y, z) and not touches(x, y, z)
+		if near_zone(x, y, z) and not is_protected(x, z) and not has_trunk_near(x, y, z) and not touches(x, y, z)
 				and not (unloaded(x - reach, y - reach, z - reach) or unloaded(x + reach, y - reach, z - reach)
 					or unloaded(x - reach, y + reach, z - reach) or unloaded(x + reach, y + reach, z - reach)
 					or unloaded(x - reach, y - reach, z + reach) or unloaded(x + reach, y - reach, z + reach)
@@ -494,10 +522,11 @@ function M.clear_trees(zone, config, engine)
 		local x, y, z = p[1], p[2], p[3]
 		local d = facedir[param2[va:index(x, y, z)] % 4]
 		local tx, ty, tz = x + d[1], y + d[2], z + d[3]
-		if near_zone(x, y, z) and tx >= emin.x and tx <= emax.x and ty >= emin.y and ty <= emax.y
+		if near_zone(x, y, z) and not is_protected(x, z) and tx >= emin.x and tx <= emax.x and ty >= emin.y and ty <= emax.y
 				and tz >= emin.z and tz <= emax.z and class(data[va:index(tx, ty, tz)]) ~= 1
 				and data[va:index(tx, ty, tz)] ~= engine.CONTENT_IGNORE then
 			data[va:index(x, y, z)] = air
+			mark(x, y, z)
 			stats.cocoa = stats.cocoa + 1
 		end
 	end
@@ -524,12 +553,13 @@ function M.clear_trees(zone, config, engine)
 		for i = #vines, 1, -1 do
 			local x, y, z = vines[i][1], vines[i][2], vines[i][3]
 			local index = va:index(x, y, z)
-			local live = near_zone(x, y, z) and data[index] ~= air
+			local live = near_zone(x, y, z) and not is_protected(x, z) and data[index] ~= air
 			-- param2 6 and 7 are no wallmounted direction: wallmounted_to_dir gives nil,
 			-- check_vines_supported returns nil and the decay ABM drops the vine.
 			local d = live and wall[param2[index] % 8]
 			if live and not d then
 				data[index] = air
+				mark(x, y, z)
 				stats.vines = stats.vines + 1
 			elseif d then
 				local nx, ny, nz = x + d[1], y + d[2], z + d[3]
@@ -541,6 +571,7 @@ function M.clear_trees(zone, config, engine)
 				end
 				if not held then
 					data[index] = air
+					mark(x, y, z)
 					stats.vines = stats.vines + 1
 				end
 			end
@@ -559,7 +590,8 @@ function M.clear_trees(zone, config, engine)
 		head = head + 1
 		for _, d in pairs(toward) do
 			local x, y, z = n[1] + d[1], n[2] + d[2], n[3] + d[3]
-			if x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z then
+			if x >= emin.x and x <= emax.x and y >= emin.y and y <= emax.y and z >= emin.z and z <= emax.z
+					and not is_protected(x, z) then
 				local index = va:index(x, y, z)
 				if is_vine(data[index]) then
 					local attached = true
@@ -577,6 +609,7 @@ function M.clear_trees(zone, config, engine)
 					end
 					if attached then
 						data[index] = air
+						mark(x, y, z)
 						stats.vines = stats.vines + 1
 						queue[#queue + 1] = {x, y, z, param2 and param2[index] or nil}
 					end
