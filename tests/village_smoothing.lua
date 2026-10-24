@@ -303,6 +303,7 @@ local names = {"air", "mcl_core:dirt_with_grass", "struct", "mcl_core:dirt", "mc
 	"mcl_bamboo:bamboo", "mcl_farming:sweet_berry_bush_3", "mcl_core:water_source", "mcl_core:leaves"}
 local IGNORE = 99
 local world = {}
+local accessed = {vm = {}, reads = {}, writes = {}}
 local function at(x, y, z)
 	if x < -30 then return "ignore" end
 	local k = world[x .. "," .. y .. "," .. z]
@@ -342,11 +343,21 @@ local fake = {
 	get_name_from_content_id = function(id) return names[id] or "ignore" end,
 	pos_to_string = function(p) return ("(%d,%d,%d)"):format(p.x, p.y, p.z) end,
 	log = function(_, m) logs[#logs + 1] = m end,
-	swap_node = function(p, n) world[p.x .. "," .. p.y .. "," .. p.z] = n.name end,
-	get_node = function(p) return {name = at(p.x, p.y, p.z)} end,
+	swap_node = function(p, n)
+		accessed.writes[#accessed.writes + 1] = {x = p.x, y = p.y, z = p.z}
+		world[p.x .. "," .. p.y .. "," .. p.z] = n.name
+	end,
+	get_node = function(p)
+		accessed.reads[#accessed.reads + 1] = {x = p.x, y = p.y, z = p.z}
+		return {name = at(p.x, p.y, p.z)}
+	end,
 	get_voxel_manip = function()
 		local vm, a, b = {}
-		function vm:read_from_map(x, y) a, b = x, y; return x, y end
+		function vm:read_from_map(x, y)
+			a, b = x, y
+			accessed.vm[#accessed.vm + 1] = {minp = x, maxp = y}
+			return x, y
+		end
 		function vm:get_data()
 			local data, va = {}, VoxelArea:new({MinEdge = a, MaxEdge = b})
 			for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
@@ -360,7 +371,10 @@ local fake = {
 			for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
 				local name = names[data[va:index(x, y, z)]]
 				local k = x .. "," .. y .. "," .. z
-				if name ~= at(x, y, z) then world[k] = name end
+				if name ~= at(x, y, z) then
+					accessed.writes[#accessed.writes + 1] = {x = x, y = y, z = z}
+					world[k] = name
+				end
 			end end end
 		end
 		function vm:write_to_map() end
@@ -378,6 +392,42 @@ local env = {
 	scan = function(area) return fragments.scan_structures(area, test, fake) end,
 	clear_trees = function() end,
 }
+
+-- volume is read-only, covers all four rotations, and snaps inclusive node
+-- bounds outward to whole mapblocks.
+local volume_schematics = {{name = "wide", hwidth = 20, hdepth = 33, hheight = 8}}
+local function volume_for(rotation, y)
+	return assert(smoothing.volume({{name = "wide", pos = {x = 20, y = y, z = 21}, rotat = rotation}},
+		volume_schematics, {}, fake))
+end
+local unrotated, rotated = volume_for("0", 10), volume_for("90", 10)
+assert(unrotated.minp.x == -16 and unrotated.maxp.x == 79 and unrotated.minp.z == -16
+	and unrotated.maxp.z == 95, "unrotated footprint contributes its full XZ reach")
+assert(rotated.minp.x == -16 and rotated.maxp.x == 95 and rotated.minp.z == -16
+	and rotated.maxp.z == 79, "rotated footprint swaps its dimensions")
+for _, rotation in ipairs({"0", "90", "180", "270"}) do
+	local box = volume_for(rotation, 10)
+	assert(box.minp.y == -64 and box.maxp.y == 79, "tree, smoothing and hole vertical extents")
+end
+local candidate_volume, candidate_reason = smoothing.volume({
+	{name = "wide", pos = {x = 20, z = 21}, rotat = "90"},
+	{name = "wide", pos = {x = 100, z = -50, y = 100}, rotat = "270"},
+}, volume_schematics, {surface_y = {min = 0, max = 20}, protected = {{x0 = -20, z0 = -20, x1 = 0, z1 = 0}}}, fake)
+assert(candidate_volume and not candidate_reason and candidate_volume.minp.y == -64
+	and candidate_volume.maxp.y == 175, "unknown candidates use both surface endpoints; known heights stay fixed")
+local no_surface, no_surface_reason = smoothing.volume({{name = "wide", pos = {x = 0, z = 0}}}, volume_schematics, {}, fake)
+assert(no_surface == nil and no_surface_reason:find("surface_y", 1, true), "missing candidate interval is explicit")
+local empty_volume, empty_reason = smoothing.volume({}, volume_schematics, {}, fake)
+assert(empty_volume == nil and empty_reason == "empty plan", "empty input has no volume")
+local unknown_volume, unknown_reason = smoothing.volume({{name = "missing", pos = {x = 0, y = 0, z = 0}}},
+	volume_schematics, {}, fake)
+assert(unknown_volume == nil and unknown_reason:find("unknown building", 1, true), "unknown schematic has no partial volume")
+local invalid_volume, invalid_reason = smoothing.volume({{name = "wide", pos = {x = 0, y = 0, z = 0}, rotat = "45"}},
+	volume_schematics, {}, fake)
+assert(invalid_volume == nil and invalid_reason:find("rotation", 1, true), "invalid rotation is rejected")
+assert(#accessed.vm == 0 and #accessed.reads == 0 and #accessed.writes == 0 and loads == 0,
+	"volume must not read nodes, use a VoxelManip, or write")
+
 -- An overhang in the skirt (#209): a 2-thick slab (y 30..31) over 4 air (26..29) above
 -- the real ground at 14, at x=-6; a normal hill (top 18) at x=-6, z=2 is still cut.
 for y = 15, 40 do world["-6,"..y..",1"] = "air" end
@@ -458,10 +508,24 @@ local protected_plan = plan_of({0, 0, 10, "mcl_core:dirt_with_grass"},
 local protected_env = setmetatable({clear_trees = function(zone, protected)
 	return fragments.clear_trees(zone, nil, fake, protected)
 end}, {__index = env})
+local pipeline_volume = assert(smoothing.volume(protected_plan, schematics, {
+	protected = {{x0 = 13, z0 = 0, x1 = 14, z1 = 2}},
+}, fake))
+accessed = {vm = {}, reads = {}, writes = {}}
 local ok, report = smoothing.terraform(protected_plan, nil, protected_env, nil, {
 	no_fallback = true, protected = {{x0 = 13, z0 = 0, x1 = 14, z1 = 2}},
 })
 assert(ok and report and report.unloaded_blocks >= 0, "external pipeline returns stats")
+local function contained(pos)
+	return pos.x >= pipeline_volume.minp.x and pos.x <= pipeline_volume.maxp.x
+		and pos.y >= pipeline_volume.minp.y and pos.y <= pipeline_volume.maxp.y
+		and pos.z >= pipeline_volume.minp.z and pos.z <= pipeline_volume.maxp.z
+end
+for _, read in ipairs(accessed.vm) do
+	assert(contained(read.minp) and contained(read.maxp), "pipeline VoxelManip request lies inside volume")
+end
+for _, read in ipairs(accessed.reads) do assert(contained(read), "direct pipeline read lies inside volume") end
+for _, written in ipairs(accessed.writes) do assert(contained(written), "direct or VoxelManip write lies inside volume") end
 assert(at(12, 17, 1) == "air", "real tree cleanup ran in the combined pipeline")
 for x = 13, 14 do for z = 0, 2 do for y = -20, 24 do
 	assert(at(x, y, z) == protected_columns[key(x, y, z)], "protected pipeline column changed: " .. key(x, y, z))
