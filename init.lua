@@ -605,7 +605,23 @@ do
 	}
 	if planner.install(globals) then planner.register_command(globals) end
 	-- Terraform runs on the planner's levelled sites, so it goes in with it.
-	dofile(core.get_modpath("living_villages") .. "/village_smoothing.lua").install(globals)
+	local smoothing = dofile(core.get_modpath("living_villages") .. "/village_smoothing.lua")
+	smoothing.install(globals)
+	-- Public, deliberately small API for mods that prepare their own building sites.
+	local api = rawget(_G, "living_villages") or {}
+	_G.living_villages = api
+	local fragments = dofile(core.get_modpath("living_villages") .. "/village_fragments.lua")
+	api.terrain = {
+		terraform = function(plan, pr, env, options)
+			local opts = {}
+			for key, value in pairs(options or {}) do opts[key] = value end
+			opts.no_fallback = true
+			return smoothing.terraform(plan, pr, env, opts.config, opts)
+		end,
+		targets = smoothing.targets,
+		pads = smoothing.pads,
+		structure_test = fragments.structure_test,
+	}
 end
 
 -- Villages start without VoxeLibre's generated paths (#12): they wobble over

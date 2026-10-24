@@ -289,7 +289,7 @@ M.spread = spread -- for the tests
 --    changed, that still differ by more than 1, walls = those pairs that differ
 --    by `config.wall` or more with a footprint or yard column on at least one
 --    side (each pair once), wall_max = the tallest (#220)}
-function M.targets(pads, height_at, config)
+function M.targets(pads, height_at, config, protected)
 	config = config or M.config
 	local radius, reach = config.radius, config.radius + config.margin
 	local bx0, bz0, bx1, bz1
@@ -311,9 +311,22 @@ function M.targets(pads, height_at, config)
 	for z = bz0, bz1 do
 		for x = bx0, bx1 do
 			local t, overhang = height_at(x, z)
+			local is_protected = false
+			for _, rect in ipairs(protected or {}) do
+				local margin = rect.margin or 0
+				if x >= rect.x0 - margin and x <= rect.x1 + margin
+						and z >= rect.z0 - margin and z <= rect.z1 + margin then
+						is_protected = true
+						break
+				end
+			end
 			if t then
 				local i = index(x, z)
 				was[i] = t
+				if is_protected then
+					-- Protected terrain is a fixed slope constraint, just like untouched ground.
+					goal[i], free[i] = t, false
+				else
 				-- The pad whose footprint holds the column or is nearest, within the
 				-- radius of its yard.
 				local near, near_d, yard_hit = nil, math.huge, nil
@@ -343,6 +356,7 @@ function M.targets(pads, height_at, config)
 					low[i], high[i] = t - config.cap, t + config.cap
 				else
 					goal[i], free[i] = t, false
+				end
 				end
 			end
 		end
@@ -463,11 +477,14 @@ end
 -- settlements.terraform's replacement. `env` has settlements (schematic_table),
 -- load_node, scan (optional, village_fragments.scan_structures), clear_trees, engine, and `original` to fall back on when the area
 -- can't be loaded. Returns true if the ground was smoothed.
-function M.terraform(plan, pr, env, config)
+function M.terraform(plan, pr, env, config, options)
 	config = config or M.config
 	local engine = env.engine
-	local pads, why = M.pads(plan, env.settlements.schematic_table, config)
+	options = options or {}
+	local schematic_table = options.schematic_table or env.settlements.schematic_table
+	local pads, why = M.pads(plan, schematic_table, config)
 	local function fall_back(reason)
+		if options.no_fallback then return false, reason end
 		engine.log("warning", "[living_villages] ground not smoothed, using VoxeLibre's terraform: " .. reason)
 		env.original(plan, pr)
 		return false
@@ -476,6 +493,16 @@ function M.terraform(plan, pr, env, config)
 	local area = area_of(pads, config)
 
 	local started = engine.get_us_time and engine.get_us_time()
+	local written = {minp = {x = math.huge, y = math.huge, z = math.huge},
+		maxp = {x = -math.huge, y = -math.huge, z = -math.huge}}
+	local function mark(x, y, z)
+		written.minp.x, written.minp.y, written.minp.z = math.min(written.minp.x, x), math.min(written.minp.y, y), math.min(written.minp.z, z)
+		written.maxp.x, written.maxp.y, written.maxp.z = math.max(written.maxp.x, x), math.max(written.maxp.y, y), math.max(written.maxp.z, z)
+	end
+	local writer = setmetatable({swap_node = function(pos, node)
+		mark(pos.x, pos.y, pos.z)
+		return engine.swap_node(pos, node)
+	end}, {__index = engine})
 	-- Trees are cleared out to the same reach as the smoothing, and the tree fill
 	-- may run on sideways past it, so load a bit further than the area.
 	local margin = fragments.config.cap_radius
@@ -493,7 +520,15 @@ function M.terraform(plan, pr, env, config)
 			maxp = {x = p.x1 + reach, y = area.maxp.y, z = p.z1 + reach},
 		}
 	end
-	env.clear_trees(zone)
+	local tree_stats = env.clear_trees(zone, options.protected)
+	local function include_box(box)
+		if not box then return end
+		for _, axis in ipairs({"x", "y", "z"}) do
+			written.minp[axis] = math.min(written.minp[axis], box.minp[axis])
+			written.maxp[axis] = math.max(written.maxp[axis], box.maxp[axis])
+		end
+	end
+	include_box(tree_stats and tree_stats.written)
 
 	local lookup, reason = terrain.heights(area, env.settlements.surface_mat, engine, true)
 	if not lookup then return fall_back(reason) end
@@ -519,8 +554,8 @@ function M.terraform(plan, pr, env, config)
 		end
 		if column.liquid then return nil end
 		return column.y, column.overhang
-	end, config)
-	local stats = M.apply(pads, targets, lookup, config, engine)
+	end, config, options.protected)
+	local stats = M.apply(pads, targets, lookup, config, writer)
 	engine.log("action", ("[living_villages] smoothed %d columns (%d cut, %d filled, steepest %d), %d steps still over 1 block (%d walls of %d+, tallest %d), %d unloaded blocks skipped%s")
 		:format(stats.changed, stats.cut, stats.filled, stats.steepest, targets.violations, targets.walls, config.wall, targets.wall_max, missing,
 			started and (", " .. math.floor((engine.get_us_time() - started) / 1000) .. " ms") or ""))
@@ -529,7 +564,8 @@ function M.terraform(plan, pr, env, config)
 	local hole_area = holes.area(pads)
 	local hole_missing = M.load_area(hole_area, config, env)
 	local hole_started = engine.get_us_time and engine.get_us_time()
-	local plan, hole_reason = holes.run(pads, hole_area, env)
+	local hole_env = setmetatable({engine = writer}, {__index = env})
+	local plan, hole_reason = holes.run(pads, hole_area, hole_env, nil, options.protected)
 	if plan then
 		engine.log("action", ("[living_villages] holes: %d columns filled, %d ramped (%d nodes), %d dropped over a limit, steps over 1 block %d -> %d, %d unloaded blocks skipped%s")
 			:format(#plan.cells - plan.ramped, plan.ramped, plan.nodes, plan.dropped, plan.cliffs_before, plan.cliffs_after, hole_missing,
@@ -537,6 +573,14 @@ function M.terraform(plan, pr, env, config)
 	else
 		engine.log("warning", "[living_villages] holes not filled: " .. tostring(hole_reason))
 	end
+	if written.minp.x == math.huge then written = nil end
+	local stats = {changed = stats.changed, cut = stats.cut, filled = stats.filled, steepest = stats.steepest,
+		steps_over_one = targets.violations, walls = targets.walls, wall_max = targets.wall_max,
+		unloaded_blocks = missing + hole_missing, written = written,
+		tree_removed = tree_stats and tree_stats.removed or 0,
+		hole_filled = plan and plan.filled or 0, hole_ramped = plan and plan.ramped or 0,
+		hole_nodes = plan and plan.nodes or 0}
+	if options.no_fallback then return true, stats end
 	return true
 end
 
@@ -560,7 +604,7 @@ function M.install(globals, engine)
 					original = original,
 					load_node = function(pos) return globals.mcl_vars.get_node(pos) end,
 					scan = function(area) return fragments.scan_structures(area, structure_test, engine) end,
-					clear_trees = function(zone) return fragments.clear_trees(zone, nil, engine) end,
+					clear_trees = function(zone, protected) return fragments.clear_trees(zone, nil, engine, protected) end,
 				})
 			end
 		end,

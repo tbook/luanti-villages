@@ -44,6 +44,14 @@ for z = t.z0, t.z1 do for x = t.x0, t.x1 do
 end end
 assert(t.violations == 0, "slope walkable, got " .. t.violations)
 
+-- Protected columns stay byte-for-byte at their source height and constrain
+-- the skirt slope as fixed neighbors.
+local protected = {{x0 = -5, z0 = -4, x1 = -4, z1 = 5}}
+t = smoothing.targets(pads, flat(14), cfg, protected)
+for z = -4, 5 do
+	assert(t.at(-5, z) == 14 and t.was(-5, z) == 14 and t.pad(-5, z) == nil, "protected column is fixed")
+end
+
 -- A pit far deeper than the cap: yard clamped to the cap, never beyond.
 t = smoothing.targets(pads, flat(0), cfg)
 assert(t.at(-2, 1) == 5, "yard capped")
@@ -421,7 +429,28 @@ local joined = table.concat(logs, "\n")
 assert(joined:find("holes: ", 1, true), "reports the fill")
 assert(joined:find("unloaded blocks skipped", 1, true), "reports skipped blocks")
 
+-- Protect the lip of the filled shaft, then rerun the complete pipeline. Every
+-- node in those inclusive XZ columns stays identical while neighboring terrain
+-- remains eligible for smoothing and hole filling.
+local protected_columns = {}
+for x = 13, 14 do for z = 0, 2 do for y = -20, 24 do
+	protected_columns[key(x, y, z)] = at(x, y, z)
+end end end
+local protected_plan = plan_of({0, 0, 10, "mcl_core:dirt_with_grass"},
+	{40, 0, 14, "mcl_core:dirt_with_grass"}, {80, 0, 20, "mcl_core:dirt_with_grass"})
+local protected_env = setmetatable({clear_trees = function() end}, {__index = env})
+local ok, report = smoothing.terraform(protected_plan, nil, protected_env, nil, {
+	no_fallback = true, protected = {{x0 = 13, z0 = 0, x1 = 14, z1 = 2}},
+})
+assert(ok and report and report.unloaded_blocks >= 0, "external pipeline returns stats")
+for x = 13, 14 do for z = 0, 2 do for y = -20, 24 do
+	assert(at(x, y, z) == protected_columns[key(x, y, z)], "protected pipeline column changed: " .. key(x, y, z))
+end end end
+
 -- An empty plan falls back to the original.
 assert(smoothing.terraform({}, nil, env) == false and fell, "fallback on empty plan")
+fell = nil
+local external_ok, external_reason = smoothing.terraform({}, nil, env, nil, {no_fallback = true})
+assert(external_ok == false and external_reason == "empty plan" and not fell, "external API reports failure without vanilla fallback")
 
 print("village_smoothing: ok")
