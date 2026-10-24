@@ -66,9 +66,10 @@ local function check_route(world, cells, target)
 	local function floor_under(cell)
 		local below = {x = cell.x, y = cell.y - 1, z = cell.z}
 		local def = defs[world.get(below).name]
-		-- A full block, or the sixteenth or two short of one that a grass path or
-		-- farmland is.
-		if not def.walkable or collision_top(def) < 0.4 or (def.damage_per_second or 0) > 0 then return false end
+		-- A full block, a path/farmland surface, or a lower slab's half-height top.
+		local lower_slab = group(below, "slab") and not group(below, "slab_top")
+		if not def.walkable or (collision_top(def) < 0.4 and not lower_slab)
+			or (def.damage_per_second or 0) > 0 then return false end
 		return not (group(below, "fence") or group(below, "fence_gate") or group(below, "wall") or group(below, "trapdoor"))
 	end
 	for i, cell in ipairs(cells) do

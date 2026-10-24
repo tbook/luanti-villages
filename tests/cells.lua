@@ -10,6 +10,7 @@ local defs = {
 	["mcl_core:grass_path"] = {walkable = true, drawtype = "nodebox", node_box = box(0.4375)},
 	["mcl_nether:soul_sand"] = {walkable = true, drawtype = "nodebox", node_box = box(0.375)},
 	["mcl_stairs:slab_wood"] = {walkable = true, drawtype = "nodebox", node_box = box(0)},
+	["mcl_stairs:slab_wood_top"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, 0, -0.5, 0.5, 0.5, 0.5}}},
 	["mcl_fences:fence"] = {walkable = true, collision_box = box(1.0)},
 	["mcl_wool:carpet"] = {walkable = true, drawtype = "nodebox", node_box = box(-0.4375)},
 	["mcl_fire:fire"] = {walkable = false},
@@ -20,6 +21,7 @@ local defs = {
 }
 local groups = {
 	["mcl_fences:fence"] = {fence = 1}, ["mcl_wool:carpet"] = {carpet = 1}, ["mcl_fire:fire"] = {fire = 1},
+	["mcl_stairs:slab_wood"] = {slab = 1}, ["mcl_stairs:slab_wood_top"] = {slab = 1, slab_top = 1},
 	["mcl_doors:wooden_door_b_1"] = {door = 1}, ["mcl_doors:iron_door_b_1"] = {door = 1, door_iron = 1},
 }
 minetest = {
@@ -34,11 +36,42 @@ local function stand_on(floor) world = {}; put(0, 0, 0, floor); return cells.can
 assert(stand_on("mcl_core:stone"), "a full block is floor")
 -- The tavern's route went nowhere because a grass path was not floor (#156).
 assert(stand_on("mcl_core:grass_path"), "a grass path is floor")
-assert(not stand_on("mcl_stairs:slab_wood"), "a bottom slab is not")
+assert(stand_on("mcl_stairs:slab_wood"), "a bottom slab is a floor")
+assert(stand_on("mcl_stairs:slab_wood_top"), "the top of an upper slab is a floor")
 assert(not stand_on("mcl_nether:soul_sand"), "soul sand (0.375) is left out: no village has it")
 assert(not stand_on("mcl_fences:fence"), "a fence is not")
 assert(not stand_on("mcl_core:lava_source"), "a hazard is not")
 assert(not stand_on("air"), "nor is nothing")
+
+-- A lower slab beside full-block ground is a half-step, not an obstacle to a
+-- route through the row. The planner should use the slab directly rather than
+-- detouring around it.
+local planner = dofile("planner.lua")
+world = {}
+for x = -1, 3 do for z = -1, 1 do put(x, 0, z, "mcl_core:stone") end end
+put(1, 0, 0, "mcl_stairs:slab_wood")
+local slab_path = planner.find_path({x = 0, y = 1, z = 0}, cells.can_stand,
+	function(pos) return pos.x == 2 and pos.y == 1 and pos.z == 0 end, {range = 8})
+assert(slab_path, "route across lower slab exists")
+local crossed_slab = false
+for _, pos in ipairs(slab_path) do
+	if pos.x == 1 and pos.y == 1 and pos.z == 0 then crossed_slab = true end
+end
+assert(crossed_slab, "route crosses the lower slab instead of detouring")
+
+-- Carpets already count as thin floor covers in the shared passability model;
+-- keep that behavior at route level as well as in the cell checks below.
+world = {}
+for x = -1, 3 do for z = -1, 1 do put(x, 0, z, "mcl_core:stone") end end
+put(1, 1, 0, "mcl_wool:carpet")
+local carpet_path = planner.find_path({x = 0, y = 1, z = 0}, cells.can_stand,
+	function(pos) return pos.x == 2 and pos.y == 1 and pos.z == 0 end, {range = 8})
+assert(carpet_path, "route across carpet exists")
+local crossed_carpet = false
+for _, pos in ipairs(carpet_path) do
+	if pos.x == 1 and pos.y == 1 and pos.z == 0 then crossed_carpet = true end
+end
+assert(crossed_carpet, "route crosses carpet instead of detouring")
 
 -- The feet cell may hold carpet, the head may not.
 world = {}; put(0, 0, 0, "mcl_core:stone"); put(0, 1, 0, "mcl_wool:carpet")

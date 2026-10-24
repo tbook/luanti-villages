@@ -106,6 +106,7 @@ minetest = {
 			or group == "door" and name:find("door", 1, true) and 1
 			or group == "door_iron" and name:find("iron_door", 1, true) and 1
 			or group == "fence" and name == "test:fence" and 1
+			or group == "slab" and name == "test:low_slab" and 1
 			or group == "trapdoor" and name == "test:trapdoor" and 1
 			or group == "cactus" and name == "test:cactus" and 1 or 0
 	end,
@@ -267,9 +268,21 @@ assert(failed_entity._villages_bed_route.reason:find("no safe standing", 1, true
 assert(not failed_entity._villages_bed_route.target)
 support_available = true
 
--- Fallback routes require floor-height, non-hazardous support. Low slabs,
--- fences, and cactus support must not produce a standable bed approach.
-for _, unsafe_support in ipairs({"test:low_slab", "test:fence", "test:trapdoor", "test:cactus"}) do
+-- A bottom slab is a real half-height floor and may be used for an approach.
+support_node = "test:low_slab"
+local slab_support_entity = {
+	_bed = {x = 0, y = 0, z = 0}, state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0.5, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(def.gopath(slab_support_entity, slab_support_entity._bed, nil, true))
+settle()
+assert(slab_support_entity._villages_bed_route.status == "travelling", "plans an approach on a bottom slab")
+
+-- Fallback routes still reject fences, trapdoors and hazards as support.
+for _, unsafe_support in ipairs({"test:fence", "test:trapdoor", "test:cactus"}) do
 	support_node = unsafe_support
 	local unsafe_entity = {
 		_bed = {x = 0, y = 0, z = 0}, state = "stand",

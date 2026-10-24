@@ -43,6 +43,18 @@ local TWO_PI = 2 * math.pi
 
 local follower = {}
 
+-- A lower slab supports the villager from the node below its feet, but the
+-- engine's feet-node sample remains inside that slab. Routes model the walk
+-- position in the open node above it, so translate only for route comparisons.
+local function route_feet_y(pos)
+	local y = common.feet_node(pos)
+	local node = core.get_node_or_nil({
+		x = math.floor(pos.x + 0.5), y = y, z = math.floor(pos.z + 0.5),
+	})
+	if node and cells.is_bottom_slab(node.name, core.registered_nodes[node.name]) then return y + 1 end
+	return y
+end
+
 local function angle_between(a, b)
 	return math.abs((a - b + math.pi) % TWO_PI - math.pi)
 end
@@ -130,7 +142,7 @@ function follower.begin(self, avoid)
 		final = last and last.pos and vector.new(last.pos) or nil,
 		avoid = avoid, progress_pos = self.object:get_pos(), still = 0, blocked = 0,
 		leg_start = self.object:get_pos() or {x = 0, z = 0},
-		from_y = self.object:get_pos() and common.feet_node(self.object:get_pos()) or nil,
+		from_y = self.object:get_pos() and route_feet_y(self.object:get_pos()) or nil,
 	}
 end
 
@@ -175,7 +187,7 @@ end
 local FALL_SPEED = -9.81 * 1.5
 local JUMP_COOLDOWN = 0.6
 local function rise_step(self, f, pos, waypoint, dx, dz)
-	if waypoint.y <= common.feet_node(pos) then return end
+	if waypoint.y <= route_feet_y(pos) then return end
 	if dx * dx + dz * dz > 1.1 * 1.1 then return end
 	if not self.jump or (self.jump_height or 0) == 0 then return end
 	local now = core.get_us_time() / 1e6
@@ -236,7 +248,7 @@ end
 -- Whether the body fits along the straight line from `from` to `to` at the
 -- level of `from`: open air only, since `to` may be lower than the floor here.
 local function body_clear(from, to)
-	local feet = common.feet_node(from)
+	local feet = route_feet_y(from)
 	local dx, dz = to.x - from.x, to.z - from.z
 	local length = math.sqrt(dx * dx + dz * dz)
 	for step = 0, math.ceil(length / SAMPLE_STEP) do
@@ -289,7 +301,7 @@ local function follow(self, dtime)
 		-- Out of waypoints with no arrival: nothing to follow.
 		return give_up(self, "route ended before the final cell")
 	end
-	local feet = common.feet_node(pos)
+	local feet = route_feet_y(pos)
 	local dx, dz = current.pos.x - pos.x, current.pos.z - pos.z
 	local distance = math.sqrt(dx * dx + dz * dz)
 
