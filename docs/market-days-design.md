@@ -358,12 +358,32 @@ single fallback reason per attempt, with the usual `[living_villages]` prefix.
 
 ## Implementation tickets
 
-Create child issues under #281 from these descriptions. Each ticket gets one
-feature branch and PR, using its actual child issue number. Land in the order
-below. Every ticket includes its own tests and must leave the existing suite
-passing; do not postpone correctness tests to the final playtest ticket.
-The early modules remain uninstalled until ticket 7, so incomplete cleanup
-cannot create stalls in players' worlds.
+The eight work packages below are tracked by eleven child issues of
+[#281](https://github.com/tbook/luanti-villages/issues/281). Prop placement and
+packing (package 4) have separate tickets; goods, travel, and selling (package 6)
+also have separate tickets, so each implementation PR has a bounded scope.
+
+| Issue | Work | Requires |
+|---|---|---|
+| [#285](https://github.com/tbook/luanti-villages/issues/285) | adjust holiday schedules and tavern music | None |
+| [#286](https://github.com/tbook/luanti-villages/issues/286) | define and validate a two-table stall layout | None |
+| [#287](https://github.com/tbook/luanti-villages/issues/287) | add bounded stall search and reservations | [#286](https://github.com/tbook/luanti-villages/issues/286) |
+| [#288](https://github.com/tbook/luanti-villages/issues/288) | place tagged stock tables and populated frames | [#286](https://github.com/tbook/luanti-villages/issues/286) |
+| [#289](https://github.com/tbook/luanti-villages/issues/289) | pack stalls while preserving player items and replacements | [#288](https://github.com/tbook/luanti-villages/issues/288) |
+| [#290](https://github.com/tbook/luanti-villages/issues/290) | recover orphaned props across unloads and restarts | [#289](https://github.com/tbook/luanti-villages/issues/289) |
+| [#291](https://github.com/tbook/luanti-villages/issues/291) | define representative goods and seller eligibility | None |
+| [#292](https://github.com/tbook/luanti-villages/issues/292) | implement bounded seller search and travel sessions | [#287](https://github.com/tbook/luanti-villages/issues/287), [#290](https://github.com/tbook/luanti-villages/issues/290), [#291](https://github.com/tbook/luanti-villages/issues/291) |
+| [#293](https://github.com/tbook/luanti-villages/issues/293) | add selling, staggered packing and stock-day persistence | [#292](https://github.com/tbook/luanti-villages/issues/292) |
+| [#294](https://github.com/tbook/luanti-villages/issues/294) | integrate sellers with bell gathering and lifecycle hooks | [#285](https://github.com/tbook/luanti-villages/issues/285), [#293](https://github.com/tbook/luanti-villages/issues/293) |
+| [#295](https://github.com/tbook/luanti-villages/issues/295) | add reproducible playtests and tune placement defaults | [#294](https://github.com/tbook/luanti-villages/issues/294) |
+
+Each child issue gets one feature branch and PR using its actual issue number.
+Follow the dependencies above; the schedule, geometry and goods tasks can start
+independently. Every ticket includes its own tests and must leave the existing
+suite passing; do not postpone correctness tests to the final playtest ticket.
+The early modules remain uninstalled until package 7 (#294), so incomplete
+cleanup cannot create stalls in players' worlds. Child PRs close only their own
+issues; merging this design does not close the overall epic.
 
 ### 1. Adjust holiday market and tavern hours
 
@@ -414,6 +434,11 @@ arrival fails safely if the world changed.
 
 ### 4. Place and pack ordinary market props safely
 
+Implement as [#288](https://github.com/tbook/luanti-villages/issues/288)
+(placement, tagging and partial-setup rollback), then
+[#289](https://github.com/tbook/luanti-villages/issues/289)
+(packing and player interactions). Neither ticket enables props in gameplay.
+
 **Depends on:** 2. **Files:** new `market_props.lua`, `tests/market_props.lua`.
 
 Implement unique tokens, four tagged stock nodes, frame population/display,
@@ -450,6 +475,13 @@ support checks. No forced loading, duplicate inventory drops, or permanent
 runtime record leaks. Test LBM invocation before and after seller activation.
 
 ### 6. Implement the seller session controller without enabling it
+
+Implement as [#291](https://github.com/tbook/luanti-villages/issues/291)
+(goods and eligibility), [#292](https://github.com/tbook/luanti-villages/issues/292)
+(search, travel and cancellation), and
+[#293](https://github.com/tbook/luanti-villages/issues/293)
+(selling, packing and stock-day persistence). Goods/eligibility can be developed
+independently; travel requires the site and prop cleanup modules.
 
 **Depends on:** 3, 5. **Files:** new `market.lua`, `tests/market.lua`.
 
@@ -517,9 +549,9 @@ repository's required full test/syntax checks. Reuse fixtures; do not add tests
 that only repeat a constant assignment. No runtime tests are necessary for this
 design-only document.
 
-Review tickets 4–5 for node ownership, inventory handling and real callback
-semantics before enabling ticket 7. Review ticket 7 for movement ownership and
+Review #288–#290 for node ownership, inventory handling and real callback
+semantics before enabling #294. Review #294 for movement ownership and
 late queued routes. These are focused checks of two concrete failure modes,
-not reasons to make the feature larger. Ticket 8 settles the initial numerical
+not reasons to make the feature larger. Playtest issue #295 settles the initial numerical
 defaults; deliberate shoppers, trade-accurate displays, optimal stall packing,
 and ordinary-day bell gatherings remain separate future work.
