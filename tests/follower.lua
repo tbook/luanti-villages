@@ -34,11 +34,16 @@ minetest = {
 	get_modpath = function() return "." end,
 	get_item_group = function(name, group)
 		return name == "test:lower_slab" and group == "slab" and 1
-			or name == "test:carpet" and group == "carpet" and 1 or 0
+			or name == "test:carpet" and group == "carpet" and 1
+			or name == "mcl_decor:path_cobble" and group == "path" and 1 or 0
 	end,
 	registered_nodes = {
 		air = {walkable = false}, ["mcl_core:stone"] = {walkable = true},
 		["mcl_core:cobble"] = {walkable = true},
+		["mcl_decor:path_cobble"] = {
+			walkable = true,
+			collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}},
+		},
 		["mcl_core:grass_path"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.4375, 0.5}}},
 		["test:lower_slab"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0, 0.5}}},
 		["test:carpet"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}},
@@ -134,15 +139,43 @@ end
 assert(slab_crossing.arrived, "crosses and completes the lower-slab waypoint")
 assert(slab_crossing.jumps == 0, "a half-height slab does not trigger a full-step jump")
 
--- Generated village paths and cobblestone footpaths stay crossable by the
--- followed route as well as by the planner.
+-- A thin mcl_decor path occupies the feet cell above its supporting block.
 reset()
-nodes[key({x = 1, y = -1, z = 0})] = "mcl_core:grass_path"
-nodes[key({x = 2, y = -1, z = 0})] = "mcl_core:cobble"
-local path_stones = villager(0, 0, {cell(0, 0), cell(1, 0), cell(2, 0), cell(3, 0)})
+nodes[key({x = 1, y = 0, z = 0})] = "mcl_decor:path_cobble"
+local path_stones = villager(0, 0, {cell(0, 0), cell(1, 0), cell(2, 0)})
 follower.begin(path_stones)
-run(path_stones, 8)
-assert(path_stones.arrived, "crosses grass path and cobble footpath")
+for _ = 1, 200 do
+	if path_stones.pos().x > 0.65 and path_stones.pos().x < 1.5 then
+		path_stones.pos().y = -0.4275
+	else
+		path_stones.pos().y = -0.49
+	end
+	path_stones.tick()
+	if path_stones.arrived then break end
+end
+assert(path_stones.arrived, "crosses mcl_decor:path_cobble at its actual collision height")
+
+-- A regular floor, path overlay, carpet and lower slab meet in one route.
+-- Model their actual tops: ground -0.5, path/carpet -0.4375, lower slab 0.
+reset()
+nodes[key({x = 1, y = 0, z = 0})] = "mcl_decor:path_cobble"
+nodes[key({x = 2, y = 0, z = 0})] = "test:carpet"
+nodes[key({x = 3, y = -1, z = 0})] = "test:lower_slab"
+local cover_seam = villager(0, 0, {cell(0, 0), cell(1, 0), cell(2, 0), cell(3, 0), cell(4, 0)})
+follower.begin(cover_seam)
+for _ = 1, 300 do
+	local x = cover_seam.pos().x
+	if (x > 0.65 and x < 1.5) or (x > 1.65 and x < 2.5) then
+		cover_seam.pos().y = -0.4275
+	elseif x > 2.65 and x < 3.5 then
+		cover_seam.pos().y = -0.99
+	else
+		cover_seam.pos().y = -0.49
+	end
+	cover_seam.tick()
+	if cover_seam.arrived then break end
+end
+assert(cover_seam.arrived, "crosses ground, path, carpet and lower-slab seams")
 
 -- Carpets remain passable through an actual followed route, not just in the
 -- cells classifier.
