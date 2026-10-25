@@ -7,7 +7,16 @@ local function box(top) return {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 
 local defs = {
 	air = {walkable = false},
 	["mcl_core:stone"] = {walkable = true},
+	["mcl_core:cobble"] = {walkable = true},
+	["mcl_core:mossycobble"] = {walkable = true},
+	["mcl_core:sandstonesmooth2"] = {walkable = true},
 	["mcl_core:grass_path"] = {walkable = true, drawtype = "nodebox", node_box = box(0.4375)},
+	["mcl_stairs:stair_cobble"] = {
+		walkable = true, drawtype = "nodebox", collision_box = {type = "fixed", fixed = {
+			{-0.5, -0.5, -0.5, 0.5, 0, 0.5}, {-0.5, 0, 0, 0.5, 0.5, 0.5},
+		}},
+	},
+	["mcl_stairs:slab_cobble"] = {walkable = true, drawtype = "nodebox", node_box = box(0)},
 	["mcl_nether:soul_sand"] = {walkable = true, drawtype = "nodebox", node_box = box(0.375)},
 	["mcl_stairs:slab_wood"] = {walkable = true, drawtype = "nodebox", node_box = box(0)},
 	["mcl_stairs:slab_wood_top"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, 0, -0.5, 0.5, 0.5, 0.5}}},
@@ -22,8 +31,49 @@ local defs = {
 local groups = {
 	["mcl_fences:fence"] = {fence = 1}, ["mcl_wool:carpet"] = {carpet = 1}, ["mcl_fire:fire"] = {fire = 1},
 	["mcl_stairs:slab_wood"] = {slab = 1}, ["mcl_stairs:slab_wood_top"] = {slab = 1, slab_top = 1},
+	["mcl_stairs:slab_cobble"] = {slab = 1},
 	["mcl_doors:wooden_door_b_1"] = {door = 1}, ["mcl_doors:iron_door_b_1"] = {door = 1, door_iron = 1},
 }
+-- mcl_decor/src/paths.lua generates these nodes from tpl_path: the visible
+-- cobbles are uneven, but the collision box is one sixteenth high over a floor.
+local decor_path_box = {type = "fixed", fixed = {{-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}}
+local decor_path_node_box = {type = "fixed", fixed = {
+	{-0.4375, -0.5, -0.4375, -0.125, -0.4375, -0.125},
+	{-0.125, -0.5, -0.0625, 0.0625, -0.4375, 0.125},
+	{-0.3125, -0.5, 0.1875, -0.0625, -0.4375, 0.4375},
+	{0.0625, -0.5, -0.375, 0.25, -0.4375, -0.1875},
+	{0.125, -0.5, 0.125, 0.375, -0.4375, 0.375},
+	{0.25, -0.5, -0.125, 0.375, -0.4375, 0},
+	{-0.4375, -0.5, 0, -0.3125, -0.4375, 0.125},
+}}
+local decor_paths = {"gravel", "cobble", "stone", "granite", "andesite", "diorite",
+	"netherrack", "deepslate", "deepslate_cobbled", "tuff"}
+for _, material in ipairs(decor_paths) do
+	local name = "mcl_decor:path_" .. material
+	defs[name] = {
+		walkable = true, drawtype = "nodebox", node_box = decor_path_node_box,
+		collision_box = decor_path_box,
+	}
+	groups[name] = {path = 1}
+end
+defs["test:thick_path"] = {
+	walkable = true, collision_box = {type = "fixed", fixed = {{-0.5, -0.5, -0.5, 0.5, -0.1, 0.5}}},
+}
+groups["test:thick_path"] = {path = 1}
+defs["test:multi_path"] = {
+	walkable = true, collision_box = {type = "fixed", fixed = {
+		{-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}, {-0.5, 0, -0.5, 0.5, 0.0625, 0.5},
+	}},
+}
+groups["test:multi_path"] = {path = 1}
+defs["test:invalid_path"] = {walkable = true, collision_box = {type = "fixed", fixed = {{-0.5}}}}
+groups["test:invalid_path"] = {path = 1}
+defs["test:flat_path"] = {
+	walkable = true, collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}},
+}
+groups["test:flat_path"] = {path = 1}
+defs["test:danger_path"] = {walkable = true, collision_box = decor_path_box, damage_per_second = 1}
+groups["test:danger_path"] = {path = 1}
 minetest = {
 	registered_nodes = defs,
 	get_modpath = function() return "." end,
@@ -42,6 +92,32 @@ assert(not stand_on("mcl_nether:soul_sand"), "soul sand (0.375) is left out: no 
 assert(not stand_on("mcl_fences:fence"), "a fence is not")
 assert(not stand_on("mcl_core:lava_source"), "a hazard is not")
 assert(not stand_on("air"), "nor is nothing")
+
+-- A mcl_decor path overlays the feet cell and stands on the full block below.
+world = {}; put(0, 0, 0, "mcl_core:stone"); put(0, 1, 0, "mcl_decor:path_cobble")
+assert(cells.can_stand({x = 0, y = 1, z = 0}), "path overlay is clear at the feet and supported below")
+local path_standing = cells.standing_position({x = 0, y = 1, z = 0})
+assert(math.abs(path_standing.y - 0.5725) < 1e-9, "stands on the path collision top: " .. path_standing.y)
+assert(not cells.is_open({x = 0, y = 1, z = 0}, {door = true}), "path at head height blocks")
+put(0, 1, 0, "test:thick_path")
+assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a thick path-group node is not transparent")
+put(0, 1, 0, "test:multi_path")
+assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a multi-box path node is not transparent")
+put(0, 1, 0, "test:invalid_path")
+assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "an invalid path box is not transparent")
+put(0, 1, 0, "test:flat_path")
+assert(cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "flat fixed path boxes are supported")
+put(0, 1, 0, "test:danger_path")
+	assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a hazardous path-group node still blocks")
+put(0, 1, 0, "mcl_decor:path_cobble")
+put(0, 0, 0, "air")
+assert(not cells.can_stand({x = 0, y = 1, z = 0}), "an unsupported path is not a floor")
+
+-- A carpet uses a sixteenth-high nodebox too, and the standing position rises
+-- to its top just as it does for the paths above.
+put(0, 0, 0, "mcl_core:stone"); put(0, 1, 0, "mcl_wool:carpet")
+local carpet_standing = cells.standing_position({x = 0, y = 1, z = 0})
+assert(math.abs(carpet_standing.y - 0.5725) < 1e-9, "stands on carpet's actual top: " .. carpet_standing.y)
 
 -- A lower slab beside full-block ground is a half-step, not an obstacle to a
 -- route through the row. The planner should use the slab directly rather than
@@ -72,6 +148,56 @@ for _, pos in ipairs(carpet_path) do
 	if pos.x == 1 and pos.y == 1 and pos.z == 0 then crossed_carpet = true end
 end
 assert(crossed_carpet, "route crosses carpet instead of detouring")
+
+-- Full-block road materials and cobble stairs/slabs remain traversable through
+-- the planner too (VoxeLibre mcl_stairs definitions).
+for _, floor in ipairs({
+	"mcl_core:cobble", "mcl_core:mossycobble", "mcl_core:sandstonesmooth2",
+	"mcl_stairs:stair_cobble", "mcl_stairs:slab_cobble",
+}) do
+	world = {}
+	for x = -1, 3 do for z = -1, 1 do put(x, 0, z, "mcl_core:stone") end end
+	put(1, 0, 0, floor)
+	local path = planner.find_path({x = 0, y = 1, z = 0}, cells.can_stand,
+		function(pos) return pos.x == 2 and pos.y == 1 and pos.z == 0 end, {range = 8})
+	assert(path, "route exists across " .. floor)
+	local crossed = false
+	for _, pos in ipairs(path) do
+		if pos.x == 1 and pos.y == 1 and pos.z == 0 then crossed = true end
+	end
+	assert(crossed, "route crosses " .. floor .. " instead of detouring")
+end
+
+-- Each mcl_decor path variant is a thin overlay in the feet cell, not a floor
+-- node one cell below it. Check real template collision geometry on solid ground.
+for _, material in ipairs(decor_paths) do
+	local name = "mcl_decor:path_" .. material
+	world = {}
+	for x = -1, 3 do for z = -1, 1 do put(x, 0, z, "mcl_core:stone") end end
+	put(1, 1, 0, name)
+	local path = planner.find_path({x = 0, y = 1, z = 0}, cells.can_stand,
+		function(pos) return pos.x == 2 and pos.y == 1 and pos.z == 0 end, {range = 8})
+	assert(path, "route exists across " .. name)
+	local crossed = false
+	for _, pos in ipairs(path) do
+		if pos.x == 1 and pos.y == 1 and pos.z == 0 then crossed = true end
+	end
+	assert(crossed, "route crosses " .. name .. " instead of detouring")
+end
+
+-- Normal ground, a path overlay, carpet and a lower slab are all one connected
+-- route at their real support cells.
+world = {}
+for x = -1, 5 do for z = -1, 1 do put(x, 0, z, "mcl_core:stone") end end
+put(1, 1, 0, "mcl_decor:path_cobble")
+put(2, 1, 0, "mcl_wool:carpet")
+put(3, 0, 0, "mcl_stairs:slab_wood")
+local cover_path = planner.find_path({x = 0, y = 1, z = 0}, cells.can_stand,
+	function(pos) return pos.x == 4 and pos.y == 1 and pos.z == 0 end, {range = 8})
+assert(cover_path, "route exists across ground, path, carpet and slab")
+local crossed_cells = {}
+for _, pos in ipairs(cover_path) do crossed_cells[pos.x] = true end
+assert(crossed_cells[1] and crossed_cells[2] and crossed_cells[3], "route crosses all three floor transitions")
 
 -- The feet cell may hold carpet, the head may not.
 world = {}; put(0, 0, 0, "mcl_core:stone"); put(0, 1, 0, "mcl_wool:carpet")

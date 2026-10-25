@@ -116,14 +116,30 @@ function cells.is_hazard(name, def)
 		or core.get_item_group(name, "dangerous") > 0
 end
 
+-- mcl_decor's path nodes are walkable overlays with a collision box only
+-- 1/16-node high at the node bottom; don't treat arbitrary group:path blocks
+-- as transparent at the villager's feet.
+local function thin_path(name, def)
+	local box = def and def.collision_box
+	local fixed = box and box.type == "fixed" and box.fixed
+	if type(fixed) ~= "table" then return false end
+	if type(fixed[1]) == "table" then
+		if fixed[2] ~= nil then return false end
+		fixed = fixed[1]
+	end
+	return core.get_item_group(name, "path") > 0
+		and type(fixed[2]) == "number" and type(fixed[5]) == "number"
+		and fixed[2] <= -0.49 and fixed[5] <= -0.4375
+		and fixed[5] - fixed[2] <= 0.1
+end
+
 -- A node the villager's body may pass through: not something it collides with,
 -- and not something that hurts it. Openness alone is not enough -- fire is not
 -- walkable, carries no collision box and is not a liquid, so a check that only
 -- asks whether a villager fits would happily place one in a fire.
 --
--- `options.thin`: a carpet counts as clear. It is a walkable sliver a villager
--- stands on top of, and the church floor (#126) is laid with it; carpet at head
--- height still blocks, so pass this for the feet cell only.
+-- `options.thin`: carpets and thin `group:path` overlays count as clear. They
+-- sit in the feet cell over a supporting floor; at head height they still block.
 -- `options.door`: a wooden door counts as clear, since the planner and the mover
 -- open it. An iron door never does.
 function cells.is_open(pos, options)
@@ -135,7 +151,8 @@ function cells.is_open(pos, options)
 		return options and options.door and core.get_item_group(node.name, "door_iron") == 0 or false
 	end
 	if not def then return false end
-	if def.walkable or (def.collision_box and def.collision_box.type ~= "none") then return false end
+	if (def.walkable or (def.collision_box and def.collision_box.type ~= "none"))
+		and not (options and options.thin and thin_path(node.name, def)) then return false end
 	if def.liquidtype and def.liquidtype ~= "none" then return false end
 	return not cells.is_hazard(node.name, def)
 end
