@@ -36,7 +36,7 @@ local groups = {
 }
 -- mcl_decor/src/paths.lua generates these nodes from tpl_path: the visible
 -- cobbles are uneven, but the collision box is one sixteenth high over a floor.
-local decor_path_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}
+local decor_path_box = {type = "fixed", fixed = {{-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}}
 local decor_path_node_box = {type = "fixed", fixed = {
 	{-0.4375, -0.5, -0.4375, -0.125, -0.4375, -0.125},
 	{-0.125, -0.5, -0.0625, 0.0625, -0.4375, 0.125},
@@ -57,9 +57,21 @@ for _, material in ipairs(decor_paths) do
 	groups[name] = {path = 1}
 end
 defs["test:thick_path"] = {
-	walkable = true, collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.1, 0.5}},
+	walkable = true, collision_box = {type = "fixed", fixed = {{-0.5, -0.5, -0.5, 0.5, -0.1, 0.5}}},
 }
 groups["test:thick_path"] = {path = 1}
+defs["test:multi_path"] = {
+	walkable = true, collision_box = {type = "fixed", fixed = {
+		{-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}, {-0.5, 0, -0.5, 0.5, 0.0625, 0.5},
+	}},
+}
+groups["test:multi_path"] = {path = 1}
+defs["test:invalid_path"] = {walkable = true, collision_box = {type = "fixed", fixed = {{-0.5}}}}
+groups["test:invalid_path"] = {path = 1}
+defs["test:flat_path"] = {
+	walkable = true, collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}},
+}
+groups["test:flat_path"] = {path = 1}
 defs["test:danger_path"] = {walkable = true, collision_box = decor_path_box, damage_per_second = 1}
 groups["test:danger_path"] = {path = 1}
 minetest = {
@@ -89,8 +101,14 @@ assert(math.abs(path_standing.y - 0.5725) < 1e-9, "stands on the path collision 
 assert(not cells.is_open({x = 0, y = 1, z = 0}, {door = true}), "path at head height blocks")
 put(0, 1, 0, "test:thick_path")
 assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a thick path-group node is not transparent")
+put(0, 1, 0, "test:multi_path")
+assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a multi-box path node is not transparent")
+put(0, 1, 0, "test:invalid_path")
+assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "an invalid path box is not transparent")
+put(0, 1, 0, "test:flat_path")
+assert(cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "flat fixed path boxes are supported")
 put(0, 1, 0, "test:danger_path")
-assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a hazardous path-group node still blocks")
+	assert(not cells.is_open({x = 0, y = 1, z = 0}, {thin = true}), "a hazardous path-group node still blocks")
 put(0, 1, 0, "mcl_decor:path_cobble")
 put(0, 0, 0, "air")
 assert(not cells.can_stand({x = 0, y = 1, z = 0}), "an unsupported path is not a floor")

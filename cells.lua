@@ -122,8 +122,13 @@ end
 local function thin_path(name, def)
 	local box = def and def.collision_box
 	local fixed = box and box.type == "fixed" and box.fixed
+	if type(fixed) ~= "table" then return false end
+	if type(fixed[1]) == "table" then
+		if fixed[2] ~= nil then return false end
+		fixed = fixed[1]
+	end
 	return core.get_item_group(name, "path") > 0
-		and type(fixed) == "table" and type(fixed[1]) == "number"
+		and type(fixed[2]) == "number" and type(fixed[5]) == "number"
 		and fixed[2] <= -0.49 and fixed[5] <= -0.4375
 		and fixed[5] - fixed[2] <= 0.1
 end

@@ -42,7 +42,7 @@ minetest = {
 		["mcl_core:cobble"] = {walkable = true},
 		["mcl_decor:path_cobble"] = {
 			walkable = true,
-			collision_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}},
+			collision_box = {type = "fixed", fixed = {{-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}},
 		},
 		["mcl_core:grass_path"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.4375, 0.5}}},
 		["test:lower_slab"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0, 0.5}}},
