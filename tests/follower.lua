@@ -32,8 +32,15 @@ local clock = 0
 local pending = {}
 minetest = {
 	get_modpath = function() return "." end,
-	get_item_group = function() return 0 end,
-	registered_nodes = {air = {walkable = false}, ["mcl_core:stone"] = {walkable = true}},
+	get_item_group = function(name, group)
+		return name == "test:lower_slab" and group == "slab" and 1
+			or name == "test:carpet" and group == "carpet" and 1 or 0
+	end,
+	registered_nodes = {
+		air = {walkable = false}, ["mcl_core:stone"] = {walkable = true},
+		["test:lower_slab"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0, 0.5}}},
+		["test:carpet"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}},
+	},
 	get_node_or_nil = function(pos) return {name = nodes[key(pos)] or "air"} end,
 	get_objects_inside_radius = function() return objects_near end,
 	get_us_time = function() return clock end,
@@ -105,6 +112,42 @@ local function run(self, seconds)
 end
 
 local function cell(x, z, action) return {x = x, y = 0, z = z, action = action} end
+
+-- The physics feet sample stays in a lower slab's node; the route cell remains
+-- the open node above. The follower translates that sample so it can complete
+-- a planner route over a half-step instead of waiting for a different cell id.
+reset()
+nodes[key({x = 1, y = -1, z = 0})] = "test:lower_slab"
+local slab_crossing = villager(0, 0, {cell(0, 0), cell(1, 0), cell(2, 0)})
+follower.begin(slab_crossing)
+for _ = 1, 200 do
+	if slab_crossing.pos().x > 0.65 and slab_crossing.pos().x < 1.5 then
+		slab_crossing.pos().y = -0.99
+	else
+		slab_crossing.pos().y = -0.49
+	end
+	slab_crossing.tick()
+	if slab_crossing.arrived then break end
+end
+assert(slab_crossing.arrived, "crosses and completes the lower-slab waypoint")
+assert(slab_crossing.jumps == 0, "a half-height slab does not trigger a full-step jump")
+
+-- Carpets remain passable through an actual followed route, not just in the
+-- cells classifier.
+reset()
+nodes[key({x = 1, y = 0, z = 0})] = "test:carpet"
+local carpet_crossing = villager(0, 0, {cell(0, 0), cell(1, 0), cell(2, 0)})
+follower.begin(carpet_crossing)
+for _ = 1, 200 do
+	if carpet_crossing.pos().x > 0.65 and carpet_crossing.pos().x < 1.5 then
+		carpet_crossing.pos().y = -0.4275
+	else
+		carpet_crossing.pos().y = -0.49
+	end
+	carpet_crossing.tick()
+	if carpet_crossing.arrived then break end
+end
+assert(carpet_crossing.arrived, "crosses carpet and completes the route")
 
 -- A route that was not flagged is vanilla's.
 reset()

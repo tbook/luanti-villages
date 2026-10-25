@@ -369,7 +369,7 @@ do
 	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), true, "standing on the ground")
 	expect_valid(world, {c(0, 5, 0)}, c(1, 5, 0), false, "standing in mid-air")
 	world.set(c(0, 0, 0), "mcl_stairs:slab_wood")
-	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), false, "standing over a bottom slab")
+	expect_valid(world, {c(0, 1, 0)}, c(1, 1, 0), true, "standing over a bottom slab")
 	-- A closed door with its leaf on the north edge, which toggling moves to the west.
 	local function door(name, param2)
 		local door_world = stock_world.new()
