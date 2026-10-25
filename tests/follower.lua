@@ -38,6 +38,8 @@ minetest = {
 	end,
 	registered_nodes = {
 		air = {walkable = false}, ["mcl_core:stone"] = {walkable = true},
+		["mcl_core:cobble"] = {walkable = true},
+		["mcl_core:grass_path"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0.4375, 0.5}}},
 		["test:lower_slab"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, 0, 0.5}}},
 		["test:carpet"] = {walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.4375, 0.5}}},
 	},
@@ -131,6 +133,16 @@ for _ = 1, 200 do
 end
 assert(slab_crossing.arrived, "crosses and completes the lower-slab waypoint")
 assert(slab_crossing.jumps == 0, "a half-height slab does not trigger a full-step jump")
+
+-- Generated village paths and cobblestone footpaths stay crossable by the
+-- followed route as well as by the planner.
+reset()
+nodes[key({x = 1, y = -1, z = 0})] = "mcl_core:grass_path"
+nodes[key({x = 2, y = -1, z = 0})] = "mcl_core:cobble"
+local path_stones = villager(0, 0, {cell(0, 0), cell(1, 0), cell(2, 0), cell(3, 0)})
+follower.begin(path_stones)
+run(path_stones, 8)
+assert(path_stones.arrived, "crosses grass path and cobble footpath")
 
 -- Carpets remain passable through an actual followed route, not just in the
 -- cells classifier.
