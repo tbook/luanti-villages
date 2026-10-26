@@ -32,6 +32,10 @@ M.config = {
 	block = 16,
 }
 
+-- Town-boundary grading has a wider transition and cap than ordinary village
+-- pads. Keep these defaults local to that API so village smoothing is unchanged.
+M.boundary_config = {radius = 20, cap = 20}
+
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
 -- Pads from a plan: {x0, z0, x1, z1} the footprint, {yx0 ...} the yard, y the
@@ -567,8 +571,8 @@ end
 function M.boundary_volume(rectangles, ground_y, options)
 	if options == nil then options = {} end
 	if type(options) ~= "table" then return nil, "options must be a table" end
-	local radius = options.radius == nil and 20 or options.radius
-	local cap = options.cap == nil and M.config.cap or options.cap
+	local radius = options.radius == nil and M.boundary_config.radius or options.radius
+	local cap = options.cap == nil and M.boundary_config.cap or options.cap
 	if not integer(ground_y) then return nil, "ground_y must be an integer" end
 	if not integer(radius) or radius < 0 then return nil, "radius must be a nonnegative integer" end
 	if not integer(cap) or cap < 0 then return nil, "cap must be a nonnegative integer" end

@@ -41,8 +41,8 @@ function M.plan(rectangles, ground_y, options)
 	local valid, reason = validate(rectangles, ground_y)
 	if not valid then return nil, reason end
 	if type(options.height_at) ~= "function" then return nil, "height_at must be a function" end
-	local radius = options.radius == nil and 20 or options.radius
-	local cap = options.cap == nil and smoothing.config.cap or options.cap
+	local radius = options.radius == nil and smoothing.boundary_config.radius or options.radius
+	local cap = options.cap == nil and smoothing.boundary_config.cap or options.cap
 	if not integer(radius) or radius < 0 then return nil, "radius must be a nonnegative integer" end
 	if not integer(cap) or cap < 0 then return nil, "cap must be a nonnegative integer" end
 	local config = {}
@@ -54,7 +54,20 @@ function M.plan(rectangles, ground_y, options)
 			yx0 = rect.x0, yz0 = rect.z0, yx1 = rect.x1, yz1 = rect.z1, y = ground_y,
 			surface = rect.surface}
 	end
-	local targets = smoothing.targets(pads, options.height_at, config, options.protected)
+	local function interior(x, z)
+		for _, rect in ipairs(rectangles) do
+			if x >= rect.x0 and x <= rect.x1 and z >= rect.z0 and z <= rect.z1 then return true end
+		end
+		return false
+	end
+	local function height_at(x, z)
+		if interior(x, z) then return ground_y, false end
+		return options.height_at(x, z)
+	end
+	-- The city is a hard target constraint, not protected terrain: protected
+	-- columns bypass the footprint rule in targets. Keep the solver's other
+	-- behavior intact and enforce the separate no-write rule in the mask below.
+	local targets = smoothing.targets(pads, height_at, config)
 	local result = {
 		targets = targets,
 		at = targets.at, was = targets.was, kind = targets.kind,
@@ -65,6 +78,7 @@ function M.plan(rectangles, ground_y, options)
 	-- support out of the future writer's mask; only changed yard/skirt columns
 	-- are eligible for boundary grading writes.
 	function result.write_mask(x, z)
+		if interior(x, z) then return false end
 		local kind = targets.kind(x, z)
 		local target, was = targets.at(x, z), targets.was(x, z)
 		return kind ~= nil and kind ~= "footprint" and target ~= nil and was ~= nil and target ~= was

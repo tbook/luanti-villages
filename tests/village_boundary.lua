@@ -8,28 +8,39 @@ end
 local town = {rect(0, 0, 4, 4)}
 local function flat(y) return function() return y end end
 
--- A raised town is cut toward its fixed floor. Footprint targets stay exact,
--- and only changed yard/skirt columns enter the future writer's mask.
-local raised = assert(boundary.plan(town, 10, {height_at = flat(14)}))
+-- A raised town is cut toward its fixed floor. Interior height is known even
+-- when the caller reports unknown terrain, a roof, or an overhang there.
+local raised = assert(boundary.plan(town, 10, {height_at = function(x, z)
+	if x >= 0 and x <= 4 and z >= 0 and z <= 4 then return nil end
+	return 14
+end, protected = {rect(0, 0, 4, 4)}}))
 assert(raised.at(2, 2) == 10 and raised.kind(2, 2) == "footprint")
-assert(not raised.write_mask(2, 2), "footprint support is filtered from writes")
+assert(raised.was(2, 2) == 10 and not raised.write_mask(2, 2), "unknown interior is fixed and filtered")
 assert(raised.at(-1, 2) < 14 and raised.write_mask(-1, 2), "raised yard changes")
 assert(raised.at(-20, 2) == 14 and not raised.write_mask(-20, 2), "strict radius edge is unchanged")
 assert(raised.kind(-19, 2) == "skirt", "column just inside radius is eligible")
+local roof = assert(boundary.plan(town, 10, {height_at = function(x, z)
+	return 40, true
+end}))
+assert(roof.at(2, 2) == 10 and roof.was(2, 2) == 10 and not roof.write_mask(2, 2),
+	"roof or overhang cannot hide the interior constraint")
 
--- A cut town is filled from below. With a 30-node discrepancy, the solver
--- still respects the existing five-node cap on every changed column.
+-- A cut town is filled from below. The boundary cap is 20, independent of the
+-- existing five-node village cap; a 30-node discrepancy therefore gets partial work.
 local cut = assert(boundary.plan(town, 10, {height_at = flat(-20)}))
 assert(cut.at(2, 2) == 10, "footprint is a hard ground_y constraint")
-assert(cut.at(-1, 2) == -15, "skirt respects the five-node cap")
+assert(cut.at(-1, 2) == 0, "default boundary cap is 20")
 for z = cut.targets.z0, cut.targets.z1 do
 	for x = cut.targets.x0, cut.targets.x1 do
 		local goal, was = cut.at(x, z), cut.was(x, z)
-		if goal and was and cut.kind(x, z) ~= "footprint" then
-			assert(math.abs(goal - was) <= 5, "cap at " .. x .. "," .. z)
+		if goal and was and cut.kind(x, z) == "skirt" then
+			assert(math.abs(goal - was) <= 20, "boundary cap at " .. x .. "," .. z)
 		end
 	end
 end
+assert(cut.write_mask(-1, 2), "partial exterior work is represented in the mask")
+local small_cap = assert(boundary.plan(town, 10, {height_at = flat(-20), cap = 5}))
+assert(small_cap.at(-1, 2) == -15, "explicit cap is honored")
 
 -- Overlapping and irregular rectangles share their slopes, while a narrow
 -- recess remains represented in the union rather than being replaced by a box.

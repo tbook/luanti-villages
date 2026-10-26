@@ -621,7 +621,6 @@ do
 			return smoothing.volume(plan, schematic_table, options, engine)
 		end,
 		boundary_volume = boundary.volume,
-		boundary_plan = boundary.plan,
 		terraform = function(plan, pr, options)
 			local opts = {}
 			for key, value in pairs(options or {}) do opts[key] = value end
