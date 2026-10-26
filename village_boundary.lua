@@ -177,7 +177,7 @@ function M.smooth(rectangles, ground_y, options, env)
 			local ground_name = column and column.ground_name
 			local base_name = column and column.base_name
 			if column and (column.ground_liquid or column.base_liquid
-					or holes.is_ice(ground_name) or holes.is_ice(base_name)) then
+					or (ground_name and holes.is_ice(ground_name)) or (base_name and holes.is_ice(base_name))) then
 				shoreline[z] = shoreline[z] or {}
 				shoreline[z][x] = true
 			end
@@ -208,7 +208,7 @@ function M.smooth(rectangles, ground_y, options, env)
 		end
 		local y, name, liquid = column.base_y, column.base_name, column.base_liquid
 		if not y then y, name, liquid = column.ground_y, column.ground_name, column.ground_liquid end
-		if not y or liquid or holes.is_ice(name) then return nil end
+		if not y or liquid or (name and holes.is_ice(name)) then return nil end
 		return y, column.overhang
 	end})
 	if not plan then return false, "boundary planning failed after tree cleanup: " .. tostring(plan_reason) end

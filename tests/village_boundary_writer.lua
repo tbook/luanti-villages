@@ -45,8 +45,9 @@ local function setup()
 	local env = {
 		engine = engine,
 		load_node = function(pos) return {name = "air"} end,
-			heights = function(area)
+		heights = function(area)
 			return function(x, z)
+				if x == 23 and z == 2 then return {} end -- Real heights lookup for an all-air column.
 				local y = 8
 				local c = {y = y, ground_y = y, ground_name = "mcl_core:dirt_with_grass",
 					base_y = y, base_name = "mcl_core:dirt_with_grass"}
@@ -55,7 +56,7 @@ local function setup()
 				if x == 16 and z == 2 then c.ground_name, c.base_name = "mcl_core:snow", "mcl_core:ice" end
 				if x == 17 and z == 2 then c.ground_name, c.base_name = "mcl_bamboo:bamboo", "mcl_core:ice" end
 				if x == 12 and z == 8 then c.ground_name, c.base_name = "mcl_core:snow", "mcl_core:ice" end
-				if x == 22 and z == 2 then c.overhang = true end
+				if x == 22 and z == 2 then c.overhang, c.base_name = true, nil end
 				return c
 			end
 		end,
@@ -120,6 +121,8 @@ assert(scene.engine.get_node({x = 18, y = 8, z = 2}).name == "mcl_core:dirt_with
 	"ground directly beside snow and growth-covered ice stays fixed")
 assert(scene.engine.get_node({x = 20, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "foreign structure margin stays fixed")
 assert(scene.engine.get_node({x = 22, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "overhang is not graded")
+assert(scene.engine.get_node({x = 23, y = 8, z = 2}).name == "mcl_core:dirt_with_grass",
+	"all-air columns with no ground or base names are skipped")
 assert(scene.engine.get_node({x = 24, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "strict radius edge stays fixed")
 assert(scene.engine.get_node({x = 12, y = 9, z = 2}).name == "air"
 	and scene.engine.get_node({x = 12, y = 4, z = 2}).name == "mcl_farming:sweet_berry_bush_3",
