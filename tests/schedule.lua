@@ -87,8 +87,11 @@ local morning_phase = mcl_moon.get_moon_phase()
 time = at(12001)
 assert(mcl_moon.get_moon_phase() ~= morning_phase)
 assert(holiday_on(0, 11999) and holiday_on(0, 12001))
-day, time = 7, at(10000)
-assert(not common.is_holiday() and common.is_holiday(1), "tomorrow wraps to the next holiday phase")
+for _, ticks in ipairs({11999, 12001}) do
+	day, time = 7, at(ticks)
+	assert(not common.is_holiday() and common.is_holiday(1),
+		("tomorrow wraps to the next holiday phase at %d"):format(ticks))
+end
 day, time = 0, at(10000)
 assert(common.is_holiday() and not common.is_holiday(1), "the following day advances beyond the holiday")
 

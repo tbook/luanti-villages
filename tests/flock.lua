@@ -531,6 +531,32 @@ assert(#gopaths == 0 and flock.sessions[loom_day].herd == nil,
 	"a preholiday workday does not start grazing")
 assert(activity_of(loom_day) == "work", "vanilla keeps the shepherd working at its loom")
 
+-- A calendar change to a preholiday day ends any active grazing walk or anchor.
+reset(); spawned = 0; day = 6; time = 10000 / 24000; gopaths = {}
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local switching = shepherd(0, 0)
+tick(switching, 3)
+assert(switching.state == "gowp", "the ordinary day starts a grazing route")
+day = 3
+tick(switching)
+assert(switching.state == "stand" and flock.sessions[switching].herd == nil,
+	"the preholiday change stops the active route")
+assert(activity_of(switching) == "work", "vanilla takes over loom work")
+
+reset(); spawned = 0; day = 6; time = 10000 / 24000; gopaths = {}
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local anchored = shepherd(0, 0)
+tick(anchored, 3)
+local anchor_stop = gopaths[1].target
+anchored.pos.x, anchored.pos.z, anchored.state = anchor_stop.x, anchor_stop.z, "stand"
+tick(anchored)
+assert(anchored._villages_wander_anchor, "arrival anchors the grazing pause")
+day = 3
+tick(anchored)
+assert(not anchored._villages_wander_anchor and flock.sessions[anchored].herd == nil,
+	"the preholiday change clears the grazing anchor")
+assert(activity_of(anchored) == "work")
+
 -- 12. A shepherd with no bed (vanilla gives one only at night) grazes about the bell all the
 -- same, within 90 of its loom; and about the loom with no bell.
 reset(); gopaths = {}; day = 6; time = 10000 / 24000

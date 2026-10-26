@@ -7,7 +7,8 @@
 -- under a roof, they are left to graze where they stand, and come running when it
 -- is out again. In the work stage the shepherd spends most of its time walking from
 -- one grazing stop to the next about the village bell (or, with no bell, its loom),
--- with a minute at the loom now and then, which is where vanilla restocks its trades.
+-- through ordinary workdays. On the day before a holiday it works at the loom all
+-- day; visits back there during grazing are for route failures or the end of work.
 --
 -- Vanilla would walk it back to the loom every few seconds (do_work in
 -- mobs_mc/villager.lua), so while it herds get_activity answers "herd", which
