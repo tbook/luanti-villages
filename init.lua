@@ -611,6 +611,7 @@ do
 	local api = rawget(_G, "living_villages") or {}
 	_G.living_villages = api
 	local fragments = dofile(core.get_modpath("living_villages") .. "/village_fragments.lua")
+	local boundary = dofile(core.get_modpath("living_villages") .. "/village_boundary.lua")
 	local terrain_settlements = rawget(_G, "settlements")
 	local terrain_mcl_vars = rawget(_G, "mcl_vars")
 	api.terrain = {
@@ -619,6 +620,8 @@ do
 			local engine = type(env) == "table" and env.engine or core
 			return smoothing.volume(plan, schematic_table, options, engine)
 		end,
+		boundary_volume = boundary.volume,
+		boundary_plan = boundary.plan,
 		terraform = function(plan, pr, options)
 			local opts = {}
 			for key, value in pairs(options or {}) do opts[key] = value end

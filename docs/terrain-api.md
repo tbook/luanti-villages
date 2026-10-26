@@ -84,6 +84,24 @@ to `volume` and terraform when overriding smoothing settings. `options.protected
 is accepted for call symmetry; protected columns remain inside the envelope because
 they still constrain the terrain around them.
 
+For town-edge grading, `boundary_plan(rectangles, ground_y, options)` is a pure
+planner over a dense list of inclusive `{x0, z0, x1, z1}` rectangles. It requires
+`options.height_at(x, z)` to supply the observed ground height (or `nil` for a
+column to leave alone). The default grading radius is 20 nodes and uses the same
+strict Euclidean radius, slope limits, and per-column cap as village smoothing.
+The returned `at`, `was`, and `kind` lookups describe target columns;
+`write_mask(x, z)` is true only for changed yard or skirt columns. Footprints
+remain hard constraints at `ground_y` and are omitted from that write mask so
+the later writer can keep their support intact. Planning does not inspect or
+change map nodes.
+
+`boundary_volume(rectangles, ground_y, options)` is a read-only pre-emerge query
+for that boundary pipeline. Its inclusive bounds include the default +/-48-node
+ground inspection, tree cleanup's configured horizontal and 40-node vertical
+reach, and the column fill and plant cleanup reaches. It rounds outward to whole
+mapblocks and returns `nil, reason` if input is invalid or the rounded box
+crosses the world map limit. It does not read or write the map.
+
 Protected rectangles are tables
 with inclusive `x0`, `z0`, `x1`, `z1`; optional nonnegative `margin` expands the
 rectangle. They remain fixed slope constraints and are excluded from tree cleanup,

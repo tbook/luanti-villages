@@ -19,6 +19,8 @@ local holes = dofile(core.get_modpath("living_villages") .. "/village_holes.lua"
 
 local M = {}
 
+local DEFAULT_INSPECTION_Y = 48 -- boundary grading reads the ground across this full range
+
 M.config = {
 	margin = 2, -- the flat yard around a footprint
 	radius = 8, -- how far from a pad the ground is changed
@@ -557,6 +559,58 @@ local function mapblock_bounds(box)
 	local function up(value) return math.floor(value / 16) * 16 + 15 end
 	return {minp = {x = down(box.minp.x), y = down(box.minp.y), z = down(box.minp.z)},
 		maxp = {x = up(box.maxp.x), y = up(box.maxp.y), z = up(box.maxp.z)}}
+end
+
+-- Bounds for the follow-up town-boundary pass (#296/#297). Its ground scan
+-- covers +/-48 around ground_y; tree cleanup and column helpers can read or
+-- write beyond that scan, so include their full configured reaches as well.
+function M.boundary_volume(rectangles, ground_y, options)
+	if options == nil then options = {} end
+	if type(options) ~= "table" then return nil, "options must be a table" end
+	local radius = options.radius == nil and 20 or options.radius
+	local cap = options.cap == nil and M.config.cap or options.cap
+	if not integer(ground_y) then return nil, "ground_y must be an integer" end
+	if not integer(radius) or radius < 0 then return nil, "radius must be a nonnegative integer" end
+	if not integer(cap) or cap < 0 then return nil, "cap must be a nonnegative integer" end
+	if type(rectangles) ~= "table" then return nil, "boundary must be a list of rectangles" end
+	local count, max_key = 0, 0
+	local minx, minz, maxx, maxz
+	for key, rect in pairs(rectangles) do
+		if not integer(key) or key < 1 or type(rect) ~= "table" then
+			return nil, "boundary must be a dense list of rectangles"
+		end
+		count, max_key = count + 1, math.max(max_key, key)
+		for _, field in ipairs({"x0", "z0", "x1", "z1"}) do
+			if not integer(rect[field]) then return nil, "invalid boundary rectangle " .. key .. ": " .. field end
+		end
+		if rect.x0 > rect.x1 or rect.z0 > rect.z1 then
+			return nil, "invalid boundary rectangle " .. key .. ": bounds are reversed"
+		end
+		minx, minz = math.min(minx or rect.x0, rect.x0), math.min(minz or rect.z0, rect.z0)
+		maxx, maxz = math.max(maxx or rect.x1, rect.x1), math.max(maxz or rect.z1, rect.z1)
+	end
+	if count == 0 then return nil, "empty boundary" end
+	if count ~= max_key then return nil, "boundary must be a dense list of rectangles" end
+	local tree_margin = math.max(fragments.config.cap_radius,
+		(fragments.config.orphan_margin or 0) + (fragments.config.leaf_reach or 0))
+	local box = {
+		minp = {x = minx - radius - tree_margin,
+			y = math.min(ground_y - DEFAULT_INSPECTION_Y - fragments.config.cap_height,
+				ground_y - cap - 20),
+			z = minz - radius - tree_margin},
+		maxp = {x = maxx + radius + tree_margin,
+			y = math.max(ground_y + DEFAULT_INSPECTION_Y + 3,
+				ground_y + cap + 32) + fragments.config.cap_height,
+			z = maxz + radius + tree_margin},
+	}
+	box = mapblock_bounds(box)
+	local map_limit = 31000
+	for _, axis in ipairs({"x", "y", "z"}) do
+		if box.minp[axis] < -map_limit or box.maxp[axis] > map_limit then
+			return nil, "boundary volume exceeds the world map limit"
+		end
+	end
+	return box
 end
 
 -- The read-only, deterministic query used before a caller emerges its area.
