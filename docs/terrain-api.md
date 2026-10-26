@@ -84,6 +84,18 @@ to `volume` and terraform when overriding smoothing settings. `options.protected
 is accepted for call symmetry; protected columns remain inside the envelope because
 they still constrain the terrain around them.
 
+For town-edge grading, `boundary_volume(rectangles, ground_y, options)` is a
+read-only pre-emerge query over a dense list of inclusive
+`{x0, z0, x1, z1}` rectangles. It requires no schematics or settlement plan.
+Default radius and cap are both 20 nodes. The later internal planner uses the
+same strict Euclidean radius and slope rules as village smoothing. It keeps
+interior heights fixed at `ground_y` regardless of map contents and excludes
+every interior column from writes. The query's inclusive bounds include the
+default +/-48-node ground inspection, tree cleanup's configured horizontal and
+40-node vertical reach, and the column fill and plant cleanup reaches. It rounds
+outward to whole mapblocks and returns `nil, reason` if input is invalid or the
+rounded box crosses the world map limit. It does not read or write the map.
+
 Protected rectangles are tables
 with inclusive `x0`, `z0`, `x1`, `z1`; optional nonnegative `margin` expands the
 rectangle. They remain fixed slope constraints and are excluded from tree cleanup,
