@@ -101,13 +101,14 @@ local HOLIDAY_KEEPER_SCHEDULE = {
 -- mcl_moon advances the phase at midday, so a day's morning reads one phase
 -- behind its evening. The evening's phase stands for the whole day, which keeps
 -- the church morning and the bell afternoon on the same holiday.
-local function is_holiday()
+local function is_holiday(days_ahead)
+	days_ahead = days_ahead or 0
 	if mcl_moon and mcl_moon.get_moon_phase then
 		local phase = mcl_moon.get_moon_phase()
 		if core.get_timeofday() <= 0.5 then phase = phase + 1 end
-		return phase % 4 == 0
+		return (phase + days_ahead) % 4 == 0
 	end
-	return core.get_day_count and core.get_day_count() % 4 == 0 or false
+	return core.get_day_count and (core.get_day_count() + days_ahead) % 4 == 0 or false
 end
 
 local function is_thunder()
