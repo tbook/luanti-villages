@@ -621,6 +621,27 @@ do
 			return smoothing.volume(plan, schematic_table, options, engine)
 		end,
 		boundary_volume = boundary.volume,
+		smooth_boundary = function(rectangles, ground_y, options)
+			local opts = options or {}
+			local overrides = type(opts) == "table" and opts.env or {}
+			local env = {
+				engine = type(overrides) == "table" and overrides.engine or core,
+				settlements = type(overrides) == "table" and overrides.settlements or terrain_settlements,
+			}
+			if type(overrides) == "table" then
+				for key, value in pairs(overrides) do env[key] = value end
+			end
+			local engine = env.engine
+			local structure_test = fragments.structure_test(engine)
+			env.load_node = env.load_node or (terrain_mcl_vars and function(pos) return terrain_mcl_vars.get_node(pos) end)
+			env.scan = env.scan or function(area)
+				return fragments.scan_structures(area, structure_test, engine, true)
+			end
+			env.clear_trees = env.clear_trees or function(zone, protected)
+				return fragments.clear_trees(zone, nil, engine, protected)
+			end
+			return boundary.smooth(rectangles, ground_y, opts, env)
+		end,
 		terraform = function(plan, pr, options)
 			local opts = {}
 			for key, value in pairs(options or {}) do opts[key] = value end

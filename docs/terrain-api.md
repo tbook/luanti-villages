@@ -96,6 +96,25 @@ default +/-48-node ground inspection, tree cleanup's configured horizontal and
 outward to whole mapblocks and returns `nil, reason` if input is invalid or the
 rounded box crosses the world map limit. It does not read or write the map.
 
+After emerging that volume and waiting for completion, call
+`smooth_boundary(rectangles, ground_y, options)` with the same boundary and
+options. It reuses the town-boundary planner and existing terrain writer, clears
+trees in one batch while protecting every boundary rectangle, and grades only
+eligible exterior columns. Radius and movement cap default to 20; columns at the
+radius stay fixed, and radius zero makes no changes. Water, ice, nearby shoreline
+ground, structures and overhangs are left alone. Interior ground stays a hard
+planning constraint at `ground_y`, and no interior node is written. This
+operation does not run the hole-filling stage.
+
+The function returns `true, stats` or `false, reason`. A false result after
+cleanup or column writing can follow partial terrain changes; it does not roll
+them back. `stats.changed`, `cut`, and `filled` count graded columns;
+`max_movement` is the largest surface-height change, and `steps_over_one` is a
+diagnostic. `tree_removed` counts removed tree nodes. `written` is the inclusive
+XYZ envelope of nodes actually changed, or nil when none changed. The same
+`options.env` injection pattern as `terraform` is available for engine and helper
+functions.
+
 Protected rectangles are tables
 with inclusive `x0`, `z0`, `x1`, `z1`; optional nonnegative `margin` expands the
 rectangle. They remain fixed slope constraints and are excluded from tree cleanup,
