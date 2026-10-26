@@ -52,14 +52,16 @@ local function setup()
 					base_y = y, base_name = "mcl_core:dirt_with_grass"}
 				if x == 13 and z == 2 then c.y = 12 end
 				if x == 15 and z == 2 then c.ground_liquid, c.ground_name = true, "mcl_core:water_source" end
-				if x == 16 and z == 2 then c.ground_name = "mcl_core:ice" end
-				if x == 20 and z == 2 then c.overhang = true end
+				if x == 16 and z == 2 then c.ground_name, c.base_name = "mcl_core:snow", "mcl_core:ice" end
+				if x == 17 and z == 2 then c.ground_name, c.base_name = "mcl_bamboo:bamboo", "mcl_core:ice" end
+				if x == 12 and z == 8 then c.ground_name, c.base_name = "mcl_core:snow", "mcl_core:ice" end
+				if x == 22 and z == 2 then c.overhang = true end
 				return c
 			end
 		end,
 		scan = function()
 			return {find = function(x0, z0, x1, z1)
-				if 18 >= x0 and 18 <= x1 and 2 >= z0 and 2 <= z1 then return "foreign:wall" end
+				if 20 >= x0 and 20 <= x1 and 2 >= z0 and 2 <= z1 then return "foreign:wall" end
 			end}
 		end,
 		clear_trees = function(zones, protected)
@@ -77,6 +79,10 @@ local scene = setup()
 scene.world[key(2, 12, 2)] = {name = "foreign:roof", param2 = 3}
 scene.world[key(8, 13, 2)] = {name = "foreign:roof", param2 = 5}
 scene.world[key(5, 11, 2)] = {name = "mcl_core:tree", param2 = 1}
+scene.world[key(16, 8, 2)] = {name = "mcl_core:ice", param2 = 0}
+scene.world[key(17, 7, 2)] = {name = "mcl_core:ice", param2 = 0}
+scene.world[key(17, 8, 2)] = {name = "mcl_bamboo:bamboo", param2 = 0}
+scene.world[key(12, 8, 8)] = {name = "mcl_core:ice", param2 = 0}
 scene.world[key(12, 9, 2)] = {name = "mcl_farming:sweet_berry_bush_3", param2 = 2}
 for y = 9, 12 do scene.world[key(13, y, 2)] = {name = "mcl_bamboo:bamboo", param2 = 0} end
 local roof_before = scene.world[key(2, 12, 2)].name .. ":" .. scene.world[key(2, 12, 2)].param2
@@ -101,10 +107,19 @@ assert(scene.world[key(8, 13, 2)].name == "foreign:roof" and scene.world[key(8, 
 	"overlapping footprint stays untouched")
 assert(scene.engine.get_node({x = 5, y = 0, z = 2}).name ~= "air", "a recess outside the footprint union remains eligible")
 assert(scene.engine.get_node({x = 15, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "water shoreline remains unchanged")
-assert(scene.engine.get_node({x = 16, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "ice and its shoreline remain unchanged")
+assert(scene.engine.get_node({x = 16, y = 8, z = 2}).name == "mcl_core:ice", "snow-covered ice remains unchanged")
+assert(scene.engine.get_node({x = 17, y = 7, z = 2}).name == "mcl_core:ice"
+	and scene.engine.get_node({x = 17, y = 8, z = 2}).name == "mcl_bamboo:bamboo",
+	"growth over ice remains unchanged")
+assert(scene.engine.get_node({x = 12, y = 8, z = 8}).name == "mcl_core:ice"
+	and scene.engine.get_node({x = 13, y = 8, z = 8}).name == "mcl_core:dirt_with_grass",
+	"snow-covered ice and directly adjacent ground remain unchanged")
 assert(scene.engine.get_node({x = 14, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "ground directly beside water stays fixed")
-assert(scene.engine.get_node({x = 18, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "foreign structure margin stays fixed")
-assert(scene.engine.get_node({x = 20, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "overhang is not graded")
+assert(scene.engine.get_node({x = 18, y = 8, z = 2}).name == "mcl_core:dirt_with_grass"
+	and scene.engine.get_node({x = 19, y = 8, z = 2}).name == "mcl_core:dirt_with_grass",
+	"ground directly beside snow and growth-covered ice stays fixed")
+assert(scene.engine.get_node({x = 20, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "foreign structure margin stays fixed")
+assert(scene.engine.get_node({x = 22, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "overhang is not graded")
 assert(scene.engine.get_node({x = 24, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "strict radius edge stays fixed")
 assert(scene.engine.get_node({x = 12, y = 9, z = 2}).name == "air"
 	and scene.engine.get_node({x = 12, y = 4, z = 2}).name == "mcl_farming:sweet_berry_bush_3",

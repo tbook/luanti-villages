@@ -174,8 +174,10 @@ function M.smooth(rectangles, ground_y, options, env)
 		for x = area.minp.x, area.maxp.x do
 			local column = lookup_fn(x, z, true)
 			columns[z][x] = column
-			local name = column and (column.ground_name or column.base_name)
-			if column and (column.ground_liquid or column.base_liquid or (name and holes.is_ice(name))) then
+			local ground_name = column and column.ground_name
+			local base_name = column and column.base_name
+			if column and (column.ground_liquid or column.base_liquid
+					or holes.is_ice(ground_name) or holes.is_ice(base_name)) then
 				shoreline[z] = shoreline[z] or {}
 				shoreline[z][x] = true
 			end
