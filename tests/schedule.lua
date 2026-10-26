@@ -87,10 +87,20 @@ local morning_phase = mcl_moon.get_moon_phase()
 time = at(12001)
 assert(mcl_moon.get_moon_phase() ~= morning_phase)
 assert(holiday_on(0, 11999) and holiday_on(0, 12001))
+for _, ticks in ipairs({11999, 12001}) do
+	day, time = 7, at(ticks)
+	assert(not common.is_holiday() and common.is_holiday(1),
+		("tomorrow wraps to the next holiday phase at %d"):format(ticks))
+end
+day, time = 0, at(10000)
+assert(common.is_holiday() and not common.is_holiday(1), "the following day advances beyond the holiday")
 
 -- Without mcl_moon the day count decides.
 mcl_moon = nil
-for d = 0, 8 do assert(holiday_on(d, 9000) == (d % 4 == 0)) end
+for d = 0, 8 do
+	assert(holiday_on(d, 9000) == (d % 4 == 0))
+	assert(common.is_holiday(1) == ((d + 1) % 4 == 0), "fallback tomorrow uses the day count")
+end
 mcl_moon = {get_moon_phase = function() return (day + offset + (time > 0.5 and 1 or 0)) % 8 end}
 
 local cleric = {_profession = "cleric"}

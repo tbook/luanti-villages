@@ -7,7 +7,8 @@
 -- under a roof, they are left to graze where they stand, and come running when it
 -- is out again. In the work stage the shepherd spends most of its time walking from
 -- one grazing stop to the next about the village bell (or, with no bell, its loom),
--- with a minute at the loom now and then, which is where vanilla restocks its trades.
+-- through ordinary workdays. On the day before a holiday it works at the loom all
+-- day; visits back there during grazing are for route failures or the end of work.
 --
 -- Vanilla would walk it back to the loom every few seconds (do_work in
 -- mobs_mc/villager.lua), so while it herds get_activity answers "herd", which
@@ -43,10 +44,9 @@ local STUCK_SECONDS, STUCK_DISTANCE, REST_SECONDS = 2, 0.25, 6
 -- Past LEASH from the shepherd, or stuck twice, a sheep no player is near is set down
 -- beside it.
 local LEASH, UNSEEN = 56, 24
--- The work stage: this many seconds out among the grazing stops, then this many at
--- the loom. A stop is a spot in the open, STOP_MIN_RADIUS or more from the centre,
--- where the shepherd lingers a while.
-local HERD_OUT, HERD_LOOM = 240, 60
+-- A stop is a spot in the open, STOP_MIN_RADIUS or more from the centre, where
+-- the shepherd lingers a while.
+local HERD_LOOM = 60 -- brief rest after repeated route failures
 local AREA_RADIUS, AREA_MIN_RADIUS = 20, 8
 -- Out in the field (#243, #249; tune.field, a table so tests can turn it off) the shepherd
 -- walks the countryside instead of the village: stops FIELD_CLEAR to living_villages_flock_range
@@ -545,6 +545,11 @@ local function herd_tick(self, session, pos, bell)
 		if session.herd and not herding_stage(self) then end_herd(self, session) end
 		return
 	end
+	-- A loom day lets vanilla work the shepherd all day to restock its trades.
+	if common.is_holiday(1) then
+		if session.herd then end_herd(self, session) end
+		return
+	end
 	local now = session.clock
 	local herd = session.herd
 	if not herd then
@@ -594,8 +599,6 @@ local function herd_tick(self, session, pos, bell)
 		if now - herd.since < HERD_LOOM then return end
 		herd.phase, herd.since, herd.failures = "out", now, 0
 		if self.order == "work" then self.order = nil end
-	elseif now - herd.since > HERD_OUT then
-		return begin_loom(self, session, herd)
 	end
 	if self.state == "gowp" and not herd.walking then return end
 	if herd.stop then
@@ -905,5 +908,5 @@ return {
 	sessions = sessions, states = states, registry = registry,
 	roofed = roofed, find_spot = find_spot, reach_cache = reach_cache,
 	FAR = FAR, NEAR = NEAR, RUN_DISTANCE = RUN_DISTANCE, VILLAGE_CAP = VILLAGE_CAP,
-	HERD_OUT = HERD_OUT, tune = tune, HERD_LOOM = HERD_LOOM, GRACE = GRACE, LEASH = LEASH,
+	tune = tune, HERD_LOOM = HERD_LOOM, GRACE = GRACE, LEASH = LEASH,
 }

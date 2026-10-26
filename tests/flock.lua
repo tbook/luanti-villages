@@ -500,16 +500,13 @@ tick(f, 10)
 assert(#gopaths == walks, "it lingers before the next stop")
 tick(f, 41)
 assert(#gopaths == walks + 1 and f._villages_wander_anchor == nil, "then goes to another")
--- After HERD_OUT it goes back to the loom, where vanilla's work resumes.
+-- On an ordinary workday it stays out past the old four-minute interval.
 f.state = "stand"
-for _ = 1, flock.HERD_OUT + 10 do
-	tick(f)
-	if activity_of(f) == "work" then break end
-end
-assert(activity_of(f) == "work", "back to the loom after a while")
-local walks2 = #gopaths
+tick(f, 300)
+assert(activity_of(f) == "herd", "ordinary workdays keep grazing past four minutes")
 tick(f, 10)
-assert(#gopaths == walks2, "no grazing walks while at the loom")
+assert(activity_of(f) == "herd" and flock.sessions[f].herd.phase == "out",
+	"grazing continues through the workday")
 -- The flock does not follow it there.
 for _, ent in ipairs(flock_of(f)) do ent.pos.x = 30 end
 tick(f, 3)
@@ -517,8 +514,6 @@ step_sheep(40)
 for _, ent in ipairs(flock_of(f)) do
 	assert(not (flock.states[ent] and flock.states[ent].pull), "no flock at the loom")
 end
-tick(f, flock.HERD_LOOM)
-assert(activity_of(f) == "herd", "and out again")
 -- The tavern stage ends the herd and stops its walk.
 f.state = "gowp"
 f._villages_herd_probe = nil
@@ -527,9 +522,44 @@ villager_def.do_custom(f, 1)
 assert(f.state == "stand", "the herd walk ends with the stage")
 assert(activity_of(f) ~= "herd")
 
+-- The day before a holiday keeps the shepherd at its loom for the whole work stage.
+reset(); spawned = 0; day = 3; time = 10000 / 24000; gopaths = {}
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local loom_day = shepherd(0, 0)
+tick(loom_day, 300)
+assert(#gopaths == 0 and flock.sessions[loom_day].herd == nil,
+	"a preholiday workday does not start grazing")
+assert(activity_of(loom_day) == "work", "vanilla keeps the shepherd working at its loom")
+
+-- A calendar change to a preholiday day ends any active grazing walk or anchor.
+reset(); spawned = 0; day = 6; time = 10000 / 24000; gopaths = {}
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local switching = shepherd(0, 0)
+tick(switching, 3)
+assert(switching.state == "gowp", "the ordinary day starts a grazing route")
+day = 3
+tick(switching)
+assert(switching.state == "stand" and flock.sessions[switching].herd == nil,
+	"the preholiday change stops the active route")
+assert(activity_of(switching) == "work", "vanilla takes over loom work")
+
+reset(); spawned = 0; day = 6; time = 10000 / 24000; gopaths = {}
+nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
+local anchored = shepherd(0, 0)
+tick(anchored, 3)
+local anchor_stop = gopaths[1].target
+anchored.pos.x, anchored.pos.z, anchored.state = anchor_stop.x, anchor_stop.z, "stand"
+tick(anchored)
+assert(anchored._villages_wander_anchor, "arrival anchors the grazing pause")
+day = 3
+tick(anchored)
+assert(not anchored._villages_wander_anchor and flock.sessions[anchored].herd == nil,
+	"the preholiday change clears the grazing anchor")
+assert(activity_of(anchored) == "work")
+
 -- 12. A shepherd with no bed (vanilla gives one only at night) grazes about the bell all the
 -- same, within 90 of its loom; and about the loom with no bell.
-reset(); gopaths = {}; time = 10000 / 24000
+reset(); gopaths = {}; day = 6; time = 10000 / 24000
 nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
 local bedless = shepherd(0, 0)
 bedless._bed = nil
@@ -654,7 +684,7 @@ assert(#gopaths == 0, "no herding while someone is trading")
 -- loom's reach. flock.tune.field turns it off (the old village stops).
 flock.tune.field = true
 local function fresh(bed_x, door_x, loom_x)
-	reset(); gopaths = {}; time = 10000 / 24000; now = now + 700
+	reset(); gopaths = {}; day = 6; time = 10000 / 24000; now = now + 700
 	for k in pairs(flock.reach_cache) do flock.reach_cache[k] = nil end
 	nodes[key({x = 15, y = 5, z = 0})] = "mcl_bells:bell"
 	nodes[key({x = 15 + (door_x or 10), y = 0, z = 0})] = "mcl_doors:door"
