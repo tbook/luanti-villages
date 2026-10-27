@@ -7,6 +7,8 @@ local TABLE = "mcl_decor:table_wooden"
 local FRAME = "mcl_itemframes:invisible_frame"
 local PREFIX = "living_villages:market_"
 local COUNTER_KEY = "market_props_token_counter"
+local TOUCH_KEY = "player_touched"
+local DROP_KEY = "player_stack_dropped"
 
 local function key(name)
 	return PREFIX .. name
@@ -58,6 +60,7 @@ function props.new(options)
 	end
 
 	local function owned(pos, token, owner, day, role, node_name, pair)
+		if not position(pair) then return false end
 		local node = world.get_node_or_nil(pos)
 		if not node or node.name ~= node_name then return false end
 		local meta = world.get_meta(pos)
@@ -69,30 +72,184 @@ function props.new(options)
 			and meta:get_string(key("pair")) == pos_key(pair)
 	end
 
-	local function rollback(created, token, owner, day)
-		for index = 1, 2 do
-			local pos = created.frames[index]
-			if pos and owned(pos, token, owner, day, "frame_" .. index, FRAME, created.tables[index]) then
-				local cleared = pcall(function()
-					local inv = world.get_meta(pos):get_inventory()
-					inv:set_stack("main", 1, make_stack(""))
-				end)
-				local removed_display = cleared and pcall(itemframes.remove_entity, pos)
-				if removed_display then
-					pcall(world.remove_node, pos)
-				end
-			end
-		end
-		for index = 1, 2 do
-			local pos = created.tables[index]
-			if pos and owned(pos, token, owner, day, "table_" .. index, TABLE, created.table_pairs[index]) then
-				local above = world.get_node_or_nil(created.table_pairs[index])
-				if above and above.name == "air" then
-					pcall(world.remove_node, pos)
-				end
-			end
-		end
+	local function clear_tags(meta)
+		meta:set_int(key("version"), 0)
+		meta:set_string(key("token"), "")
+		meta:set_string(key("owner"), "")
+		meta:set_int(key("day"), 0)
+		meta:set_string(key("role"), "")
+		meta:set_string(key("pair"), "")
+		meta:set_string(key(TOUCH_KEY), "")
+		meta:set_string(key(DROP_KEY), "")
 	end
+
+	local function tagged_frame(pos, token, owner, day, index, table_pos)
+		return owned(pos, token, owner, day, "frame_" .. index, FRAME, table_pos)
+	end
+
+	local function remove_frame(pos, token, owner, day, index, table_pos)
+		if not tagged_frame(pos, token, owner, day, index, table_pos) then
+			return world.get_node_or_nil(pos) ~= nil
+		end
+
+		local meta = world.get_meta(pos)
+		local inv = meta:get_inventory()
+		local stack = inv:get_stack("main", 1)
+		local touched = meta:get_string(key(TOUCH_KEY)) == "1"
+		if touched and stack and not stack:is_empty() then
+			if meta:get_string(key(DROP_KEY)) ~= "1" then
+				local ok, object = pcall(world.add_item, pos, make_stack(stack))
+				if not ok or not object then return false end
+				meta:set_string(key(DROP_KEY), "1")
+			end
+		end
+
+		local cleared = pcall(inv.set_stack, inv, "main", 1, make_stack(""))
+		if not cleared then return false end
+		local remaining = inv:get_stack("main", 1)
+		if remaining and not remaining:is_empty() then return false end
+
+		local removed_display = pcall(itemframes.remove_entity, pos)
+		if not removed_display then return false end
+		if not tagged_frame(pos, token, owner, day, index, table_pos) then
+			return world.get_node_or_nil(pos) ~= nil
+		end
+		local removed = pcall(world.remove_node, pos)
+		if not removed then return false end
+		local node = world.get_node_or_nil(pos)
+		return node ~= nil and node.name ~= FRAME
+	end
+
+	local function remove_table(pos, token, owner, day, index, frame_pos)
+		if not owned(pos, token, owner, day, "table_" .. index, TABLE, frame_pos) then
+			return world.get_node_or_nil(pos) ~= nil
+		end
+		local above = world.get_node_or_nil(frame_pos)
+		if not above then return false end
+		if tagged_frame(frame_pos, token, owner, day, index, pos) then return false end
+		if above.name ~= "air" then
+			-- A replacement above is player-owned now. Keep both it and its support.
+			clear_tags(world.get_meta(pos))
+			return true
+		end
+		if not owned(pos, token, owner, day, "table_" .. index, TABLE, frame_pos) then
+			return world.get_node_or_nil(pos) ~= nil
+		end
+		local removed = pcall(world.remove_node, pos)
+		if not removed then return false end
+		local node = world.get_node_or_nil(pos)
+		return node ~= nil and node.name ~= TABLE
+	end
+
+	local function valid_stall(stall)
+		if type(stall) ~= "table" or type(stall.layout) ~= "table"
+			or type(stall.layout.tables) ~= "table" or type(stall.layout.frames) ~= "table"
+			or stall.token == nil or stall.owner == nil or stall.day == nil then
+			return false
+		end
+		return true
+	end
+
+	local function remove_frames(stall)
+		if not valid_stall(stall) then return false, "invalid_stall" end
+		local layout = stall.layout
+		local complete = true
+		for index = 1, 2 do
+			local pos = layout.frames[index]
+			if not pos or not remove_frame(pos, stall.token, stall.owner, stall.day, index, layout.tables[index]) then
+				complete = false
+			end
+		end
+		return complete, complete and nil or "deferred"
+	end
+
+	local function cleanup(stall)
+		if not valid_stall(stall) then return false, "invalid_stall" end
+		local layout = stall.layout
+		local frames_complete = remove_frames(stall)
+		local complete = frames_complete
+		for index = 1, 2 do
+			local pos = layout.tables[index]
+			if not pos or not remove_table(pos, stall.token, stall.owner, stall.day, index, layout.frames[index]) then
+				complete = false
+			end
+		end
+		return complete, complete and nil or "deferred"
+	end
+
+	local function rollback(created, token, owner, day)
+		cleanup({layout = {tables = created.tables, frames = created.frames}, token = token, owner = owner, day = day})
+	end
+
+	local function player_name(player)
+		if player and type(player.get_player_name) == "function" then
+			return player:get_player_name()
+		end
+		return ""
+	end
+
+	local function permitted(pos, player)
+		local name = player_name(player)
+		return name ~= "" and (type(world.is_protected) ~= "function" or not world.is_protected(pos, name))
+	end
+
+	local function pack(...)
+		return {n = select("#", ...), ...}
+	end
+
+	local function clear_previously_dropped(pos, meta)
+		if meta:get_string(key(DROP_KEY)) ~= "1" then return true end
+		local inv = meta:get_inventory()
+		local cleared = pcall(inv.set_stack, inv, "main", 1, make_stack(""))
+		if not cleared then return false end
+		local stack = inv:get_stack("main", 1)
+		if stack and not stack:is_empty() then return false end
+		meta:set_string(key(DROP_KEY), "")
+		pcall(itemframes.update_entity, pos)
+		return true
+	end
+
+	function api.wrap_interactions()
+		local def = world.registered_nodes and world.registered_nodes[FRAME]
+		if not def or def._living_villages_market_interactions_wrapped
+			or (not def.on_rightclick and not def.on_rotate) then return false end
+		for _, callback_name in ipairs({"on_rightclick", "on_rotate"}) do
+			local callback = callback_name
+			local original = def[callback]
+			if original then
+				def[callback] = function(pos, ...)
+					local node = world.get_node_or_nil(pos)
+					if node and node.name == FRAME then
+						local meta = world.get_meta(pos)
+						local player = select(2, ...)
+						local role = meta:get_string(key("role"))
+						local pair = {x = pos.x, y = pos.y - 1, z = pos.z}
+						local matching_tag = meta:get_int(key("version")) == VERSION
+							and meta:get_string(key("token")) ~= ""
+							and meta:get_string(key("owner")) ~= ""
+							and (role == "frame_1" or role == "frame_2")
+							and meta:get_string(key("pair")) == pos_key(pair)
+						if matching_tag and permitted(pos, player) then
+							if not clear_previously_dropped(pos, meta) then
+								if callback == "on_rightclick" then return select(3, ...) end
+								return nil
+							end
+							meta:set_string(key(TOUCH_KEY), "1")
+						end
+					end
+					local args = pack(...)
+					local result = pack(original(pos, unpack(args, 1, args.n)))
+					return unpack(result, 1, result.n)
+				end
+			end
+		end
+		def._living_villages_market_interactions_wrapped = true
+		return true
+	end
+
+	api.wrap_interactions()
+	api.cleanup = cleanup
+	api.remove_frames = remove_frames
 
 	local function valid_input(layout, owner, day, items)
 		if type(layout) ~= "table" or type(layout.tables) ~= "table" or type(layout.frames) ~= "table"

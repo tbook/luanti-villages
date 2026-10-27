@@ -6,20 +6,29 @@ end
 local world_nodes, metadata, displays, drops
 local construct_count, write_count, pending
 local fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame
+local fail_drop, protected, violations, unloaded
 local storage_values
 local constructor_hooks, test_itemframes, test_site
 local frame_name = "mcl_itemframes:invisible_frame"
 local table_name = "mcl_decor:table_wooden"
 
-local function stack(name, count)
-	local value = {name = name or "", count = count or (name and name ~= "" and 1 or 0)}
+local function stack(name, count, fields)
+	if type(name) == "table" then fields, count, name = name.fields, name.count, name.name end
+	local value = {name = name or "", count = count or (name and name ~= "" and 1 or 0), fields = fields or {}}
 	function value:is_empty() return self.name == "" or self.count == 0 end
 	function value:get_name() return self.name end
 	function value:get_count() return self.count end
+	function value:take_item(amount)
+		local taken = stack(self.name, math.min(amount or 1, self.count), self.fields)
+		self.count = self.count - taken.count
+		if self.count <= 0 then self.name, self.count, self.fields = "", 0, {} end
+		return taken
+	end
+	function value:peek_item(amount) return stack(self.name, math.min(amount or 1, self.count), self.fields) end
 	return value
 end
 
-ItemStack = function(name) return stack(name) end
+ItemStack = function(name, count, fields) return stack(name, count, fields) end
 
 local frame_def = {}
 local function frame_on_construct(pos)
@@ -42,11 +51,41 @@ frame_def.on_destruct = function(pos)
 	inv:set_stack("main", 1, ItemStack(""))
 	displays[key(pos)] = nil
 end
+frame_def.on_rightclick = function(pos, _node, clicker, wield, _pointed)
+	local name = clicker:get_player_name()
+	if minetest.is_protected(pos, name) then
+		minetest.record_protection_violation(pos, name)
+		return wield, "protected"
+	end
+	local inv = minetest.get_meta(pos):get_inventory()
+	local current = inv:get_stack("main", 1)
+	local item = clicker.creative and wield:peek_item() or wield:take_item()
+	if not current:is_empty() then minetest.add_item(pos, current) end
+	inv:set_stack("main", 1, ItemStack(item))
+	test_itemframes.update_entity(pos)
+	return wield, "rightclick-result"
+end
+frame_def.on_rotate = function(pos, _node, user)
+	local name = user:get_player_name()
+	if minetest.is_protected(pos, name) then
+		minetest.record_protection_violation(pos, name)
+		return "protected-rotate"
+	end
+	local inv = minetest.get_meta(pos):get_inventory()
+	local current = inv:get_stack("main", 1)
+	if not current:is_empty() then minetest.add_item(pos, current); inv:set_stack("main", 1, ItemStack("")) end
+	test_itemframes.update_entity(pos)
+	return "rotate-result", nil, "tail"
+end
+local stock_on_rightclick, stock_on_rotate = frame_def.on_rightclick, frame_def.on_rotate
 
 local function reset()
+	frame_def.on_rightclick, frame_def.on_rotate = stock_on_rightclick, stock_on_rotate
+	frame_def._living_villages_market_interactions_wrapped = nil
 	world_nodes, metadata, displays, drops = {}, {}, {}, {}
 	construct_count, write_count, pending = 0, 0, {}
 	fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame = nil, false, nil, nil, nil
+	fail_drop, protected, violations, unloaded = false, false, {}, {}
 	constructor_hooks = {}
 	storage_values = storage_values or {}
 	minetest = {
@@ -58,10 +97,20 @@ local function reset()
 			}
 		end,
 		get_node_or_nil = function(pos)
+			if unloaded[key(pos)] then return nil end
 			local node = world_nodes[key(pos)]
 			return node and {name = node.name, param2 = node.param2} or {name = "air", param2 = 0}
 		end,
 		get_node = function(pos) return minetest.get_node_or_nil(pos) end,
+		registered_nodes = {[frame_name] = frame_def},
+		is_protected = function() return protected end,
+		record_protection_violation = function(pos, name) violations[#violations + 1] = {pos = key(pos), name = name} end,
+		add_item = function(pos, item)
+			if fail_drop then return nil end
+			local dropped = ItemStack(item)
+			if not dropped:is_empty() then drops[#drops + 1] = {pos = key(pos), stack = dropped} end
+			return {name = "__builtin:item"}
+		end,
 		get_meta = function(pos)
 			local node_key = key(pos)
 			metadata[node_key] = metadata[node_key] or {fields = {}, lists = {}, sizes = {}}
@@ -79,7 +128,7 @@ local function reset()
 					error("injected inventory clear failure")
 				end
 				data.lists[name] = data.lists[name] or {}
-				data.lists[name][index] = item
+				data.lists[name][index] = ItemStack(item)
 			end
 			function inv:get_stack(name, index)
 				return (data.lists[name] or {})[index] or ItemStack("")
@@ -163,6 +212,13 @@ end
 local function fixture_reservation(layout_value, owner, site)
 	site = site or test_site
 	return {_market_site = site, owner = owner, layout = layout_value, token = "fixture-token"}
+end
+
+local function place_owned(api, x, owner)
+	local value = layout(x)
+	local result = assert(api.setup(value, owner, 29, {"test:apple", "test:carrot"},
+		fixture_reservation(value, owner)))
+	return value, result
 end
 
 local function count_nodes(name)
@@ -489,4 +545,214 @@ assert(not failed and reason == "reservation", "reservation from another site in
 assert(write_count == 0 and (storage_values.market_props_token_counter or 0) == before,
 	"foreign site reservation causes no world or token writes")
 
-print("market props setup and rollback tests passed")
+-- Packing removes untouched generated stock before the stock destructor can drop it.
+reset()
+api = reset()
+local packed_layout, packed = place_owned(api, 70, "packer")
+local complete = assert(api.cleanup(packed))
+assert(complete, "untouched stall cleanup completes")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "cleanup removes owned tables and frames")
+assert_clean(packed_layout, "untouched cleanup")
+assert(api.cleanup(packed), "repeated cleanup is harmless")
+assert_clean(packed_layout, "repeated untouched cleanup")
+
+-- Normal packing can remove frames first, wait at the seller, then remove tables through the same cleanup.
+reset()
+api = reset()
+local staged_layout, staged = place_owned(api, 72, "staged-packer")
+assert(api.remove_frames(staged), "frame packing phase completes")
+assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 2,
+	"frame phase removes frames while retaining tables for the packing pause")
+assert_clean(staged_layout, "frame packing phase")
+assert(api.remove_frames(staged), "repeated frame packing phase is harmless")
+assert(api.cleanup(staged), "table phase reuses the shared cleanup")
+assert(count_nodes(table_name) == 0, "shared cleanup removes tables after the pause")
+
+-- A permitted right-click is marked before stock behavior swaps inventory, and returns are unchanged.
+reset()
+api = reset()
+local touched_layout, touched = place_owned(api, 74, "clicker-owner")
+local clicker = {creative = false, get_player_name = function() return "alice" end}
+local wield = ItemStack("test:emerald", 2, {custom = "player-data"})
+local click_results = {frame_def.on_rightclick(touched_layout.frames[1],
+	minetest.get_node(touched_layout.frames[1]), clicker, wield, {type = "node"})}
+assert(click_results[1] == wield and click_results[2] == "rightclick-result", "right-click callback returns are preserved")
+assert(wield:get_count() == 1, "stock right-click consumes one player item")
+assert(metadata[key(touched_layout.frames[1])].fields[frame_meta_prefix .. "player_touched"] == "1",
+	"right-click marks player touch before upstream mutation")
+assert(api.cleanup(touched), "touched frame cleanup completes")
+local kept_drop
+for _, dropped in ipairs(drops) do
+	if dropped.stack:get_name() == "test:emerald" then kept_drop = dropped.stack end
+end
+assert(kept_drop and kept_drop:get_count() == 1 and kept_drop.fields.custom == "player-data",
+	"remaining player stack and metadata are dropped intact")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "touched cleanup removes the stall")
+assert(api.cleanup(touched), "second touched cleanup completes")
+local emerald_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack:get_name() == "test:emerald" then emerald_drops = emerald_drops + 1 end end
+assert(emerald_drops == 1, "repeated cleanup never duplicates a player drop")
+
+-- Touch state, not item identity, preserves a player item identical to generated stock.
+reset()
+api = reset()
+local identical_layout, identical = place_owned(api, 78, "identical-owner")
+local same_item = ItemStack("test:apple", 2, {engraving = "kept"})
+frame_def.on_rightclick(identical_layout.frames[1], minetest.get_node(identical_layout.frames[1]), clicker,
+	same_item, {type = "node"})
+assert(api.cleanup(identical), "identical stock item cleanup completes")
+local identical_player_drop
+for _, dropped in ipairs(drops) do
+	if dropped.stack:get_name() == "test:apple" and dropped.stack.fields.engraving then identical_player_drop = dropped.stack end
+end
+assert(identical_player_drop and identical_player_drop:get_count() == 1
+	and identical_player_drop.fields.engraving == "kept", "player-inserted stock-identical item is preserved")
+
+-- Protected interactions are delegated for stock violation reporting without marking the frame.
+reset()
+api = reset()
+local protected_layout, protected_stall = place_owned(api, 82, "protected-owner")
+protected = true
+local protected_wield = ItemStack("test:diamond")
+local protected_click = frame_def.on_rightclick(protected_layout.frames[1],
+	minetest.get_node(protected_layout.frames[1]), clicker, protected_wield, {type = "node"})
+local protected_rotate = frame_def.on_rotate(protected_layout.frames[2],
+	minetest.get_node(protected_layout.frames[2]), clicker)
+assert(protected_click == protected_wield and protected_rotate == "protected-rotate", "protected callback returns are preserved")
+assert(#violations == 2, "upstream reports both protected interactions")
+assert(metadata[key(protected_layout.frames[1])].fields[frame_meta_prefix .. "player_touched"] ~= "1"
+	and metadata[key(protected_layout.frames[2])].fields[frame_meta_prefix .. "player_touched"] ~= "1",
+	"protected interactions do not mark generated inventory touched")
+assert(api.cleanup(protected_stall), "protected stall cleanup completes")
+assert_clean(protected_layout, "protected cleanup")
+
+-- The rotate wrapper preserves all return slots and lets stock behavior drop the displayed item.
+reset()
+api = reset()
+local rotate_layout, rotate_stall = place_owned(api, 86, "rotator")
+local rotate_result = {n = 0}
+rotate_result.n = select("#", frame_def.on_rotate(rotate_layout.frames[1],
+	minetest.get_node(rotate_layout.frames[1]), clicker))
+rotate_result[1], rotate_result[2], rotate_result[3] = frame_def.on_rotate(rotate_layout.frames[1],
+	minetest.get_node(rotate_layout.frames[1]), clicker)
+assert(rotate_result.n == 3 and rotate_result[1] == "rotate-result" and rotate_result[2] == nil
+	and rotate_result[3] == "tail", "rotate return values including trailing nil are preserved")
+assert(metadata[key(rotate_layout.frames[1])].fields[frame_meta_prefix .. "player_touched"] == "1",
+	"permitted rotation marks the inventory before stock mutation")
+assert(api.cleanup(rotate_stall), "rotated stall cleanup completes")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "rotated cleanup removes the stall")
+for _, pos in ipairs(rotate_layout.frames) do assert(not displays[key(pos)], "rotated cleanup removes frame displays") end
+local rotated_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack:get_name() == "test:apple" then rotated_drops = rotated_drops + 1 end end
+assert(rotated_drops == 1, "rotation's normal stock drop is not duplicated by cleanup")
+
+-- If a player-item drop cannot be created, retain the stack and its owned frame for retry.
+reset()
+api = reset()
+local retained_layout, retained = place_owned(api, 90, "retained-owner")
+frame_def.on_rightclick(retained_layout.frames[1], minetest.get_node(retained_layout.frames[1]), clicker,
+	ItemStack("test:emerald", 1, {serial = "safe"}), {type = "node"})
+fail_drop = true
+complete = api.cleanup(retained)
+assert(not complete, "failed item drop defers cleanup")
+assert(world_nodes[key(retained_layout.frames[1])].name == frame_name, "failed drop keeps the frame")
+assert(metadata[key(retained_layout.frames[1])].lists.main[1]:get_name() == "test:emerald"
+	and metadata[key(retained_layout.frames[1])].lists.main[1].fields.serial == "safe", "failed drop retains exact inventory")
+assert(world_nodes[key(retained_layout.tables[1])].name == table_name, "failed frame cleanup retains table support")
+fail_drop = false
+assert(api.cleanup(retained), "cleanup retries successfully after item drop becomes available")
+local safe_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "safe" then safe_drops = safe_drops + 1 end end
+assert(safe_drops == 1, "successful retry drops retained player item once")
+assert(api.cleanup(retained), "retried cleanup is idempotent")
+assert(safe_drops == 1, "retry cleanup does not duplicate drops")
+
+-- Once a player stack has been dropped, a later clear failure retains the frame and retries without duplication.
+reset()
+api = reset()
+local clear_retry_layout, clear_retry = place_owned(api, 92, "clear-retry")
+frame_def.on_rightclick(clear_retry_layout.frames[1], minetest.get_node(clear_retry_layout.frames[1]), clicker,
+	ItemStack("test:emerald", 1, {serial = "clear-retry"}), {type = "node"})
+fail_clear_inventory = key(clear_retry_layout.frames[1])
+complete = api.cleanup(clear_retry)
+assert(not complete and world_nodes[key(clear_retry_layout.frames[1])].name == frame_name,
+	"inventory clear failure retains the owned frame")
+local retry_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "clear-retry" then retry_drops = retry_drops + 1 end end
+assert(retry_drops == 1, "first cleanup creates one player drop before clear failure")
+local post_failure_wield = ItemStack("test:emerald", 1, {serial = "after-clear-failure"})
+frame_def.on_rightclick(clear_retry_layout.frames[1], minetest.get_node(clear_retry_layout.frames[1]), clicker,
+	post_failure_wield, {type = "node"})
+local old_stack_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack:get_name() == "test:apple" then old_stack_drops = old_stack_drops + 1 end end
+assert(old_stack_drops == 1, "next interaction clears an already-dropped stack before stock behavior")
+assert(api.cleanup(clear_retry), "cleanup retries after the inventory becomes writable")
+for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "clear-retry" then retry_drops = retry_drops + 1 end end
+assert(retry_drops == 2, "retry observes the already-created drop and does not add another")
+local after_failure_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "after-clear-failure" then after_failure_drops = after_failure_drops + 1 end end
+assert(after_failure_drops == 1, "the new player stack inserted after retryable cleanup is preserved")
+
+-- Replaced frame nodes are unowned and left in place; their owned table is relinquished as support.
+reset()
+api = reset()
+local replacement_layout, replacement_stall = place_owned(api, 94, "replacement-owner")
+minetest.set_node(replacement_layout.frames[1], {name = frame_name})
+local replacement_meta = minetest.get_meta(replacement_layout.frames[1])
+replacement_meta:get_inventory():set_stack("main", 1, ItemStack("test:book", 3, {note = "player"}))
+replacement_meta:set_string("test:keep", "metadata")
+local replacement_wield = ItemStack("test:gold_ingot")
+local replacement_return, replacement_extra = frame_def.on_rightclick(replacement_layout.frames[1],
+	minetest.get_node(replacement_layout.frames[1]), clicker, replacement_wield, {type = "node"})
+assert(replacement_return == replacement_wield and replacement_extra == "rightclick-result",
+	"untagged replacement keeps the stock callback and return behavior")
+assert(replacement_meta:get_string(frame_meta_prefix .. "player_touched") == "",
+	"untagged replacement is not marked as a market inventory")
+assert(api.cleanup(replacement_stall), "replacement support cleanup completes")
+assert(world_nodes[key(replacement_layout.frames[1])].name == frame_name, "untagged same-name replacement survives")
+assert(metadata[key(replacement_layout.frames[1])].lists.main[1]:get_name() == "test:gold_ingot"
+	and metadata[key(replacement_layout.frames[1])].fields["test:keep"] == "metadata", "replacement inventory and metadata survive")
+assert(world_nodes[key(replacement_layout.tables[1])].name == table_name, "replacement's table support survives")
+assert(metadata[key(replacement_layout.tables[1])].fields[frame_meta_prefix .. "token"] == "",
+	"support table loses only market ownership tags")
+assert(metadata[key(replacement_layout.tables[1])].fields["test:keep"] == nil, "market cleanup leaves no unrelated table fields")
+
+-- An unloaded support cell defers cleanup without forcing it; a later pass removes the stall.
+reset()
+api = reset()
+local unloaded_layout, unloaded_stall = place_owned(api, 98, "unloaded-owner")
+unloaded[key(unloaded_layout.frames[1])] = true
+complete = api.cleanup(unloaded_stall)
+assert(not complete and world_nodes[key(unloaded_layout.tables[1])].name == table_name,
+	"unloaded frame defers table removal")
+assert(metadata[key(unloaded_layout.tables[1])].fields[frame_meta_prefix .. "token"] ~= "",
+	"deferred support table remains tagged for retry")
+unloaded[key(unloaded_layout.frames[1])] = nil
+assert(api.cleanup(unloaded_stall), "cleanup completes after the frame block loads")
+assert(world_nodes[key(unloaded_layout.tables[1])].name == "air", "deferred owned table is eventually removed")
+
+-- A missing frame does not block cleanup of its still-owned table or paired member.
+reset()
+api = reset()
+local missing_layout, missing_stall = place_owned(api, 100, "missing-owner")
+world_nodes[key(missing_layout.frames[1])] = {name = "air"}
+metadata[key(missing_layout.frames[1])] = nil
+displays[key(missing_layout.frames[1])] = nil
+assert(api.cleanup(missing_stall), "missing frame member is treated as already removed")
+assert(world_nodes[key(missing_layout.tables[1])].name == "air"
+	and world_nodes[key(missing_layout.tables[2])].name == "air", "remaining owned table members are removed")
+
+-- Removing an owned table clears only market tags if a non-frame player node is above it.
+reset()
+api = reset()
+local support_layout, support_stall = place_owned(api, 102, "support-owner")
+minetest.set_node(support_layout.frames[2], {name = "test:player_node"})
+local support_meta = minetest.get_meta(support_layout.tables[2])
+support_meta:set_string("player:note", "retain")
+assert(api.cleanup(support_stall), "player node support cleanup completes")
+assert(world_nodes[key(support_layout.frames[2])].name == "test:player_node"
+	and world_nodes[key(support_layout.tables[2])].name == table_name, "player node and its support survive")
+assert(support_meta:get_string("player:note") == "retain", "relinquishing does not clear unrelated metadata")
+assert(support_meta:get_string(frame_meta_prefix .. "token") == "", "relinquished table has no ownership token")
+
+print("market props setup, packing and rollback tests passed")
