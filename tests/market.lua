@@ -79,8 +79,18 @@ local guarded = setmetatable({_profession = "farmer", _id = "guarded"}, {
 })
 assert(market.eligible(guarded), "eligibility does not depend on trades or claimed jobsites")
 
+registered["mcl_core:apple"] = {}
+registered["mcl_farming:bread"] = {}
+assert(market.saved_fields[1] == "_villages_market_stock_day",
+	"the stock-day guard is the only market field integration saves")
+assert(#market.transient_fields == 2
+	and market.transient_fields[1] == "_villages_market_session"
+	and market.transient_fields[2] == "_villages_market_attempted",
+	"session and attempt fields are reset on activation")
+
 local function controller_fixture()
-	local now, ticks = 100, 14000
+	local now, ticks, real = 100, 14000, 1000
+	local bell_node = {name = "mcl_bells:bell"}
 	local site = {searches = 0, renewals = 0, releases = 0, valid_calls = 0}
 	function site.begin_search(center, owner)
 		site.searches = site.searches + 1
@@ -92,11 +102,12 @@ local function controller_fixture()
 		if search.steps == 1 then return "pending" end
 		return "found", site.reservation
 	end
-	function site.renew() site.renewals = site.renewals + 1; return true end
+	function site.renew(reservation) site.renewals = site.renewals + 1; return reservation ~= nil end
 	function site.release() site.releases = site.releases + 1; return true end
 	function site.valid() site.valid_calls = site.valid_calls + 1; return true end
 	local reservation = {layout = {
 		seller = {x = 4, y = 1, z = 5},
+		outward = {x = 1, z = 0},
 	}}
 	site.reservation = reservation
 	local cancelled = {}
@@ -109,15 +120,42 @@ local function controller_fixture()
 		return true
 	end}
 	local target = {x = 4, y = 1, z = 5}
-	local controller = market.new({site = site, props = {}, navigation = nav,
+	local seller_velocity
+	local props = {setups = 0, activations = 0, renewals = 0, cleanups = 0, frame_removals = 0}
+	function props.setup(layout, owner, setup_day, items, reserved)
+		props.setups = props.setups + 1
+		props.owner, props.day, props.items = owner, setup_day, items
+		if props.fail_setup then return nil, "injected failure" end
+		return {token = "prop-token", owner = owner, day = setup_day, layout = layout}
+	end
+	function props.activate(stall, object, session, deadline, context)
+		props.activations = props.activations + 1
+		props.deadline = deadline
+		props.context = context
+		return not props.fail_activate
+	end
+	function props.renew(_, _, _, deadline)
+		props.renewals = props.renewals + 1
+		props.renewal_deadline = deadline
+		return not props.fail_renew
+	end
+	function props.release() props.releases = (props.releases or 0) + 1 end
+	function props.cleanup() props.cleanups = props.cleanups + 1; return true end
+	function props.remove_frames() props.frame_removals = props.frame_removals + 1; return true end
+	local controller = market.new({site = site, props = props, navigation = nav,
 		now = function() return now end,
+		real_now = function() return real end,
+		day_count = function() return day end,
+		random = function(low, high) return low end,
 		ticks = function() return ticks end,
+		get_node_or_nil = function() return bell_node end,
 		standing_position = function() return target end,
 		stage = function() return "bell" end})
-	local bell = {center = {x = 0, y = 0, z = 0}, limit = 2}
+	local bell = {pos = {x = 0, y = 2, z = 0}, center = {x = 0, y = 0, z = 0}, limit = 2}
 	local self = {
 		_id = "seller", _profession = "farmer",
-		object = {get_pos = function() return target end},
+		object = {get_pos = function() return target end, get_velocity = function() return {x = 1, y = 0, z = 2} end,
+			set_velocity = function(_, velocity) seller_velocity = velocity end},
 		gopath = function(entity, _, callback)
 			entity._villages_goto_route = {id = 17, status = "planning", market_token = entity._gopath_market_token}
 			entity.arrival_callback = callback
@@ -131,22 +169,143 @@ local function controller_fixture()
 		return original_gopath(entity, target_pos, callback, prioritised, token)
 	end
 	return controller, site, nav, self, bell, cancelled, function(value) now = value end,
-		function(value) ticks = value end
+		function(value) ticks = value end, props, function(value) real = value end,
+		function() return seller_velocity end, function(value) bell_node = value end
 end
 
 do
-	local controller, site, _, seller, bell = controller_fixture()
+	local controller, site, _, seller, bell, _, _, _, props = controller_fixture()
 	assert(controller.tick(seller, bell, 0) == "holding", "seller holds while bounded search is pending")
 	assert(controller.tick(seller, bell, 0) == "walking", "seller begins normal goto after reservation")
-	assert(site.searches == 1 and site.owner == seller._id, "search is created once for the prop owner")
+	assert(site.searches == 1 and site.owner == tostring(seller._id), "search is created once for the string prop owner")
 	assert(controller.tick(seller, bell, 1) == "walking", "seller continues a planning route")
 	assert(site.renewals == 1, "reservation renews while the seller travels")
 	seller._villages_goto_route.status = "arrived"
 	seller.arrival_callback(seller)
 	assert(controller.tick(seller, bell, 0) == "holding", "arrival requires position and layout revalidation")
 	assert(site.valid_calls == 1, "arrival validates reserved layout")
+	assert(seller._villages_market_stock_day == day and site.owner == tostring(seller._id),
+		"arrival saves today's stock guard and reserves by string owner id")
+	assert(controller.tick(seller, bell, 0) == "holding" and site.valid_calls == 1,
+		"an opened seller stays selling without revalidating or restocking")
+	assert(props.renewal_deadline == 1600, "seller renewals extend the prop deadline on real time")
 	controller.leave(seller, "test")
-	assert(site.releases == 1, "leave releases the reservation")
+	assert(site.releases == 1 and site.renewals == 3, "leave releases the reservation after renewing it while selling")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, set_ticks, props, set_real, get_velocity = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	assert(controller.tick(seller, bell, 0) == "holding")
+	local session = seller._villages_market_session
+	assert(props.setups == 1 and props.activations == 1 and props.owner == tostring(seller._id),
+		"props are created and leased once after confirmed arrival")
+	assert(props.context.validate_session(), "prop recovery validates the live seller session and bell")
+	assert(session.pack_at == 14750 and props.deadline == 1600,
+		"packing is selected once and the lease has an absolute real-time deadline")
+	assert(controller.tick(seller, bell, 0) == "holding" and props.setups == 1,
+		"selling holds in place and never repairs/restocks props")
+	local velocity = get_velocity()
+	assert(velocity and velocity.x == 0 and velocity.y == 0 and velocity.z == 0,
+		"seller holds a standing pose with horizontal movement stopped")
+	set_ticks(14750)
+	assert(controller.tick(seller, bell, 0) == "holding" and props.frame_removals == 1,
+		"chosen packing time removes frames first")
+	set_real(1000.99)
+	assert(controller.tick(seller, bell, 0) == "holding" and props.cleanups == 0,
+		"tables remain for the one-second packing interval")
+	set_real(1001.01)
+	assert(controller.tick(seller, bell, 0) == "holding" and props.cleanups == 1,
+		"tables are removed after the interval")
+	assert(seller._villages_market_session == nil and site.releases == 1 and props.releases == 1,
+		"packing releases prop lease and site reservation")
+	assert(controller.tick(seller, bell, 0) == "browse" and props.setups == 1,
+		"a packed seller does not reopen this activation")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, set_ticks, props = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	assert(controller.tick(seller, bell, 0) == "holding")
+	set_ticks(15000)
+	assert(controller.tick(seller, bell, 0) == "holding" and props.cleanups == 1,
+		"a skipped packing deadline forces immediate full cleanup")
+	assert(site.releases == 1 and seller._villages_market_session == nil,
+		"forced cleanup releases all session claims")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, _, props = controller_fixture()
+	props.fail_setup = true
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	assert(controller.tick(seller, bell, 0) == "browse")
+	assert(seller._villages_market_stock_day == day and props.setups == 1 and props.activations == 0,
+		"a failed setup still consumes today's opportunity and never activates a lease")
+	assert(site.releases == 1 and seller._villages_market_session == nil,
+		"setup failure releases reservation and abandons the session")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, _, props, _, _, set_bell_node = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	controller.tick(seller, bell, 0)
+	set_bell_node(nil)
+	local bell_state, bell_reason = props.context.validate_session()
+	assert(bell_state == nil and bell_reason == "bell_unloaded",
+		"an unavailable bell is an unknown prop validation result")
+	assert(controller.tick(seller, bell, 0) == "holding" and props.cleanups == 0,
+		"an unloaded bell is unknown and leaves a live stall alone")
+	seller.following = true
+	assert(props.context.validate_session() == false,
+		"known ineligibility overrides an unavailable bell during orphan checks")
+	seller.following = nil
+	seller.object.get_pos = function() return {x = 9, y = 1, z = 5} end
+	assert(props.context.validate_session() == false,
+		"known displacement overrides an unavailable bell during orphan checks")
+	seller.object.get_pos = function() return {x = 4, y = 1, z = 5} end
+	set_bell_node({name = "air"})
+	assert(controller.tick(seller, bell, 0) == "browse" and props.cleanups == 1,
+		"a loaded removed bell aborts the stall and cleans its props")
+	assert(site.releases == 1, "bell removal releases the site reservation")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, _, props = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	controller.tick(seller, bell, 0)
+	seller.object.get_pos = function() return {x = 9, y = 1, z = 5} end
+	assert(controller.tick(seller, bell, 0) == "browse")
+	assert(props.cleanups == 1 and site.releases == 1 and seller._villages_market_session == nil,
+		"displacement aborts selling and cleans the stall")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, _, props = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	controller.tick(seller, bell, 0)
+	seller._profession = "mason"
+	assert(controller.tick(seller, bell, 0) == "browse")
+	assert(props.cleanups == 1 and site.releases == 1,
+		"a profession change aborts the stall and releases its reservation")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	seller._villages_market_stock_day = day
+	assert(controller.tick(seller, bell, 0) == "browse" and site.searches == 0,
+		"a reloaded seller with today's saved stock guard cannot mint another stall")
 end
 
 do

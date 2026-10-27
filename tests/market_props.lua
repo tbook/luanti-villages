@@ -93,7 +93,7 @@ local function reset(options)
 	fail_drop, protected, violations, unloaded = false, false, {}, {}
 	constructor_hooks = {}
 	registered_lbms, registered_abms = {}, {}
-	clock_value, day_value, timeofday_value, thunder_value, owner_valid = 100, 4, 0.65, false, true
+	clock_value, day_value, timeofday_value, thunder_value, owner_valid = 100, 4, 0.5, false, true
 	timers = {}
 	storage_values = storage_values or {}
 	minetest = {
@@ -917,9 +917,15 @@ end
 
 -- Active props survive both callbacks; every API handle shares the same record.
 reset()
-api = reset({validate_session = function() return false end})
+api = reset({validate_session = function() return true end})
 local active_layout, active_stall = place_owned(api, 110, "active-owner")
 local session_ref = activate_runtime(api, active_stall, "active-session")
+assert(api.renew(active_stall.token, session_ref, "active-session"),
+	"a market seller can renew during the holiday bell stage")
+timeofday_value = 0.624
+assert(api.renew(active_stall.token, session_ref, "active-session"),
+	"a market seller remains valid up to the 15:00 handoff")
+timeofday_value = 0.5
 local later_valid = true
 local shared_api = dofile("market_props.lua").new({site = test_site, itemframes = test_itemframes,
 	core = minetest, validate_session = function() return later_valid end})
@@ -1010,12 +1016,14 @@ assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
 	"fresh registry cleans old tagged props")
 assert_clean(restart_layout, "restart cleanup")
 
--- Calendar, weather, deadlines, lease and owner/session changes invalidate even a live owner.
+-- The market seller window is the holiday bell stage (10:30 to 15:00), not
+-- the tavern's later hours. Calendar, weather, deadline, lease and owner/session
+-- changes invalidate even a live owner.
 local invalidations = {
 	{name = "stale day", change = function() day_value = day_value + 1 end},
 	{name = "ordinary day", change = function() day_value = 5 end},
 	{name = "thunder", change = function() thunder_value = true end},
-	{name = "market window ended", change = function() timeofday_value = 0.75 end},
+	{name = "market window ended", change = function() timeofday_value = 0.625 end},
 	{name = "deadline time jump", change = function() clock_value = 142 end},
 	{name = "backward clock jump", change = function() clock_value = 99 end},
 	{name = "missing owner session", change = function() owner_valid = false end},
@@ -1034,6 +1042,16 @@ for index, invalidation in ipairs(invalidations) do
 end
 
 reset()
+api = reset({validate_session = function() return nil, "bell_unloaded" end})
+local unknown_base_layout, unknown_base_stall = place_owned(api, 162, "unknown-base-owner")
+local unknown_base_ref = {session = "unknown-base-session"}
+assert(api.activate(unknown_base_stall, unknown_base_ref, "unknown-base-session", clock_value + 40,
+	{validate_session = function() return false end}),
+	"runtime records accept an independent session validator")
+invoke_pair("lbm", unknown_base_layout)
+assert_clean(unknown_base_layout, "a known invalid context overrides an unknown base validator")
+
+reset()
 api = reset()
 local renewed_layout, renewed = place_owned(api, 165, "renewed-owner")
 local renewed_ref = activate_runtime(api, renewed, "renewed-session")
@@ -1045,6 +1063,23 @@ clock_value = 120
 assert(api.check_prop(renewed_layout.tables[1]) == false, "renewed lease expires after its ten-second window")
 invoke_pair("abm", renewed_layout)
 assert_clean(renewed_layout, "renewed lease expiry")
+
+reset()
+api = reset()
+local slow_layout, slow_stall = place_owned(api, 167, "slow-owner")
+local slow_ref = activate_runtime(api, slow_stall, "slow-session")
+clock_value = 109
+assert(api.renew(slow_stall.token, slow_ref, "slow-session", 1000),
+	"renewal moves the real-time fallback deadline forward with a slow game clock")
+clock_value = 118
+assert(api.renew(slow_stall.token, slow_ref, "slow-session", 1000),
+	"regular renewal keeps the lease live while the game clock is slow")
+clock_value = 127
+assert(api.check_prop(slow_layout.tables[1]) == true,
+	"the original hard deadline cannot expire a regularly renewed seller")
+timeofday_value = 0.625
+assert(api.check_prop(slow_layout.tables[1]) == false,
+	"the game-time market handoff still invalidates a renewed real-time deadline")
 
 -- Packing the frames retains the live record; final cleanup invalidates it before deferring.
 reset()
