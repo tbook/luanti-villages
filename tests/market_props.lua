@@ -7,7 +7,7 @@ local world_nodes, metadata, displays, drops
 local construct_count, write_count, pending
 local fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame
 local storage_values
-local constructor_hooks, test_itemframes
+local constructor_hooks, test_itemframes, test_site
 local frame_name = "mcl_itemframes:invisible_frame"
 local table_name = "mcl_decor:table_wooden"
 
@@ -125,8 +125,8 @@ local function reset()
 			metadata[key(pos)] = nil
 		end,
 	}
-	local site = {
-		valid = function(layout, reservation)
+	local site = {}
+	function site.valid(layout, reservation)
 			if reservation and reservation.layout ~= layout then return false, "reservation" end
 			for _, list in ipairs({layout.tables, layout.frames}) do
 				for _, pos in ipairs(list) do
@@ -134,8 +134,8 @@ local function reset()
 				end
 			end
 			return true
-		end,
-	}
+	end
+	test_site = site
 	local itemframes = {
 		remove_entity = function(pos) displays[key(pos)] = nil end,
 		update_entity = function(pos)
@@ -160,6 +160,11 @@ local function layout(x)
 	}
 end
 
+local function fixture_reservation(layout_value, owner, site)
+	site = site or test_site
+	return {_market_site = site, owner = owner, layout = layout_value, token = "fixture-token"}
+end
+
 local function count_nodes(name)
 	local count = 0
 	for _, node in pairs(world_nodes) do if node.name == name then count = count + 1 end end
@@ -179,7 +184,8 @@ local api = reset()
 local blocked = layout(0)
 world_nodes[key(blocked.tables[1])] = {name = "test:stone"}
 local before = storage_values.market_props_token_counter or 0
-local result, reason = api.setup(blocked, "villager-a", 17, {"test:apple", "test:carrot"})
+local result, reason = api.setup(blocked, "villager-a", 17, {"test:apple", "test:carrot"},
+	fixture_reservation(blocked, "villager-a"))
 assert(not result and reason == "destination_not_air", "preflight reports changed destination")
 assert(write_count == 0 and construct_count == 0, "preflight failure performs no writes")
 assert((storage_values.market_props_token_counter or 0) == before, "preflight failure does not consume a token")
@@ -188,7 +194,8 @@ assert((storage_values.market_props_token_counter or 0) == before, "preflight fa
 reset()
 api = reset()
 local stall = layout(2)
-local success = assert(api.setup(stall, "villager-a", 17, {"test:apple", "test:carrot"}))
+local success = assert(api.setup(stall, "villager-a", 17, {"test:apple", "test:carrot"},
+	fixture_reservation(stall, "villager-a")))
 assert(success.token == "market-" .. tostring(before + 1), "token is allocated from persistent counter")
 assert(count_nodes(table_name) == 2 and count_nodes(frame_name) == 2, "success writes exactly two tables and two frames")
 assert(construct_count == 2, "frame constructors ran through add_node")
@@ -213,8 +220,9 @@ end
 assert(write_count == 4 and count_nodes("air") == 0, "success writes only four prop nodes")
 
 -- A new module instance shares mod storage and cannot reuse the previous token.
+local second_site = {valid = function() return true end}
 local second_api = dofile("market_props.lua").new({
-	site = {valid = function() return true end},
+	site = second_site,
 	itemframes = {
 		remove_entity = function(pos) displays[key(pos)] = nil end,
 		update_entity = function(pos)
@@ -225,7 +233,8 @@ local second_api = dofile("market_props.lua").new({
 	},
 })
 local other = layout(8)
-local next_setup = assert(second_api.setup(other, "villager-b", 18, {"test:bread", "test:potato"}))
+local next_setup = assert(second_api.setup(other, "villager-b", 18, {"test:bread", "test:potato"},
+	fixture_reservation(other, "villager-b", second_site)))
 assert(next_setup.token ~= success.token and next_setup.token == "market-" .. tostring(before + 2),
 	"persistent counter makes tokens unique across module sessions")
 
@@ -234,7 +243,8 @@ reset()
 api = reset()
 local partially_written = layout(12)
 fail_add_at = 4
-local failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"})
+local failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"},
+	fixture_reservation(partially_written, "villager-c"))
 assert(not failed, "node write failure aborts setup")
 assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "constructor failure rolls back matching props")
 assert(construct_count == 2, "the failing frame constructor ran before rollback")
@@ -244,7 +254,8 @@ reset()
 api = reset()
 partially_written = layout(16)
 fail_display_at = key(partially_written.frames[2])
-failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"})
+failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"},
+	fixture_reservation(partially_written, "villager-c"))
 assert(not failed, "display failure aborts setup")
 assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "display failure removes all owned nodes")
 assert_clean(partially_written, "display rollback")
@@ -253,7 +264,8 @@ reset()
 api = reset()
 partially_written = layout(20)
 fail_inventory = true
-failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"})
+failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"},
+	fixture_reservation(partially_written, "villager-c"))
 assert(not failed, "inventory write failure aborts setup")
 assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "inventory failure removes all owned nodes")
 assert_clean(partially_written, "inventory rollback")
@@ -262,11 +274,13 @@ assert_clean(partially_written, "inventory rollback")
 reset()
 api = reset()
 local owner_stall = layout(24)
-local owner_setup = assert(api.setup(owner_stall, "villager-a", 20, {"test:apple", "test:carrot"}))
+local owner_setup = assert(api.setup(owner_stall, "villager-a", 20, {"test:apple", "test:carrot"},
+	fixture_reservation(owner_stall, "villager-a")))
 local failing_stall = layout(30)
 replace_first_frame = {trigger = failing_stall.frames[2], pos = failing_stall.frames[1]}
 fail_display_at = key(failing_stall.frames[2])
-failed = api.setup(failing_stall, "villager-b", 20, {"test:bread", "test:potato"})
+failed = api.setup(failing_stall, "villager-b", 20, {"test:bread", "test:potato"},
+	fixture_reservation(failing_stall, "villager-b"))
 assert(not failed, "replacement during setup invalidates the operation")
 assert(world_nodes[key(failing_stall.frames[1])].name == frame_name,
 	"same-name untagged replacement survives rollback")
@@ -318,9 +332,11 @@ local stock_update = {
 		return entity
 	end,
 }
-local async_api = dofile("market_props.lua").new({site = {valid = function() return true end}, itemframes = stock_update})
+local async_site = {valid = function() return true end}
+local async_api = dofile("market_props.lua").new({site = async_site, itemframes = stock_update})
 fail_display_at = key(partially_written.frames[2])
-failed = async_api.setup(partially_written, "villager-e", 22, {"test:map", "test:apple"})
+failed = async_api.setup(partially_written, "villager-e", 22, {"test:map", "test:apple"},
+	fixture_reservation(partially_written, "villager-e", async_site))
 assert(not failed, "second display failure aborts setup with a queued map refresh")
 for _, callback in ipairs(pending) do callback() end
 assert_clean(partially_written, "deferred map refresh rollback")
@@ -331,7 +347,8 @@ api = reset()
 local stuck = layout(48)
 fail_clear_inventory = key(stuck.frames[1])
 fail_display_at = key(stuck.frames[2])
-failed = api.setup(stuck, "villager-f", 23, {"test:apple", "test:carrot"})
+failed = api.setup(stuck, "villager-f", 23, {"test:apple", "test:carrot"},
+	fixture_reservation(stuck, "villager-f"))
 assert(not failed, "clear failure occurs while unwinding the stock frame")
 assert(world_nodes[key(stuck.frames[1])].name == frame_name, "uncleared frame remains owned")
 assert(metadata[key(stuck.frames[1])].fields[frame_meta_prefix .. "token"] ~= nil,
@@ -356,7 +373,8 @@ constructor_hooks[frame_name] = function(pos)
 	meta:set_string(frame_meta_prefix .. "role", "frame_1")
 	meta:set_string(frame_meta_prefix .. "pair", key(tagged_foreign.tables[1]):gsub(":", ","))
 end
-failed = api.setup(tagged_foreign, "villager-g", 24, {"test:apple", "test:carrot"})
+failed = api.setup(tagged_foreign, "villager-g", 24, {"test:apple", "test:carrot"},
+	fixture_reservation(tagged_foreign, "villager-g"))
 assert(not failed, "foreign ownership tag aborts setup")
 assert(world_nodes[key(tagged_foreign.frames[1])].name == frame_name
 	and metadata[key(tagged_foreign.frames[1])].fields[frame_meta_prefix .. "token"] == "foreign-token",
@@ -377,7 +395,8 @@ constructor_hooks[table_name] = function(pos)
 	meta:set_int(frame_meta_prefix .. "version", 1)
 	meta:set_string(frame_meta_prefix .. "token", "foreign-later")
 end
-failed = api.setup(occupied_later, "villager-h", 25, {"test:apple", "test:carrot"})
+failed = api.setup(occupied_later, "villager-h", 25, {"test:apple", "test:carrot"},
+	fixture_reservation(occupied_later, "villager-h"))
 assert(not failed, "later destination filled by a constructor aborts setup")
 assert(world_nodes[key(occupied_later.frames[2])].name == frame_name
 	and metadata[key(occupied_later.frames[2])].fields[frame_meta_prefix .. "token"] == "foreign-later",
@@ -419,6 +438,20 @@ local real_api, real_site, reservation, real_clock = real_market_service("seller
 local real_result = assert(real_api.setup(reservation.layout, "seller-a", 26,
 	{"test:apple", "test:carrot"}, reservation))
 assert(real_result.token, "active reservation from the shared site service succeeds")
+
+real_api, real_site, reservation = real_market_service("seller-a")
+local original_valid = real_site.valid
+local validation_calls = 0
+real_site.valid = function(...)
+	validation_calls = validation_calls + 1
+	return original_valid(...)
+end
+before = storage_values.market_props_token_counter or 0
+failed, reason = real_api.setup(reservation.layout, "seller-a", 26, {"test:apple", "test:carrot"})
+assert(not failed and reason == "reservation", "nil reservation is rejected")
+assert(validation_calls == 0 and write_count == 0
+	and (storage_values.market_props_token_counter or 0) == before,
+	"nil reservation is rejected before site map validation, token allocation, or writes")
 
 real_api, real_site, reservation = real_market_service("seller-a")
 assert(real_site.release(reservation), "reservation is released")

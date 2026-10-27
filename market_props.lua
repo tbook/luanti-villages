@@ -112,12 +112,13 @@ function props.new(options)
 
 	-- Reservation and map validation are repeated at arrival, immediately before writes.
 	function api.setup(layout, owner, day, items, reservation)
+		if reservation == nil then return nil, "reservation" end
 		if not valid_input(layout, owner, day, items) then return nil, "invalid_setup" end
-		if reservation ~= nil and (type(reservation) ~= "table"
+		if type(reservation) ~= "table"
 			or reservation._market_site ~= site
 			or reservation.owner ~= owner
 			or reservation.layout ~= layout
-			or reservation.token == nil) then
+			or reservation.token == nil then
 			return nil, "reservation"
 		end
 		local valid, reason = site.valid(layout, reservation)
