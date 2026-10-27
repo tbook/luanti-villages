@@ -13,6 +13,11 @@ local CARDINALS = {
 }
 local FLOOR_TOLERANCE = 0.1
 local AIR = "air"
+-- A villager's collisionbox is 0.6 wide and 1.95 tall. Include the largest
+-- center offset whose box can still overlap a table cell, then verify overlap
+-- exactly below. This keeps the engine's radius query local and conservative.
+local OCCUPANCY_RADIUS = math.sqrt(
+	2 * (0.5 + cells.HALF_WIDTH) ^ 2 + (0.5 + cells.HEIGHT_NODES) ^ 2)
 
 local function pos(x, y, z)
 	return {x = x, y = y, z = z}
@@ -50,9 +55,9 @@ local function make_layout(first, outward)
 	for side = -1, 2 do
 		for distance = -2, 1 do
 			table.insert(clearance, pos(
-				first.x + right.x * side - outward.x * distance,
+				first.x + right.x * side + outward.x * distance,
 				first.y,
-				first.z + right.z * side - outward.z * distance))
+				first.z + right.z * side + outward.z * distance))
 		end
 	end
 	return {
@@ -107,7 +112,7 @@ local function default_occupied(table_pos)
 	if not core.get_objects_inside_radius then return false end
 	local min = pos(table_pos.x - 0.5, table_pos.y - 0.5, table_pos.z - 0.5)
 	local max = pos(table_pos.x + 0.5, table_pos.y + 0.5, table_pos.z + 0.5)
-	for _, object in ipairs(core.get_objects_inside_radius(table_pos, 1)) do
+	for _, object in ipairs(core.get_objects_inside_radius(table_pos, OCCUPANCY_RADIUS)) do
 		local player = object.is_player and object:is_player()
 		local entity = not player and object.get_luaentity and object:get_luaentity()
 		if player or (entity and entity.name == "mobs_mc:villager") then
