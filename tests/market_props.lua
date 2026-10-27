@@ -1,0 +1,320 @@
+-- Setup and rollback tests use the stock frame callback behavior from mineclone2.
+local function key(pos)
+	return pos.x .. ":" .. pos.y .. ":" .. pos.z
+end
+
+local world_nodes, metadata, displays, drops
+local construct_count, write_count, pending
+local fail_add_at, fail_inventory, fail_display_at, replace_first_frame
+local storage_values
+local frame_name = "mcl_itemframes:invisible_frame"
+local table_name = "mcl_decor:table_wooden"
+
+local function stack(name, count)
+	local value = {name = name or "", count = count or (name and name ~= "" and 1 or 0)}
+	function value:is_empty() return self.name == "" or self.count == 0 end
+	function value:get_name() return self.name end
+	function value:get_count() return self.count end
+	return value
+end
+
+ItemStack = function(name) return stack(name) end
+
+local frame_def = {}
+local function frame_on_construct(pos)
+	construct_count = construct_count + 1
+	local inv = minetest.get_meta(pos):get_inventory()
+	inv:set_size("main", 1)
+	if replace_first_frame and key(pos) == key(replace_first_frame.trigger) then
+		local replacement_pos = replace_first_frame.pos
+		replace_first_frame = nil
+		-- Simulate a same-name player replacement through the normal node API.
+		minetest.set_node(replacement_pos, {name = frame_name})
+	end
+end
+
+frame_def.on_construct = frame_on_construct
+frame_def.on_destruct = function(pos)
+	local inv = minetest.get_meta(pos):get_inventory()
+	local item = inv:get_stack("main", 1)
+	if item and not item:is_empty() then drops[#drops + 1] = {pos = key(pos), stack = item} end
+	inv:set_stack("main", 1, ItemStack(""))
+	displays[key(pos)] = nil
+end
+
+local function reset()
+	world_nodes, metadata, displays, drops = {}, {}, {}, {}
+	construct_count, write_count, pending = 0, 0, {}
+	fail_add_at, fail_inventory, fail_display_at, replace_first_frame = nil, false, nil, nil
+	storage_values = storage_values or {}
+	minetest = {
+		get_modpath = function() return "." end,
+		get_mod_storage = function()
+			return {
+				get_int = function(_, name) return storage_values[name] or 0 end,
+				set_int = function(_, name, value) storage_values[name] = value end,
+			}
+		end,
+		get_node_or_nil = function(pos)
+			local node = world_nodes[key(pos)]
+			return node and {name = node.name, param2 = node.param2} or {name = "air", param2 = 0}
+		end,
+		get_node = function(pos) return minetest.get_node_or_nil(pos) end,
+		get_meta = function(pos)
+			local node_key = key(pos)
+			metadata[node_key] = metadata[node_key] or {fields = {}, lists = {}, sizes = {}}
+			local data = metadata[node_key]
+			local inv = {}
+			function inv:set_size(name, size)
+				data.sizes[name] = size
+				data.lists[name] = data.lists[name] or {}
+			end
+			function inv:get_size(name) return data.sizes[name] or 0 end
+			function inv:set_stack(name, index, item)
+				if fail_inventory then fail_inventory = false; error("injected inventory write failure") end
+				data.lists[name] = data.lists[name] or {}
+				data.lists[name][index] = item
+			end
+			function inv:get_stack(name, index)
+				return (data.lists[name] or {})[index] or ItemStack("")
+			end
+			local meta = {}
+			function meta:get_inventory() return inv end
+			function meta:set_string(name, value) data.fields[name] = tostring(value) end
+			function meta:get_string(name) return data.fields[name] or "" end
+			function meta:set_int(name, value) data.fields[name] = value end
+			function meta:get_int(name) return data.fields[name] or 0 end
+			function meta:to_table() return data end
+			return meta
+		end,
+		add_node = function(pos, node)
+			write_count = write_count + 1
+			local old = world_nodes[key(pos)]
+			if old and old.name ~= "air" then
+				local def = old.name == frame_name and frame_def or {}
+				if def.on_destruct then def.on_destruct(pos) end
+			end
+			world_nodes[key(pos)] = {name = node.name, param2 = node.param2 or 0}
+			metadata[key(pos)] = nil
+			local def = node.name == frame_name and frame_def or {}
+			if def.on_construct then def.on_construct(pos) end
+			if fail_add_at == write_count then error("injected node write failure") end
+		end,
+		set_node = function(pos, node)
+			write_count = write_count + 1
+			local old = world_nodes[key(pos)]
+			local def = old and old.name == frame_name and frame_def or {}
+			if def.on_destruct then def.on_destruct(pos) end
+			world_nodes[key(pos)] = {name = node.name, param2 = node.param2 or 0}
+			metadata[key(pos)] = nil
+			def = node.name == frame_name and frame_def or {}
+			if def.on_construct then def.on_construct(pos) end
+		end,
+		remove_node = function(pos)
+			local old = world_nodes[key(pos)]
+			local def = old and old.name == frame_name and frame_def or {}
+			if def.on_destruct then def.on_destruct(pos) end
+			world_nodes[key(pos)] = {name = "air", param2 = 0}
+			metadata[key(pos)] = nil
+		end,
+	}
+	local site = {
+		valid = function(layout, reservation)
+			if reservation and reservation.layout ~= layout then return false, "reservation" end
+			for _, list in ipairs({layout.tables, layout.frames}) do
+				for _, pos in ipairs(list) do
+					if minetest.get_node_or_nil(pos).name ~= "air" then return false, "destination_not_air" end
+				end
+			end
+			return true
+		end,
+	}
+	local itemframes = {
+		remove_entity = function(pos) displays[key(pos)] = nil end,
+		update_entity = function(pos)
+			if fail_display_at == key(pos) then error("injected display failure") end
+			local inv = minetest.get_meta(pos):get_inventory()
+			local item = inv:get_stack("main", 1)
+			if item:is_empty() then displays[key(pos)] = nil; return nil end
+			local display = {name = "mcl_itemframes:item", pos = key(pos), stack = item}
+			displays[key(pos)] = display
+			return display
+		end,
+	}
+	return dofile("market_props.lua").new({site = site, itemframes = itemframes})
+end
+
+local function layout(x)
+	return {
+		tables = {{x = x, y = 0, z = 0}, {x = x + 1, y = 0, z = 0}},
+		frames = {{x = x, y = 1, z = 0}, {x = x + 1, y = 1, z = 0}},
+		frame_param2 = 1,
+	}
+end
+
+local function count_nodes(name)
+	local count = 0
+	for _, node in pairs(world_nodes) do if node.name == name then count = count + 1 end end
+	return count
+end
+
+local function assert_clean(layout_value, message)
+	for _, pos in ipairs(layout_value.frames) do
+		assert(not displays[key(pos)], message .. ": no frame display")
+	end
+	assert(#drops == 0, message .. ": no generated item drops")
+end
+
+-- Preflight rejection must not allocate tokens, write nodes, or run callbacks.
+reset()
+local api = reset()
+local blocked = layout(0)
+world_nodes[key(blocked.tables[1])] = {name = "test:stone"}
+local before = storage_values.market_props_token_counter or 0
+local result, reason = api.setup(blocked, "villager-a", 17, {"test:apple", "test:carrot"})
+assert(not result and reason == "destination_not_air", "preflight reports changed destination")
+assert(write_count == 0 and construct_count == 0, "preflight failure performs no writes")
+assert((storage_values.market_props_token_counter or 0) == before, "preflight failure does not consume a token")
+
+-- Successful setup uses node constructors, tags all props and makes both displays.
+reset()
+api = reset()
+local stall = layout(2)
+local success = assert(api.setup(stall, "villager-a", 17, {"test:apple", "test:carrot"}))
+assert(success.token == "market-" .. tostring(before + 1), "token is allocated from persistent counter")
+assert(count_nodes(table_name) == 2 and count_nodes(frame_name) == 2, "success writes exactly two tables and two frames")
+assert(construct_count == 2, "frame constructors ran through add_node")
+local frame_meta_prefix = "living_villages:market_"
+for index = 1, 2 do
+	local table_pos, frame_pos = stall.tables[index], stall.frames[index]
+	assert(world_nodes[key(frame_pos)].param2 == stall.frame_param2, "frame faces up toward its supporting table")
+	for _, pair in ipairs({{table_pos, "table_" .. index, frame_pos}, {frame_pos, "frame_" .. index, table_pos}}) do
+		local data = metadata[key(pair[1])].fields
+		assert(data[frame_meta_prefix .. "version"] == 1, "tag version is present")
+		assert(data[frame_meta_prefix .. "token"] == success.token, "tag token matches setup")
+		assert(data[frame_meta_prefix .. "owner"] == "villager-a", "tag owner matches villager id")
+		assert(data[frame_meta_prefix .. "day"] == 17, "tag creation day matches")
+		assert(data[frame_meta_prefix .. "role"] == pair[2], "tag identifies role")
+		assert(data[frame_meta_prefix .. "pair"] == key(pair[3]):gsub(":", ","), "tag identifies paired position")
+	end
+	local inventory = metadata[key(frame_pos)].lists.main[1]
+	assert(inventory:get_name() == (index == 1 and "test:apple" or "test:carrot")
+		and inventory:get_count() == 1, "each display holds exactly one contracted item")
+	assert(displays[key(frame_pos)] and displays[key(frame_pos)].name == "mcl_itemframes:item", "frame display was updated")
+end
+assert(write_count == 4 and count_nodes("air") == 0, "success writes only four prop nodes")
+
+-- A new module instance shares mod storage and cannot reuse the previous token.
+local second_api = dofile("market_props.lua").new({
+	site = {valid = function() return true end},
+	itemframes = {
+		remove_entity = function(pos) displays[key(pos)] = nil end,
+		update_entity = function(pos)
+			local display = {name = "mcl_itemframes:item", pos = key(pos)}
+			displays[key(pos)] = display
+			return display
+		end,
+	},
+})
+local other = layout(8)
+local next_setup = assert(second_api.setup(other, "villager-b", 18, {"test:bread", "test:potato"}))
+assert(next_setup.token ~= success.token and next_setup.token == "market-" .. tostring(before + 2),
+	"persistent counter makes tokens unique across module sessions")
+
+-- Failure after construction and after a display update clears generated stock before destructors.
+reset()
+api = reset()
+local partially_written = layout(12)
+fail_add_at = 4
+local failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"})
+assert(not failed, "node write failure aborts setup")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "constructor failure rolls back matching props")
+assert(construct_count == 2, "the failing frame constructor ran before rollback")
+assert_clean(partially_written, "node write rollback")
+
+reset()
+api = reset()
+partially_written = layout(16)
+fail_display_at = key(partially_written.frames[2])
+failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"})
+assert(not failed, "display failure aborts setup")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "display failure removes all owned nodes")
+assert_clean(partially_written, "display rollback")
+
+reset()
+api = reset()
+partially_written = layout(20)
+fail_inventory = true
+failed = api.setup(partially_written, "villager-c", 19, {"test:apple", "test:carrot"})
+assert(not failed, "inventory write failure aborts setup")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0, "inventory failure removes all owned nodes")
+assert_clean(partially_written, "inventory rollback")
+
+-- Rollback is token-scoped and preserves an untagged same-name player replacement.
+reset()
+api = reset()
+local owner_stall = layout(24)
+local owner_setup = assert(api.setup(owner_stall, "villager-a", 20, {"test:apple", "test:carrot"}))
+local failing_stall = layout(30)
+replace_first_frame = {trigger = failing_stall.frames[2], pos = failing_stall.frames[1]}
+fail_display_at = key(failing_stall.frames[2])
+failed = api.setup(failing_stall, "villager-b", 20, {"test:bread", "test:potato"})
+assert(not failed, "replacement during setup invalidates the operation")
+assert(world_nodes[key(failing_stall.frames[1])].name == frame_name,
+	"same-name untagged replacement survives rollback")
+assert(metadata[key(failing_stall.frames[1])].fields[frame_meta_prefix .. "token"] == nil,
+	"replacement does not retain market ownership tags")
+assert(world_nodes[key(owner_stall.tables[1])].name == table_name
+	and metadata[key(owner_stall.tables[1])].fields[frame_meta_prefix .. "token"] == owner_setup.token,
+	"another owner's matching props remain untouched")
+assert(count_nodes(table_name) == 2 and count_nodes(frame_name) == 3,
+	"only replacement and prior owner's nodes remain")
+assert(not displays[key(failing_stall.frames[1])], "replaced frame display is gone")
+assert(#drops == 0, "rollback does not drop stock or table items")
+
+-- Revalidate the reservation before consuming a token or writing any node.
+reset()
+api = reset()
+local reserved = layout(36)
+local bad_reservation = {layout = layout(40)}
+before = storage_values.market_props_token_counter or 0
+failed, reason = api.setup(reserved, "villager-d", 21, {"test:apple", "test:carrot"}, bad_reservation)
+assert(not failed and reason == "reservation", "stale or mismatched reservation is rejected")
+assert(write_count == 0 and (storage_values.market_props_token_counter or 0) == before,
+	"reservation failure has no writes or token consumption")
+
+-- A stock-style deferred map refresh after rollback cannot leave or recreate a display.
+reset()
+api = reset()
+partially_written = layout(42)
+local stock_update = {
+	remove_entity = function(pos) displays[key(pos)] = nil end,
+	update_entity = function(pos)
+		if fail_display_at == key(pos) then error("injected display failure") end
+		local inventory = minetest.get_meta(pos):get_inventory()
+		local item = inventory:get_stack("main", 1)
+		if item:is_empty() then displays[key(pos)] = nil; return nil end
+		local entity = {name = "mcl_itemframes:item", pos = key(pos)}
+		displays[key(pos)] = entity
+		-- mineclone2's map entity may queue update_entity(pos) until after(0).
+		pending[#pending + 1] = function()
+			local current = minetest.get_meta(pos):get_inventory():get_stack("main", 1)
+			if current:is_empty() then
+				-- Stock update_entity creates then removes an entity for an empty stack.
+				displays[key(pos)] = {name = "mcl_itemframes:item", pos = key(pos)}
+				displays[key(pos)] = nil
+			else
+				displays[key(pos)] = entity
+			end
+		end
+		return entity
+	end,
+}
+local async_api = dofile("market_props.lua").new({site = {valid = function() return true end}, itemframes = stock_update})
+fail_display_at = key(partially_written.frames[2])
+failed = async_api.setup(partially_written, "villager-e", 22, {"test:map", "test:apple"})
+assert(not failed, "second display failure aborts setup with a queued map refresh")
+for _, callback in ipairs(pending) do callback() end
+assert_clean(partially_written, "deferred map refresh rollback")
+
+print("market props setup and rollback tests passed")
