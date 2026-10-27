@@ -264,6 +264,9 @@ reset()
 local first_search = site.begin_search({x = 10, y = 1, z = 10}, "seller-a", options(0, 600, clock))
 local status, first_reservation = site.step_search(first_search)
 assert(status == "found" and first_reservation.owner == "seller-a", "first valid candidate is reserved")
+local repeated_status, repeated_reservation = site.step_search(first_search)
+assert(repeated_status == "found" and repeated_reservation == first_reservation,
+	"repeated search call returns the same active reservation")
 assert(site.valid(first_reservation.layout, first_reservation), "active reservation revalidates")
 
 -- This trader approaches the same pair from the opposite side. The layouts
@@ -284,6 +287,7 @@ local after_release = site.begin_search({x = 22, y = 1, z = 10}, "seller-b", opt
 local released_status, released_reservation = site.step_search(after_release)
 assert(released_status == "found", "released space is available")
 assert(site.release(released_reservation), "new reservation releases cleanly")
+assert(site.step_search(after_release) == "exhausted", "released search cannot report an inactive reservation")
 
 -- Neighboring stalls share clearance cells, provided no table/seller column
 -- from either stall occupies the other's clearance.
@@ -319,6 +323,7 @@ wrong_owner.owner, wrong_owner.token = "another-seller", replacement.token
 assert(not site.release(wrong_owner) and not site.renew(wrong_owner),
 	"matching a replacement token with the wrong owner cannot mutate its lease")
 clock.value = 10
+assert(site.step_search(replacement_search) == "exhausted", "expired search cannot report an inactive reservation")
 assert(not site.renew(replacement), "lease expires after ten real seconds")
 local expiry_search = site.begin_search({x = 10, y = 1, z = 10}, "after-expiry", options(0, 600, clock))
 local expiry_status, expiry_reservation = site.step_search(expiry_search)

@@ -291,7 +291,16 @@ end
 
 function site.step_search(search)
 	if type(search) ~= "table" then return "exhausted" end
-	if search.reservation then return "found", search.reservation end
+	if search.reservation then
+		local now = now_from(search.options)
+		if search.reservation.owner == search.owner and search.reservation.token == search.token
+			and active(search.reservation, now) then
+			return "found", search.reservation
+		end
+		search.exhausted = true
+		expire(now)
+		return "exhausted"
+	end
 	if search.exhausted then return "exhausted" end
 	local examined = 0
 	while examined < CANDIDATES_PER_STEP and search.sampled < MAX_CANDIDATES do
