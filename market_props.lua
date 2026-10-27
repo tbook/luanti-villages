@@ -28,7 +28,7 @@ end
 function props.new(options)
 	options = options or {}
 	local world = options.core or core
-	local site = options.site or dofile(world.get_modpath("living_villages") .. "/market_site.lua")
+	local site = assert(options.site, "market_props.new requires the shared market_site service")
 	local storage = options.storage or world.get_mod_storage()
 	local itemframes = options.itemframes or mcl_itemframes
 	local make_stack = options.itemstack or ItemStack
@@ -48,6 +48,15 @@ function props.new(options)
 		return true
 	end
 
+	local function has_market_tag(meta)
+		return meta:get_int(key("version")) ~= 0
+			or meta:get_string(key("token")) ~= ""
+			or meta:get_string(key("owner")) ~= ""
+			or meta:get_int(key("day")) ~= 0
+			or meta:get_string(key("role")) ~= ""
+			or meta:get_string(key("pair")) ~= ""
+	end
+
 	local function owned(pos, token, owner, day, role, node_name, pair)
 		local node = world.get_node_or_nil(pos)
 		if not node or node.name ~= node_name then return false end
@@ -60,25 +69,27 @@ function props.new(options)
 			and meta:get_string(key("pair")) == pos_key(pair)
 	end
 
-	local function clear_frame(pos)
-		local meta = world.get_meta(pos)
-		local inv = meta:get_inventory()
-		inv:set_stack("main", 1, make_stack(""))
-		itemframes.remove_entity(pos)
-	end
-
 	local function rollback(created, token, owner, day)
 		for index = 1, 2 do
 			local pos = created.frames[index]
 			if pos and owned(pos, token, owner, day, "frame_" .. index, FRAME, created.tables[index]) then
-				pcall(clear_frame, pos)
-				pcall(world.remove_node, pos)
+				local cleared = pcall(function()
+					local inv = world.get_meta(pos):get_inventory()
+					inv:set_stack("main", 1, make_stack(""))
+				end)
+				local removed_display = cleared and pcall(itemframes.remove_entity, pos)
+				if removed_display then
+					pcall(world.remove_node, pos)
+				end
 			end
 		end
 		for index = 1, 2 do
 			local pos = created.tables[index]
-			if pos and owned(pos, token, owner, day, "table_" .. index, TABLE, created.frames[index]) then
-				pcall(world.remove_node, pos)
+			if pos and owned(pos, token, owner, day, "table_" .. index, TABLE, created.table_pairs[index]) then
+				local above = world.get_node_or_nil(created.table_pairs[index])
+				if above and above.name == "air" then
+					pcall(world.remove_node, pos)
+				end
 			end
 		end
 	end
@@ -102,22 +113,35 @@ function props.new(options)
 	-- Reservation and map validation are repeated at arrival, immediately before writes.
 	function api.setup(layout, owner, day, items, reservation)
 		if not valid_input(layout, owner, day, items) then return nil, "invalid_setup" end
+		if reservation ~= nil and (type(reservation) ~= "table"
+			or reservation._market_site ~= site
+			or reservation.owner ~= owner
+			or reservation.layout ~= layout
+			or reservation.token == nil) then
+			return nil, "reservation"
+		end
 		local valid, reason = site.valid(layout, reservation)
 		if not valid then return nil, reason or "invalid_layout" end
 
 		local counter = storage:get_int(COUNTER_KEY) + 1
 		storage:set_int(COUNTER_KEY, counter)
 		local token = "market-" .. tostring(counter)
-		local created = {tables = {}, frames = {}}
+		local created = {tables = {}, frames = {}, table_pairs = layout.frames}
 
 		local function place(pos, node_name, param2, kind, index, role, pair)
 			created[kind][index] = copy_pos(pos)
+			local before = world.get_node_or_nil(pos)
+			if not before or before.name ~= "air" then return false end
 			local ok = pcall(world.add_node, pos, {name = node_name, param2 = param2 or 0})
 			local node = world.get_node_or_nil(pos)
 			if node and node.name == node_name then
-				-- add_node may throw from on_construct after writing the node. Since
-				-- preflight proved this exact cell was air, tag it for safe rollback.
-				tag(pos, node_name, token, owner, day, role, pair)
+				-- The supported stock table has no constructor and the stock frame
+				-- constructor only sizes main; do not claim a node already tagged by
+				-- an interleaving replacement.
+				-- The constructor may have replaced this cell or tagged its own prop.
+				-- Never claim a node that already carries market ownership metadata.
+				local meta = world.get_meta(pos)
+				if not has_market_tag(meta) then tag(pos, node_name, token, owner, day, role, pair) end
 			end
 			if not ok or not node or node.name ~= node_name
 				or not owned(pos, token, owner, day, role, node_name, pair) then

@@ -5,8 +5,9 @@ end
 
 local world_nodes, metadata, displays, drops
 local construct_count, write_count, pending
-local fail_add_at, fail_inventory, fail_display_at, replace_first_frame
+local fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame
 local storage_values
+local constructor_hooks, test_itemframes
 local frame_name = "mcl_itemframes:invisible_frame"
 local table_name = "mcl_decor:table_wooden"
 
@@ -45,7 +46,8 @@ end
 local function reset()
 	world_nodes, metadata, displays, drops = {}, {}, {}, {}
 	construct_count, write_count, pending = 0, 0, {}
-	fail_add_at, fail_inventory, fail_display_at, replace_first_frame = nil, false, nil, nil
+	fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame = nil, false, nil, nil, nil
+	constructor_hooks = {}
 	storage_values = storage_values or {}
 	minetest = {
 		get_modpath = function() return "." end,
@@ -72,6 +74,10 @@ local function reset()
 			function inv:get_size(name) return data.sizes[name] or 0 end
 			function inv:set_stack(name, index, item)
 				if fail_inventory then fail_inventory = false; error("injected inventory write failure") end
+				if fail_clear_inventory == node_key and item:is_empty() then
+					fail_clear_inventory = nil
+					error("injected inventory clear failure")
+				end
 				data.lists[name] = data.lists[name] or {}
 				data.lists[name][index] = item
 			end
@@ -98,6 +104,7 @@ local function reset()
 			metadata[key(pos)] = nil
 			local def = node.name == frame_name and frame_def or {}
 			if def.on_construct then def.on_construct(pos) end
+			if constructor_hooks[node.name] then constructor_hooks[node.name](pos) end
 			if fail_add_at == write_count then error("injected node write failure") end
 		end,
 		set_node = function(pos, node)
@@ -141,6 +148,7 @@ local function reset()
 			return display
 		end,
 	}
+	test_itemframes = itemframes
 	return dofile("market_props.lua").new({site = site, itemframes = itemframes})
 end
 
@@ -267,8 +275,8 @@ assert(metadata[key(failing_stall.frames[1])].fields[frame_meta_prefix .. "token
 assert(world_nodes[key(owner_stall.tables[1])].name == table_name
 	and metadata[key(owner_stall.tables[1])].fields[frame_meta_prefix .. "token"] == owner_setup.token,
 	"another owner's matching props remain untouched")
-assert(count_nodes(table_name) == 2 and count_nodes(frame_name) == 3,
-	"only replacement and prior owner's nodes remain")
+assert(count_nodes(table_name) == 3 and count_nodes(frame_name) == 3,
+	"replacement, its supporting table and prior owner's nodes remain")
 assert(not displays[key(failing_stall.frames[1])], "replaced frame display is gone")
 assert(#drops == 0, "rollback does not drop stock or table items")
 
@@ -316,5 +324,136 @@ failed = async_api.setup(partially_written, "villager-e", 22, {"test:map", "test
 assert(not failed, "second display failure aborts setup with a queued map refresh")
 for _, callback in ipairs(pending) do callback() end
 assert_clean(partially_written, "deferred map refresh rollback")
+
+-- If generated inventory cannot be cleared, retain the owned frame and its support.
+reset()
+api = reset()
+local stuck = layout(48)
+fail_clear_inventory = key(stuck.frames[1])
+fail_display_at = key(stuck.frames[2])
+failed = api.setup(stuck, "villager-f", 23, {"test:apple", "test:carrot"})
+assert(not failed, "clear failure occurs while unwinding the stock frame")
+assert(world_nodes[key(stuck.frames[1])].name == frame_name, "uncleared frame remains owned")
+assert(metadata[key(stuck.frames[1])].fields[frame_meta_prefix .. "token"] ~= nil,
+	"uncleared frame keeps ownership metadata")
+assert(world_nodes[key(stuck.tables[1])].name == table_name, "table remains beneath uncleared frame")
+assert(world_nodes[key(stuck.frames[2])].name == "air" and world_nodes[key(stuck.tables[2])].name == "air",
+	"independent pair still rolls back")
+assert(metadata[key(stuck.frames[1])].lists.main[1]:get_name() == "test:apple",
+	"generated inventory remains in the retained frame")
+assert(#drops == 0, "failed inventory clear never invokes a dropping destructor")
+
+-- A constructor-supplied same-name ownership tag is foreign and must not be overwritten.
+reset()
+api = reset()
+local tagged_foreign = layout(54)
+constructor_hooks[frame_name] = function(pos)
+	local meta = minetest.get_meta(pos)
+	meta:set_int(frame_meta_prefix .. "version", 1)
+	meta:set_string(frame_meta_prefix .. "token", "foreign-token")
+	meta:set_string(frame_meta_prefix .. "owner", "player")
+	meta:set_int(frame_meta_prefix .. "day", 4)
+	meta:set_string(frame_meta_prefix .. "role", "frame_1")
+	meta:set_string(frame_meta_prefix .. "pair", key(tagged_foreign.tables[1]):gsub(":", ","))
+end
+failed = api.setup(tagged_foreign, "villager-g", 24, {"test:apple", "test:carrot"})
+assert(not failed, "foreign ownership tag aborts setup")
+assert(world_nodes[key(tagged_foreign.frames[1])].name == frame_name
+	and metadata[key(tagged_foreign.frames[1])].fields[frame_meta_prefix .. "token"] == "foreign-token",
+	"same-name foreign node and its token survive")
+assert(world_nodes[key(tagged_foreign.tables[1])].name == table_name,
+	"foreign frame keeps its supporting market table")
+assert(#drops == 0, "foreign frame rollback creates no drops")
+
+-- A constructor may fill a later destination after preflight; the later write must stop.
+reset()
+api = reset()
+local occupied_later = layout(60)
+constructor_hooks[table_name] = function(pos)
+	if key(pos) ~= key(occupied_later.tables[1]) then return end
+	constructor_hooks[table_name] = nil
+	minetest.add_node(occupied_later.frames[2], {name = frame_name})
+	local meta = minetest.get_meta(occupied_later.frames[2])
+	meta:set_int(frame_meta_prefix .. "version", 1)
+	meta:set_string(frame_meta_prefix .. "token", "foreign-later")
+end
+failed = api.setup(occupied_later, "villager-h", 25, {"test:apple", "test:carrot"})
+assert(not failed, "later destination filled by a constructor aborts setup")
+assert(world_nodes[key(occupied_later.frames[2])].name == frame_name
+	and metadata[key(occupied_later.frames[2])].fields[frame_meta_prefix .. "token"] == "foreign-later",
+	"later foreign destination is preserved")
+assert(world_nodes[key(occupied_later.tables[2])].name == table_name,
+	"table beneath later foreign destination remains in place")
+assert(#drops == 0, "constructor interleaving rollback creates no drops")
+
+-- Use actual market_site instances so reservations are checked for identity, activity and owner.
+local function real_market_service(owner)
+	reset()
+	minetest.registered_nodes = {
+		air = {walkable = false},
+		["test:stone"] = {walkable = true},
+	}
+	minetest.get_item_group = function() return 0 end
+	minetest.dir_to_wallmounted = function(dir)
+		assert(dir.x == 0 and dir.y == -1 and dir.z == 0)
+		return 1
+	end
+	minetest.is_protected = function() return false end
+	minetest.get_objects_inside_radius = function() return {} end
+	for x = 0, 30 do
+		for z = 0, 30 do world_nodes[key({x = x, y = 0, z = z})] = {name = "test:stone"} end
+	end
+	local real_site = dofile("market_site.lua")
+	local clock = {value = 0}
+	local search = real_site.begin_search({x = 10, y = 1, z = 10}, owner, {
+		random = function(_, high) return high == 35999 and 0 or 600 end,
+		now = function() return clock.value end,
+	})
+	local state, reservation = real_site.step_search(search)
+	assert(state == "found" and reservation, "real market_site reserves the supported test layout")
+	local real_api = dofile("market_props.lua").new({site = real_site, itemframes = test_itemframes})
+	return real_api, real_site, reservation, clock
+end
+
+local real_api, real_site, reservation, real_clock = real_market_service("seller-a")
+local real_result = assert(real_api.setup(reservation.layout, "seller-a", 26,
+	{"test:apple", "test:carrot"}, reservation))
+assert(real_result.token, "active reservation from the shared site service succeeds")
+
+real_api, real_site, reservation = real_market_service("seller-a")
+assert(real_site.release(reservation), "reservation is released")
+before = storage_values.market_props_token_counter or 0
+failed, reason = real_api.setup(reservation.layout, "seller-a", 26,
+	{"test:apple", "test:carrot"}, reservation)
+assert(not failed and reason == "reservation", "released real reservation is rejected")
+assert(write_count == 0 and (storage_values.market_props_token_counter or 0) == before,
+	"released reservation causes no world or token writes")
+
+real_api, real_site, reservation, real_clock = real_market_service("seller-a")
+real_clock.value = 11
+before = storage_values.market_props_token_counter or 0
+failed, reason = real_api.setup(reservation.layout, "seller-a", 26,
+	{"test:apple", "test:carrot"}, reservation)
+assert(not failed and reason == "reservation", "expired real reservation is rejected")
+assert(write_count == 0 and (storage_values.market_props_token_counter or 0) == before,
+	"expired reservation causes no world or token writes")
+
+real_api, real_site, reservation = real_market_service("seller-a")
+before = storage_values.market_props_token_counter or 0
+failed, reason = real_api.setup(reservation.layout, "seller-b", 26,
+	{"test:apple", "test:carrot"}, reservation)
+assert(not failed and reason == "reservation", "reservation owner must match the caller")
+assert(write_count == 0 and (storage_values.market_props_token_counter or 0) == before,
+	"foreign owner cannot place or consume a token")
+
+real_api, real_site, reservation = real_market_service("seller-a")
+local other_site = dofile("market_site.lua")
+local other_api = dofile("market_props.lua").new({site = other_site, itemframes = test_itemframes})
+before = storage_values.market_props_token_counter or 0
+failed, reason = other_api.setup(reservation.layout, "seller-a", 26,
+	{"test:apple", "test:carrot"}, reservation)
+assert(not failed and reason == "reservation", "reservation from another site instance is rejected")
+assert(write_count == 0 and (storage_values.market_props_token_counter or 0) == before,
+	"foreign site reservation causes no world or token writes")
 
 print("market props setup and rollback tests passed")
