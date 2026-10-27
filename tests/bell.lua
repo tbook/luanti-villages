@@ -146,7 +146,7 @@ assert(#gopaths == before + 1 and arrived._villages_wander_anchor == nil, "a str
 local leaver = villager(11, -1)
 tick(leaver)
 assert(leaver._villages_wander_anchor)
-time = 14000 / 24000
+time = 15000 / 24000
 tick(leaver)
 assert(leaver._villages_wander_anchor == nil and leaver._villages_bell == nil, "the Tavern stage releases the villager")
 -- Stopped mid-walk, the follower's flag goes with the state (#230).
@@ -154,7 +154,7 @@ time = 11000 / 24000
 local walker = villager(12, -1)
 tick(walker)
 walker.state, walker._villages_follow = "gowp", {final = {x = 0, y = 0, z = 0}}
-time = 14000 / 24000
+time = 15000 / 24000
 tick(walker)
 assert(walker.state == "stand" and walker._villages_follow == nil, "the walk to the bell ends with its flag")
 time = 11000 / 24000
@@ -186,14 +186,14 @@ nodes[key({x = 10, y = 5, z = 0})] = "mcl_bells:bell"
 local handoff_def = {
 	on_activate = function() end, on_die = function() end, get_staticdata = function() return {} end,
 	do_custom = function(self)
-		if minetest.get_timeofday() * 24000 >= 13500 and self.state ~= "gowp" then self.state = "gowp" end
+		if minetest.get_timeofday() * 24000 >= 15000 and self.state ~= "gowp" then self.state = "gowp" end
 	end,
 }
 bell.install(handoff_def)
 local guest = villager(11, 4)
 tick(guest)
 assert(guest._villages_wander_anchor)
-time = 14000 / 24000
+time = 15000 / 24000
 handoff_def.do_custom(guest, 0.1)
 assert(guest.state == "gowp" and guest._villages_bell == nil, "the tavern's trip survives the stage change")
 time = 11000 / 24000

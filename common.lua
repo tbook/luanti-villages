@@ -72,13 +72,13 @@ local KEEPER_SCHEDULE = {
 -- Holidays (#124) fall on every full moon and new moon, every 4 days. The
 -- holiday tables apply instead of the two above and share their wrap at
 -- midnight. "church" is the villagers' service and "pulpit" and "service" the
--- cleric's; vanilla knows none of them, nor "bell", until their own issues
--- give them behavior (#10).
+-- cleric's; "bell" runs from the service until tavern time, for the holiday
+-- gathering (and market days, #281).
 local HOLIDAY_SCHEDULE = {
 	{start = 5500, stage = "putter"},
 	{start = 7000, stage = "church"},
 	{start = 10500, stage = "bell"},
-	{start = 13500, stage = "tavern"},
+	{start = 15000, stage = "tavern"},
 	{start = 17500, stage = "home"},
 	{start = 18500, stage = "sleep"},
 }
@@ -86,14 +86,14 @@ local HOLIDAY_CLERIC_SCHEDULE = {
 	{start = 5500, stage = "pulpit"},
 	{start = 7000, stage = "service"},
 	{start = 10500, stage = "bell"},
-	{start = 13500, stage = "tavern"},
+	{start = 15000, stage = "tavern"},
 	{start = 17500, stage = "home"},
 	{start = 18500, stage = "sleep"},
 }
 local HOLIDAY_KEEPER_SCHEDULE = {
 	{start = 7000, stage = "putter"},
 	{start = 8000, stage = "free"},
-	{start = 13000, stage = "staff"},
+	{start = 14500, stage = "staff"},
 	{start = 18500, stage = "home"},
 	{start = 19000, stage = "sleep"},
 }

@@ -126,18 +126,20 @@ alice.order = nil
 def.do_custom(alice, 0.1)
 assert(alice.order == nil, "no hold once service ends")
 
--- Holiday hours (#128): the keeper staffs from 13:00, an hour before an
--- ordinary day's 14:00, and still closes at 18:30.
+-- Holiday hours (#285): staffing starts at 14:30, half an hour before an
+-- ordinary day's 15:00, and ends at 18:30.
 local schedule = dofile("common.lua")
 local function stage_at(ticks) return schedule.schedule_stage(ticks / 24000, alice) end
 day = 3
 assert(stage_at(13500) == "free", "ordinary day: not yet")
 assert(stage_at(14000) == "staff")
 day = 4
-assert(stage_at(12999) == "free", "holiday: not before 13:00")
-assert(stage_at(13000) == "staff" and stage_at(13500) == "staff", "holiday: open early")
-assert(stage_at(18400) == "staff", "holiday: open until 18:30")
-assert(stage_at(18600) == "home", "holiday: closed after 18:30")
+assert(stage_at(14499) == "free", "holiday: not before 14:30")
+assert(stage_at(14500) == "staff", "holiday: starts staffing at 14:30")
+assert(stage_at(14999) == "staff" and stage_at(15000) == "staff", "holiday: staffs during guest arrival")
+assert(stage_at(18499) == "staff", "holiday: open until 18:30")
+assert(stage_at(18500) == "home", "holiday: goes home at 18:30")
+assert(stage_at(18999) == "home" and stage_at(19000) == "sleep", "holiday: sleeps at 19:00")
 day = 3
 time = 10000 / 24000
 vanilla_custom = function() end
