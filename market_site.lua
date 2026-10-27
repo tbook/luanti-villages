@@ -13,6 +13,11 @@ local CARDINALS = {
 }
 local FLOOR_TOLERANCE = 0.1
 local AIR = "air"
+local MAX_CANDIDATES = 48
+local CANDIDATES_PER_STEP = 4
+local RESERVATION_SECONDS = 10
+local reservations = {}
+local next_token = 0
 -- A villager's collisionbox is 0.6 wide and 1.95 tall. Include the largest
 -- center offset whose box can still overlap a table cell, then verify overlap
 -- exactly below. This keeps the engine's radius query local and conservative.
@@ -175,6 +180,179 @@ local function valid_layout(layout, options)
 	return true
 end
 
-site.valid = valid_layout
+local valid_layout_base = valid_layout
+
+local function default_now()
+	if core.get_us_time then return core.get_us_time() / 1000000 end
+	return os.time()
+end
+
+local function now_from(options)
+	return options and options.now and options.now() or default_now()
+end
+
+local function same_column(a, a_height, b, b_height)
+	return a.x == b.x and a.z == b.z
+		and a.y < b.y + b_height and b.y < a.y + a_height
+end
+
+local function conflicts(layout, other)
+	for _, exclusive in ipairs(layout.exclusive) do
+		for _, clearance in ipairs(other.layout.clearance) do
+			if same_column(exclusive.pos, exclusive.height, clearance, 2) then return true end
+		end
+	end
+	for _, exclusive in ipairs(other.layout.exclusive) do
+		for _, clearance in ipairs(layout.clearance) do
+			if same_column(exclusive.pos, exclusive.height, clearance, 2) then return true end
+		end
+	end
+	return false
+end
+
+local function active(reservation, now)
+	return type(reservation) == "table" and reservation._market_site == site
+		and reservations[reservation.token] == reservation and reservation.expires > now
+end
+
+local function expire(now)
+	now = now or default_now()
+	for token, reservation in pairs(reservations) do
+		if reservation.expires <= now then reservations[token] = nil end
+	end
+end
+
+site.expire = expire
+
+local function random_value(options, low, high)
+	local random = options and options.random or math.random
+	return random(low, high)
+end
+
+local function sample_offset(options)
+	-- Sampling is one bounded horizontal candidate, even if rounding puts it
+	-- just outside the permitted radius.
+	local angle = random_value(options, 0, 35999) / 100
+	local radius = random_value(options, 400, 1200) / 100
+	local radians = angle * math.pi / 180
+	local dx = math.floor(math.cos(radians) * radius + 0.5)
+	local dz = math.floor(math.sin(radians) * radius + 0.5)
+	local distance = math.sqrt(dx * dx + dz * dz)
+	if distance < 4 or distance > 12 then return nil end
+	return dx, dz
+end
+
+local function candidate_layout(center, dx, dz, y)
+	local outward
+	if math.abs(dx) >= math.abs(dz) then
+		outward = {x = dx >= 0 and 1 or -1, z = 0}
+	else
+		outward = {x = 0, z = dz >= 0 and 1 or -1}
+	end
+	local right = {x = -outward.z, z = outward.x}
+	local first = pos(
+		math.floor(center.x + dx - right.x / 2 + 0.5), y,
+		math.floor(center.z + dz - right.z / 2 + 0.5))
+	local layout = site.describe(center, first)
+	if not layout then return nil end
+	local mx, mz = layout.midpoint.x - center.x, layout.midpoint.z - center.z
+	local distance = math.sqrt(mx * mx + mz * mz)
+	if distance < 4 or distance > 12 then return nil end
+	return layout
+end
+
+function site.begin_search(center, owner, options)
+	if type(center) ~= "table" or owner == nil then return nil end
+	next_token = next_token + 1
+	local search = {
+		center = copy_pos(center), owner = owner, token = next_token,
+		options = options or {}, sampled = 0, exhausted = false,
+	}
+	expire(now_from(search.options))
+	return search
+end
+
+local function reserve(search, layout)
+	local now = now_from(search.options)
+	expire(now)
+	-- No yield or callback occurs between the last conflict check and insertion.
+	if not valid_layout_base(layout, search.options) then return nil end
+	for _, other in pairs(reservations) do
+		if conflicts(layout, other) then return nil end
+	end
+	local reservation = {
+		_market_site = site, owner = search.owner, token = search.token,
+		layout = layout, expires = now + RESERVATION_SECONDS,
+		options = search.options,
+	}
+	reservations[reservation.token] = reservation
+	return reservation
+end
+
+function site.step_search(search)
+	if type(search) ~= "table" then return "exhausted" end
+	if search.reservation then
+		local now = now_from(search.options)
+		if search.reservation.owner == search.owner and search.reservation.token == search.token
+			and active(search.reservation, now) then
+			return "found", search.reservation
+		end
+		search.exhausted = true
+		expire(now)
+		return "exhausted"
+	end
+	if search.exhausted then return "exhausted" end
+	local examined = 0
+	while examined < CANDIDATES_PER_STEP and search.sampled < MAX_CANDIDATES do
+		search.sampled = search.sampled + 1
+		examined = examined + 1
+		local dx, dz = sample_offset(search.options)
+		if dx then
+			for _, height in ipairs({0, 1, -1}) do
+				local layout = candidate_layout(search.center, dx, dz, search.center.y + height)
+				if layout then
+					local reservation = reserve(search, layout)
+					if reservation then
+						search.reservation = reservation
+						return "found", reservation
+					end
+				end
+			end
+		end
+	end
+	if search.sampled >= MAX_CANDIDATES then
+		search.exhausted = true
+		return "exhausted"
+	end
+	return "pending"
+end
+
+function site.renew(reservation)
+	local now = now_from(reservation and reservation.options)
+	if not active(reservation, now) then
+		if reservation and reservations[reservation.token] == reservation then reservations[reservation.token] = nil end
+		return false
+	end
+	reservation.expires = now + RESERVATION_SECONDS
+	return true
+end
+
+function site.release(reservation)
+	if type(reservation) ~= "table" or reservation._market_site ~= site
+		or reservations[reservation.token] ~= reservation then return false end
+	reservations[reservation.token] = nil
+	return true
+end
+
+-- The reservation carries the readers used by the search for deterministic
+-- tests; production reservations use the live world readers on arrival.
+function site.valid(layout, reservation)
+	if reservation and reservation._market_site == site then
+		local now = now_from(reservation.options)
+		if not active(reservation, now) or reservation.layout ~= layout then return false, "reservation" end
+		return valid_layout_base(layout, reservation.options)
+	end
+	return valid_layout_base(layout, reservation)
+end
 
 return site
