@@ -79,4 +79,174 @@ local guarded = setmetatable({_profession = "farmer", _id = "guarded"}, {
 })
 assert(market.eligible(guarded), "eligibility does not depend on trades or claimed jobsites")
 
+local function controller_fixture()
+	local now, ticks = 100, 14000
+	local site = {searches = 0, renewals = 0, releases = 0, valid_calls = 0}
+	function site.begin_search(center, owner)
+		site.searches = site.searches + 1
+		site.owner = owner
+		return {center = center, owner = owner}
+	end
+	function site.step_search(search)
+		search.steps = (search.steps or 0) + 1
+		if search.steps == 1 then return "pending" end
+		return "found", site.reservation
+	end
+	function site.renew() site.renewals = site.renewals + 1; return true end
+	function site.release() site.releases = site.releases + 1; return true end
+	function site.valid() site.valid_calls = site.valid_calls + 1; return true end
+	local reservation = {layout = {
+		seller = {x = 4, y = 1, z = 5},
+	}}
+	site.reservation = reservation
+	local cancelled = {}
+	local nav = {cancel_goto = function(self, token)
+		cancelled[#cancelled + 1] = token
+		if self._villages_goto_route and self._villages_goto_route.market_token == token then
+			self._villages_goto_route = nil
+			self.state = "stand"
+		end
+		return true
+	end}
+	local target = {x = 4, y = 1, z = 5}
+	local controller = market.new({site = site, props = {}, navigation = nav,
+		now = function() return now end,
+		ticks = function() return ticks end,
+		standing_position = function() return target end,
+		stage = function() return "bell" end})
+	local bell = {center = {x = 0, y = 0, z = 0}, limit = 2}
+	local self = {
+		_id = "seller", _profession = "farmer",
+		object = {get_pos = function() return target end},
+		gopath = function(entity, _, callback)
+			entity._villages_goto_route = {id = 17, status = "planning", market_token = entity._gopath_market_token}
+			entity.arrival_callback = callback
+			return true
+		end,
+	}
+	-- Match navigation.lua's optional market route identity argument.
+	local original_gopath = self.gopath
+	self.gopath = function(entity, target_pos, callback, prioritised, token)
+		entity._gopath_market_token = token
+		return original_gopath(entity, target_pos, callback, prioritised, token)
+	end
+	return controller, site, nav, self, bell, cancelled, function(value) now = value end,
+		function(value) ticks = value end
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	assert(controller.tick(seller, bell, 0) == "holding", "seller holds while bounded search is pending")
+	assert(controller.tick(seller, bell, 0) == "walking", "seller begins normal goto after reservation")
+	assert(site.searches == 1 and site.owner == seller._id, "search is created once for the prop owner")
+	assert(controller.tick(seller, bell, 1) == "walking", "seller continues a planning route")
+	assert(site.renewals == 1, "reservation renews while the seller travels")
+	seller._villages_goto_route.status = "arrived"
+	seller.arrival_callback(seller)
+	assert(controller.tick(seller, bell, 0) == "holding", "arrival requires position and layout revalidation")
+	assert(site.valid_calls == 1, "arrival validates reserved layout")
+	controller.leave(seller, "test")
+	assert(site.releases == 1, "leave releases the reservation")
+end
+
+do
+	local controller, site, nav, seller, bell, cancelled = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session = seller._villages_market_session
+	local late = seller.arrival_callback
+	controller.leave(seller, "stage ended")
+	late(seller)
+	assert(not session.callback_arrived and seller._villages_market_session == nil,
+		"pending arrival callback cannot revive a departed session")
+	assert(cancelled[1] == session.id and site.releases == 1, "leave cancels only the market route and releases its claim")
+	assert(controller.tick(seller, bell, 0) == "browse", "one activation never restarts an abandoned attempt")
+end
+
+do
+	local controller, site, nav, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session = seller._villages_market_session
+	seller._villages_goto_route = {id = 18, status = "travelling", market_token = "replacement"}
+	assert(controller.tick(seller, bell, 3) == "browse", "replacement route aborts the market walk")
+	assert(seller._villages_market_session == nil and site.releases == 1,
+		"replaced route fallback releases the reservation")
+	assert(seller._villages_goto_route.id == 18, "market cleanup preserves a replacement goto route")
+	assert(session.route_id == 17, "market records the route identity it owns")
+end
+
+do
+	local controller, _, _, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "travelling"
+	seller._trading_players = {player = true}
+	assert(controller.tick(seller, bell, 100) == "walking", "trading pauses the route deadline")
+	seller._trading_players = nil
+	seller._villages_job_search_route = {status = "travelling"}
+	assert(controller.tick(seller, bell, 100) == "walking", "unrelated job search pauses the route deadline")
+	seller._villages_job_search_route = nil
+	assert(controller.tick(seller, bell, 3) == "browse", "an active market walk times out against bell's limit")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session = seller._villages_market_session
+	seller._villages_goto_route = {id = 18, status = "planning", market_token = session.id}
+	assert(controller.tick(seller, bell, 0) == "walking", "navigation replan keeps the same market session")
+	assert(session.route_id == 18, "controller tracks the replacement planning route identity")
+	seller._villages_goto_route.status = "arrived"
+	seller.object.get_pos = function() return {x = 20, y = 1, z = 20} end
+	assert(controller.tick(seller, bell, 3) == "browse", "an arrival far from its seller cell times out")
+	assert(site.releases == 1, "bad arrival releases the reservation")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session = seller._villages_market_session
+	seller._villages_goto_route = {id = 18, status = "arrived", market_token = session.id}
+	seller.object.get_pos = function() return {x = 20, y = 1, z = 20} end
+	seller._trading_players = {player = true}
+	assert(controller.tick(seller, bell, 100) == "walking", "trading pauses late-arrival timeout")
+	seller._trading_players = nil
+	seller._villages_job_route = {status = "travelling"}
+	assert(controller.tick(seller, bell, 100) == "walking", "another route pauses late-arrival timeout")
+	seller._villages_job_route = nil
+	assert(controller.tick(seller, bell, 3) == "browse", "unpaused late-arrival timeout eventually releases the stall")
+	assert(site.releases == 1, "late-arrival timeout releases its reservation")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, set_ticks = controller_fixture()
+	assert(controller.tick(seller, bell, 0) == "holding", "search begins before cutoff")
+	set_ticks(14500)
+	assert(controller.tick(seller, bell, 0) == "browse", "in-flight search stops at setup cutoff")
+	assert(site.releases == 0, "pending search has no reservation to release")
+end
+
+do
+	local controller, _, _, seller, bell = controller_fixture()
+	seller._profession = "unknown"
+	local before = #logs
+	assert(controller.tick(seller, bell, 0) == "browse")
+	assert(controller.tick(seller, bell, 0) == "browse")
+	assert(#logs == before + 1, "unsupported goods fallback logs once per activation")
+	assert(seller._villages_market_attempted, "unsupported seller is not rechecked during this activation")
+end
+
+do
+	local controller, site, _, seller, bell, _, _, set_ticks = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	set_ticks(14500)
+	assert(controller.tick(seller, bell, 0) == "browse", "late arrival skips stall setup")
+	assert(site.valid_calls == 0, "late arrival does not validate or set up a stall")
+end
+
 print("market goods and eligibility tests passed")
