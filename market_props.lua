@@ -277,7 +277,11 @@ function props.new(options)
 		return true
 	end
 
-	api.wrap_interactions()
+	if world.register_on_mods_loaded then
+		world.register_on_mods_loaded(function() api.wrap_interactions() end)
+	else
+		api.wrap_interactions()
+	end
 	-- Full cleanup invalidates ownership before attempting node edits. Use remove_frames
 	-- alone for the staged packing pause; the runtime lease stays live until tables go.
 	api.cleanup = function(stall)

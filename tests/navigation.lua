@@ -1544,7 +1544,8 @@ do
 		on_activate = function() end,
 		do_custom = function() end,
 	}
-	dofile("navigation.lua")(planner_def)
+	local install_planner, navigation_api = dofile("navigation.lua")
+	install_planner(planner_def)
 	local function new_entity(bed)
 		return {
 			_id = "villager-1", _bed = bed and {x = 0, y = 0, z = 0}, state = "stand", order = "stand",
@@ -1755,6 +1756,40 @@ do
 	settle()
 	assert(gave_up._villages_bed_route.status == "retry"
 		and gave_up._villages_bed_route.reason:find("blocked by another villager", 1, true), "then backs off")
+
+	-- A queued market plan may finish after a player opens a trade. It stays a
+	-- planning record without starting a follower; the controller can cancel and
+	-- submit it again once the trade closes.
+	local trading_seller = new_entity()
+	trading_seller._villages_market_session = {id = "market:trade"}
+	assert(planner_def.gopath(trading_seller, {x = 8, y = 0, z = 0}, nil, true, "market:trade"))
+	trading_seller._trading_players = {player = true}
+	settle()
+	assert(trading_seller._villages_goto_route.status == "trade_paused"
+		and trading_seller.state == "stand" and not trading_seller._villages_follow,
+		"a queued market plan cannot start walking under a trade")
+	assert(navigation_api.cancel_goto(trading_seller, "market:trade"),
+		"the controller can invalidate the trade-paused market result")
+	trading_seller._trading_players = nil
+	assert(planner_def.gopath(trading_seller, {x = 8, y = 0, z = 0}, nil, true, "market:trade"))
+	settle()
+	assert(trading_seller._villages_goto_route.status == "travelling"
+		and trading_seller.state == "gowp", "the market route starts after trade ends")
+	local browser = new_entity()
+	browser._villages_bell = {walk_token = "bell:browser"}
+	assert(planner_def.gopath(browser, {x = 9, y = 0, z = 0}, nil, true, "bell:browser"))
+	browser._trading_players = {player = true}
+	settle()
+	assert(browser._villages_goto_route.status == "trade_paused"
+		and browser.state == "stand" and not browser._villages_follow,
+		"a queued browser route cannot start walking under a trade")
+	assert(navigation_api.cancel_goto(browser, "bell:browser"),
+		"the bell controller can invalidate a trade-paused browser route")
+	browser._trading_players = nil
+	assert(planner_def.gopath(browser, {x = 9, y = 0, z = 0}, nil, true, "bell:browser"))
+	settle()
+	assert(browser._villages_goto_route.status == "travelling" and browser.state == "gowp",
+		"the browser route starts after the trade ends")
 
 end
 

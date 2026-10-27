@@ -20,6 +20,13 @@ local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
 -- Registers living_villages:meal, so it loads here for the same reason.
 local path_storage = core.get_mod_storage()
 local meal = dofile(core.get_modpath("living_villages") .. "/meal.lua")
+-- The prop service owns orphan cleanup callbacks and must be loaded once while
+-- this mod's normal-load registration context is active. Bell and market share it.
+local market_site = dofile(core.get_modpath("living_villages") .. "/market_site.lua")
+local market_props = dofile(core.get_modpath("living_villages") .. "/market_props.lua").new({
+	site = market_site, storage = path_storage, common = common,
+})
+local market = dofile(core.get_modpath("living_villages") .. "/market.lua")
 -- Registers living_villages:pulpit, likewise.
 dofile(core.get_modpath("living_villages") .. "/pulpit.lua")
 local MODEL = "living_villages_villager.b3d"
@@ -543,7 +550,8 @@ core.register_on_mods_loaded(function()
 
 	dofile(core.get_modpath("living_villages") .. "/births.lua")(def)
 	child_growth.install(def)
-	dofile(core.get_modpath("living_villages") .. "/navigation.lua")(def)
+	local install_navigation, navigation_api = dofile(core.get_modpath("living_villages") .. "/navigation.lua")
+	install_navigation(def)
 	dofile(core.get_modpath("living_villages") .. "/farmer.lua")(def)
 	install_fisherman(def)
 	keeper.install(def)
@@ -558,7 +566,8 @@ core.register_on_mods_loaded(function()
 	-- After the tavern, so its seated-guest check sees a pew first.
 	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
 	local bell = dofile(core.get_modpath("living_villages") .. "/bell.lua")
-	bell.install(def)
+	local market_controller = market.new({site = market_site, props = market_props, navigation = navigation_api})
+	bell.install(def, market_controller, navigation_api)
 	-- The shepherd's flock (#215) steers VoxeLibre's own sheep and, while the shepherd
 	-- grazes it, answers get_activity for it.
 	local flock = dofile(core.get_modpath("living_villages") .. "/flock.lua")

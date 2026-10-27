@@ -50,6 +50,20 @@ end
 
 local bell = dofile("bell.lua")
 local gopaths, answer = {}, true
+local cancelled_bell_routes = {}
+local navigation_api = {
+	cancel_goto = function(self, token)
+		local route = self._villages_goto_route
+		if not route or route.market_token ~= token then return false end
+		self._villages_goto_route = nil
+		cancelled_bell_routes[#cancelled_bell_routes + 1] = token
+		if self.state == "gowp" and route.status == "travelling" then
+			self.state = "stand"
+			self._villages_follow, self._villages_follow_failed = nil, nil
+		end
+		return true
+	end,
+}
 local def = {
 	on_activate = function() end,
 	do_custom = function() end,
@@ -60,7 +74,7 @@ local def = {
 		return saved
 	end,
 }
-bell.install(def)
+bell.install(def, nil, navigation_api)
 
 local ids = 0
 local function villager(x, z, extra)
@@ -72,9 +86,12 @@ local function villager(x, z, extra)
 		set_velocity = function() end,
 	}
 	self.ready_to_path = function() return true end
-	self.gopath = function(s, target)
-		table.insert(gopaths, {self = s, target = target})
-		if answer then s.state = "gowp" end
+	self.gopath = function(s, target, _callback, _prioritised, token)
+		table.insert(gopaths, {self = s, target = target, token = token})
+		if answer then
+			s.state = "gowp"
+			s._villages_goto_route = {status = "travelling", market_token = token}
+		end
 		return answer
 	end
 	self.pos = pos
@@ -154,6 +171,7 @@ time = 11000 / 24000
 local walker = villager(12, -1)
 tick(walker)
 walker.state, walker._villages_follow = "gowp", {final = {x = 0, y = 0, z = 0}}
+walker._villages_goto_route = {status = "travelling", market_token = walker._villages_bell.walk_token}
 time = 15000 / 24000
 tick(walker)
 assert(walker.state == "stand" and walker._villages_follow == nil, "the walk to the bell ends with its flag")
@@ -189,7 +207,7 @@ local handoff_def = {
 		if minetest.get_timeofday() * 24000 >= 15000 and self.state ~= "gowp" then self.state = "gowp" end
 	end,
 }
-bell.install(handoff_def)
+bell.install(handoff_def, nil, navigation_api)
 local guest = villager(11, 4)
 tick(guest)
 assert(guest._villages_wander_anchor)
@@ -207,7 +225,7 @@ assert(#gopaths == before, "a child or a keeper does not go to the bell")
 -- No bell in reach: it putters, and looks again later.
 nodes[key({x = 10, y = 5, z = 0})] = nil
 before = #gopaths
-local lone = villager(0, 0)
+local lone = villager(-20, 0)
 tick(lone, 5)
 assert(#gopaths == before and lone._villages_wander_anchor == nil, "no bell leaves the villager to putter")
 nodes[key({x = 10, y = 5, z = 0})] = "mcl_bells:bell"
@@ -257,5 +275,114 @@ assert(detour._villages_bell, "a job search interrupting the walk does not time 
 detour._villages_job_search_route = nil
 seconds(detour, 120, 1)
 assert(detour._villages_bell == nil, "a walk of its own that goes nowhere is still given up")
+
+-- Sellers share bell discovery but own movement while searching, walking and
+-- holding a stall. Dispatch also runs during trade, and cleanup precedes the
+-- inner wrapper that starts the tavern route.
+local market_calls, market_leaves, inner_started = {}, {}, false
+local market_result = "walking"
+local integration_def = {
+	on_activate = function() end,
+	on_deactivate = function() end,
+	on_die = function() end,
+	get_staticdata = function(self)
+		local saved = {}
+		for k, v in pairs(self) do if type(v) ~= "table" or k:match("^_villages") then saved[k] = v end end
+		return saved
+	end,
+	do_custom = function(self)
+		if minetest.get_timeofday() * 24000 >= 15000 and self.state ~= "gowp" then
+			inner_started = true
+			self.state = "gowp"
+		end
+	end,
+}
+bell.install(integration_def, {
+	tick = function(self, session, dtime)
+		market_calls[#market_calls + 1] = {self = self, session = session, dtime = dtime}
+		return market_result
+	end,
+	leave = function(self, reason)
+		market_leaves[#market_leaves + 1] = reason
+		self._villages_market_session = nil
+		self._villages_market_attempted = true
+	end,
+}, navigation_api)
+local seller = villager(10, 0)
+seller.state = "gowp"
+integration_def.do_custom(seller, 0.25)
+assert(market_calls[1] and market_calls[1].session == seller._villages_bell,
+	"seller controller receives the same discovered bell session")
+assert(seller._villages_wander_anchor == nil and seller.state == "gowp",
+	"seller route is not replaced by a browser anchor")
+market_result = "holding"
+seller._trading_players = {player = true}
+seller.state = "stand"
+integration_def.do_custom(seller, 0.5)
+assert(#market_calls == 2 and market_calls[2].dtime == 0.5 and seller._villages_wander_anchor == nil,
+	"seller lease is ticked during trading without browser movement")
+market_result = "browse"
+local trade_calls, paused_since = #gopaths, seller._villages_bell.since
+integration_def.do_custom(seller, 1)
+assert(#gopaths == trade_calls and seller._villages_wander_anchor == nil
+	and seller._villages_bell.since == paused_since + 1,
+	"a trading browser starts no route and pauses its bell walk deadline")
+local browser_token = seller._villages_bell.walk_token
+seller.state = "gowp"
+seller._villages_goto_route = {status = "travelling", market_token = browser_token}
+local browser_routes = #gopaths
+integration_def.do_custom(seller, 0.1)
+assert(seller.state == "stand" and seller._villages_goto_route == nil
+	and cancelled_bell_routes[#cancelled_bell_routes] == browser_token,
+	"a browser's own bell route is canceled when trade starts")
+assert(#gopaths == browser_routes, "the browser does not replace its route during trade")
+seller._trading_players = nil
+seller.pos.x = 100
+seller._villages_bell.spot = {x = 12, y = 0, z = 0}
+seller._villages_bell.since, seller._villages_bell.limit = now, 1000
+time = 11000 / 24000
+seller._villages_job_search_route = {status = "planning"}
+integration_def.do_custom(seller, 0.1)
+assert(#gopaths == browser_routes and seller._villages_job_search_route.status == "planning",
+	"resuming the bell does not replace a pending job search")
+seller._villages_job_search_route = nil
+seller._villages_goto_route = {status = "planning", market_token = "replacement"}
+integration_def.do_custom(seller, 0.1)
+assert(#gopaths == browser_routes and seller._villages_goto_route.market_token == "replacement",
+	"resuming the bell does not replace a newer goto route")
+seller._villages_goto_route = nil
+integration_def.do_custom(seller, 0.1)
+assert(#gopaths == browser_routes + 1 and gopaths[#gopaths].token == browser_token,
+	"the browser route resumes after even a short trade")
+seller._villages_market_session = {live = true, holding_order = true, previous_order = "roam"}
+seller._villages_market_attempted = true
+seller.order = "stand"
+local static = integration_def.get_staticdata(seller)
+assert(static._villages_market_session == nil and static._villages_market_attempted == nil
+	and seller._villages_market_session.live and static.order == "roam" and seller.order == "stand",
+	"market session is excluded, its prior order is saved, and the live hold is restored")
+time = 15000 / 24000
+integration_def.do_custom(seller, 0.1)
+assert(market_leaves[1] == "bell session ended" and inner_started,
+	"market cleanup runs before the tavern wrapper starts its route")
+assert(seller._villages_market_attempted == nil, "departure clears the attempt for a later holiday")
+seller._villages_market_session = {live = true}
+integration_def.on_deactivate(seller, false)
+assert(market_leaves[2] == "bell session ended", "deactivation cleans the market session")
+time = 11000 / 24000
+day = 8
+local market_calls_before_new_holiday = #market_calls
+integration_def.do_custom(seller, 0.1)
+assert(#market_calls == market_calls_before_new_holiday + 1,
+	"a seller gets a new market attempt at a later holiday")
+local replacement = villager(10, 5)
+integration_def.do_custom(replacement, 0.1)
+local replacement_route = {status = "travelling", market_token = "tavern"}
+replacement._villages_goto_route, replacement.state = replacement_route, "gowp"
+time = 15000 / 24000
+integration_def.do_custom(replacement, 0.1)
+assert(replacement._villages_goto_route == replacement_route and replacement.state == "gowp",
+	"bell cleanup preserves a replacement tavern route")
+time = 11000 / 24000
 
 print("ok")

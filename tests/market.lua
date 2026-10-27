@@ -189,8 +189,13 @@ do
 	assert(controller.tick(seller, bell, 0) == "holding" and site.valid_calls == 1,
 		"an opened seller stays selling without revalidating or restocking")
 	assert(props.renewal_deadline == 1600, "seller renewals extend the prop deadline on real time")
+	seller._trading_players = {player = true}
+	assert(controller.tick(seller, bell, 20, true) == "holding" and props.renewals == 2,
+		"a long player trade continues renewing an active stall lease")
+	seller._trading_players = nil
 	controller.leave(seller, "test")
-	assert(site.releases == 1 and site.renewals == 3, "leave releases the reservation after renewing it while selling")
+	assert(site.releases == 1 and site.renewals == 4, "leave releases the reservation after renewing it while selling")
+	assert(seller.order == nil, "leaving a market hold restores the previous order")
 end
 
 do
@@ -236,6 +241,15 @@ do
 		"a skipped packing deadline forces immediate full cleanup")
 	assert(site.releases == 1 and seller._villages_market_session == nil,
 		"forced cleanup releases all session claims")
+end
+
+do
+	local controller, _, _, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	assert(seller.order == "stand", "searching pins the seller in place")
+	seller.order = "sleep"
+	controller.leave(seller, "stage transition")
+	assert(seller.order == "sleep", "cleanup preserves a role order that replaced the market hold")
 end
 
 do
@@ -406,6 +420,75 @@ do
 	set_ticks(14500)
 	assert(controller.tick(seller, bell, 0) == "browse", "late arrival skips stall setup")
 	assert(site.valid_calls == 0, "late arrival does not validate or set up a stall")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	local route = {status = "travelling", market_token = "job-search"}
+	seller._villages_goto_route = route
+	assert(controller.tick(seller, bell, 0) == "browse" and site.searches == 0,
+		"a market attempt does not replace a route already owned by another system")
+	assert(seller._villages_goto_route == route and seller._villages_market_attempted,
+		"the existing route survives and this activation does not retry market setup")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	seller._trading_players = {player = true}
+	assert(controller.tick(seller, bell, 0, true) == "browse" and site.searches == 0,
+		"a trade tick renews only a seller session that already exists")
+	assert(seller._villages_market_session == nil and not seller._villages_market_attempted,
+		"trading does not start or consume a new market attempt")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	assert(controller.tick(seller, bell, 0) == "holding", "market search starts before trade")
+	local session = seller._villages_market_session
+	seller._trading_players = {player = true}
+	assert(controller.tick(seller, bell, 10, true) == "holding" and session.search.steps == 1,
+		"trade pauses an existing search before it can reserve or start a route")
+	assert(seller._villages_goto_route == nil, "search does not call gopath during trade")
+	seller._trading_players = nil
+	assert(controller.tick(seller, bell, 0) == "walking" and seller._villages_goto_route,
+		"the pending search resumes after the trade")
+	seller._trading_players = {player = true}
+	assert(controller.tick(seller, bell, 10, true) == "holding" and seller._villages_goto_route == nil
+		and session.route_paused,
+		"a queued market route is invalidated while the player trades")
+	seller._trading_players = nil
+	assert(controller.tick(seller, bell, 0) == "walking" and seller._villages_goto_route
+		and not session.route_paused,
+		"the reserved stall route is replanned after trading ends")
+end
+
+do
+	local controller, site, _, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._trading_players = {player = true}
+	controller.tick(seller, bell, 0, true)
+	local session = seller._villages_market_session
+	local replacement = {status = "travelling", market_token = "role-route"}
+	seller._villages_goto_route = replacement
+	seller._trading_players = nil
+	assert(controller.tick(seller, bell, 0) == "browse" and site.releases == 1,
+		"a replaced paused market route abandons the session instead of overwriting the new route")
+	assert(seller._villages_goto_route == replacement and session.route_paused,
+		"the replacement role route retains movement ownership")
+end
+
+do
+	local controller, _, _, seller, bell = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session = seller._villages_market_session
+	seller._trading_players = {player = true}
+	seller._villages_goto_route.status = "trade_paused"
+	seller._trading_players = nil
+	assert(controller.tick(seller, bell, 0) == "walking" and seller._villages_goto_route
+		and seller._villages_goto_route.market_token == session.id,
+		"a queued plan deferred during a short trade is replanned even if trade ends before a tick")
 end
 
 print("market goods and eligibility tests passed")

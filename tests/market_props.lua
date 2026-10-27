@@ -11,6 +11,7 @@ local remove_calls
 local storage_values
 local constructor_hooks, test_itemframes, test_site
 local registered_lbms, registered_abms
+local mods_loaded_callbacks
 local clock_value, day_value, timeofday_value, thunder_value, owner_valid
 local timers
 local frame_name = "mcl_itemframes:invisible_frame"
@@ -93,6 +94,7 @@ local function reset(options)
 	fail_drop, protected, violations, unloaded = false, false, {}, {}
 	constructor_hooks = {}
 	registered_lbms, registered_abms = {}, {}
+	mods_loaded_callbacks = {}
 	clock_value, day_value, timeofday_value, thunder_value, owner_valid = 100, 4, 0.5, false, true
 	timers = {}
 	storage_values = storage_values or {}
@@ -103,6 +105,7 @@ local function reset(options)
 		get_timeofday = function() return timeofday_value end,
 		register_lbm = function(spec) registered_lbms[#registered_lbms + 1] = spec end,
 		register_abm = function(spec) registered_abms[#registered_abms + 1] = spec end,
+		register_on_mods_loaded = function(callback) mods_loaded_callbacks[#mods_loaded_callbacks + 1] = callback end,
 		after = function(delay, callback) timers[#timers + 1] = {at = clock_value + delay, callback = callback} end,
 		get_mod_storage = function()
 			return {
@@ -116,7 +119,7 @@ local function reset(options)
 			return node and {name = node.name, param2 = node.param2} or {name = "air", param2 = 0}
 		end,
 		get_node = function(pos) return minetest.get_node_or_nil(pos) end,
-		registered_nodes = {[frame_name] = frame_def},
+		registered_nodes = options and options.late_frame_registration and {} or {[frame_name] = frame_def},
 		is_protected = function() return protected end,
 		record_protection_violation = function(pos, name) violations[#violations + 1] = {pos = key(pos), name = name} end,
 		add_item = function(pos, item)
@@ -216,11 +219,16 @@ local function reset(options)
 	}
 	test_itemframes = itemframes
 	options = options or {}
+	local defer_mods_loaded = options.defer_mods_loaded
 	options.site, options.itemframes = site, itemframes
 	if options.validate_session == nil then
 		options.validate_session = function(record) return owner_valid, owner_valid and nil or "owner" end
 	end
-	return dofile("market_props.lua").new(options)
+	local api = dofile("market_props.lua").new(options)
+	if not defer_mods_loaded then
+		for _, callback in ipairs(mods_loaded_callbacks) do callback() end
+	end
+	return api
 end
 
 local function layout(x)
@@ -269,7 +277,13 @@ assert(write_count == 0 and construct_count == 0, "preflight failure performs no
 assert((storage_values.market_props_token_counter or 0) == before, "preflight failure does not consume a token")
 
 -- Successful setup uses node constructors, tags all props and makes both displays.
-reset()
+local late_registration_api = reset({late_frame_registration = true, defer_mods_loaded = true})
+assert(not frame_def._living_villages_market_interactions_wrapped,
+	"frame callbacks wait for the mods-loaded hook")
+minetest.registered_nodes[frame_name] = frame_def
+for _, callback in ipairs(mods_loaded_callbacks) do callback() end
+assert(frame_def._living_villages_market_interactions_wrapped,
+	"late item-frame registration is wrapped after mods load")
 api = reset()
 local stall = layout(2)
 local success = assert(api.setup(stall, "villager-a", 17, {"test:apple", "test:carrot"},
