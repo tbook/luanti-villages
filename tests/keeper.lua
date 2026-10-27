@@ -68,7 +68,11 @@ local gopaths = {}
 local def = {
 	on_activate = function() end,
 	do_custom = function(self, dtime) return vanilla_custom(self, dtime) end,
-	gopath = function(self, target, callback) table.insert(gopaths, {self = self, target = target, callback = callback}) return true end,
+	gopath = function(self, target, callback, prioritised, market_token)
+		table.insert(gopaths, {self = self, target = target, callback = callback,
+			prioritised = prioritised, market_token = market_token})
+		return true
+	end,
 	on_rightclick = function() end,
 }
 keeper.install(def)
@@ -87,6 +91,14 @@ assert(vector.equals(alice._jobsite, jukebox))
 assert(minetest.get_meta(jukebox):get_string("villager") == "alice")
 assert(alice._trades[1].offered.name == "mcl_farming:bread" and alice._trades[1].tier == 1)
 assert(keeper.claimed_jukebox(alice))
+
+-- The keeper wrapper must preserve the optional market identity for other roles.
+local route_token = "market-route-token"
+local route_seller = villager("market-seller", {x = 10, y = 0, z = 0})
+assert(def.gopath(route_seller, smoker, nil, true, route_token))
+assert(gopaths[#gopaths].market_token == route_token and gopaths[#gopaths].prioritised,
+	"keeper gopath wrapper passes market route ownership through")
+gopaths = {}
 
 -- Exactly one keeper per jukebox: a second villager finds nothing to claim.
 local bob = villager("bob", {x = 6, y = 0, z = 0})

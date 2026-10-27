@@ -259,12 +259,12 @@ local function install(def)
 
 	-- A keeper works only at a jukebox; refuse vanilla's trips to any other
 	-- workstation rather than walk there and release it on arrival.
-	def.gopath = function(self, target, callback_arrived, prioritised)
+	def.gopath = function(self, target, callback_arrived, prioritised, market_token)
 		if self._villages_keeper and target then
 			local node = core.get_node_or_nil(target)
 			if node and common.is_workstation_node(node.name) then return false end
 		end
-		return original_gopath(self, target, callback_arrived, prioritised)
+		return original_gopath(self, target, callback_arrived, prioritised, market_token)
 	end
 
 	local trading = {}
