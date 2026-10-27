@@ -8,6 +8,16 @@ local FRAME = "mcl_itemframes:invisible_frame"
 local PREFIX = "living_villages:market_"
 local COUNTER_KEY = "market_props_token_counter"
 local TOUCH_KEY = "player_touched"
+local RUNTIME_KEY = "_living_villages_market_props_runtime"
+
+local function runtime_for(world)
+	local state = world[RUNTIME_KEY]
+	if not state then
+		state = {records = {}, callbacks_registered = false}
+		world[RUNTIME_KEY] = state
+	end
+	return state
+end
 
 local function key(name)
 	return PREFIX .. name
@@ -29,12 +39,39 @@ end
 function props.new(options)
 	options = options or {}
 	local world = options.core or core
+	local runtime = runtime_for(world)
+	local runtime_records = runtime.records
 	local site = assert(options.site, "market_props.new requires the shared market_site service")
 	local storage = options.storage or world.get_mod_storage()
 	local itemframes = options.itemframes or mcl_itemframes
 	local make_stack = options.itemstack or ItemStack
 
 	local api = {}
+	local now = options.now or function()
+		if world.get_us_time then return world.get_us_time() / 1000000 end
+		return os.time()
+	end
+	local current_day = options.day_count or world.get_day_count or function() return nil end
+	local is_holiday = options.is_holiday or (options.common and options.common.is_holiday)
+		or function()
+			if mcl_moon and mcl_moon.get_moon_phase then
+				local phase = mcl_moon.get_moon_phase()
+				if world.get_timeofday() <= 0.5 then phase = phase + 1 end
+				return phase % 4 == 0
+			end
+			return world.get_day_count and world.get_day_count() % 4 == 0 or false
+		end
+	local is_thunder = options.is_thunder or function()
+		return mcl_weather and mcl_weather.get_weather
+			and mcl_weather.get_weather() == "thunder" or false
+	end
+	local validate_session = options.validate_session or function(record)
+		if record.owner_ref and record.owner_ref.get_luaentity then
+			local entity = record.owner_ref:get_luaentity()
+			return entity ~= nil and entity._villages_market_session == record.session
+		end
+		return false
+	end
 
 	local function tag(pos, node_name, token, owner, day, role, pair)
 		local node = world.get_node_or_nil(pos)
@@ -144,6 +181,12 @@ function props.new(options)
 		return node ~= nil and node.name ~= TABLE
 	end
 
+	local function cleanup_pair(token, owner, day, index, table_pos, frame_pos)
+		local frame_ok = remove_frame(frame_pos, token, owner, day, index, table_pos)
+		local table_ok = remove_table(table_pos, token, owner, day, index, frame_pos)
+		return frame_ok and table_ok
+	end
+
 	local function valid_stall(stall)
 		if type(stall) ~= "table" or type(stall.layout) ~= "table"
 			or type(stall.layout.tables) ~= "table" or type(stall.layout.frames) ~= "table"
@@ -237,6 +280,133 @@ function props.new(options)
 	api.wrap_interactions()
 	api.cleanup = cleanup
 	api.remove_frames = remove_frames
+
+	local function parse_pair(value)
+		local x, y, z = value:match("^(-?%d+),(-?%d+),(-?%d+)$")
+		if not x then return nil end
+		return {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+	end
+
+	local function current_window()
+		local ticks = (world.get_timeofday() * 24000) % 24000
+		return ticks >= 15000 and ticks < 17500
+	end
+
+	local function same_pos(a, b)
+		return a and b and a.x == b.x and a.y == b.y and a.z == b.z
+	end
+
+	local function runtime_valid(record)
+		local clock = now()
+		if type(clock) ~= "number" or clock < record.last_now then return false end
+		record.last_now = clock
+		if clock > record.deadline + 1 or clock >= record.lease_expires then return false end
+		if current_day() ~= record.day or not is_holiday() or not current_window() or is_thunder() then
+			return false
+		end
+		local valid, reason = validate_session(record)
+		if valid == nil then return nil, reason end
+		return valid == true
+	end
+
+	-- A controller registers only after arrival and renews while its session remains active.
+	function api.activate(stall, owner_ref, session, deadline, context)
+		if not valid_stall(stall) or owner_ref == nil or session == nil or type(deadline) ~= "number" then
+			return false
+		end
+		local clock = now()
+		runtime_records[stall.token] = {
+			stall = stall,
+			owner = tostring(stall.owner),
+			owner_ref = owner_ref,
+			session = session,
+			context = context,
+			day = stall.day,
+			deadline = deadline,
+			last_now = clock,
+			lease_expires = clock + 10,
+		}
+		return true
+	end
+
+	function api.renew(token, owner_ref, session)
+		local record = runtime_records[token]
+		if not record or record.owner_ref ~= owner_ref or record.session ~= session then return false end
+		local clock = now()
+		if runtime_valid(record) ~= true then
+			runtime_records[token] = nil
+			return false
+		end
+		record.lease_expires = clock + 10
+		return true
+	end
+
+	function api.release(token, owner_ref, session)
+		local record = runtime_records[token]
+		if not record or (owner_ref and record.owner_ref ~= owner_ref)
+			or (session and record.session ~= session) then return false end
+		runtime_records[token] = nil
+		return true
+	end
+
+	-- validate_session may also check the bell; nil means a needed node is unloaded.
+	-- Shared by both callbacks. Pair-local work avoids loading or scanning a mapblock.
+	function api.check_prop(pos)
+		local node = world.get_node_or_nil(pos)
+		if not node or (node.name ~= TABLE and node.name ~= FRAME) then return false end
+		local meta = world.get_meta(pos)
+		if not has_market_tag(meta) then return false end
+		local role = meta:get_string(key("role"))
+		local token = meta:get_string(key("token"))
+		local owner = meta:get_string(key("owner"))
+		local day = meta:get_int(key("day"))
+		local pair = parse_pair(meta:get_string(key("pair")))
+		local role_kind, role_index = role:match("^(table)_(%d+)$")
+		if not role_kind then role_kind, role_index = role:match("^(frame)_(%d+)$") end
+		local index = tonumber(role_index)
+		if meta:get_int(key("version")) ~= VERSION or token == "" or owner == ""
+			or not index or index < 1 or index > 2 or not pair then return false end
+		local table_pos, frame_pos
+		if node.name == TABLE and role == "table_" .. index then
+			table_pos, frame_pos = copy_pos(pos), pair
+		elseif node.name == FRAME and role == "frame_" .. index then
+			table_pos, frame_pos = pair, copy_pos(pos)
+		else
+			return false
+		end
+		local record = runtime_records[token]
+		if record and record.owner == owner and record.day == day
+			and record.stall.token == token and record.stall.owner == owner
+			and record.stall.day == day
+			and same_pos(record.stall.layout.tables[index], table_pos)
+			and same_pos(record.stall.layout.frames[index], frame_pos) then
+			local valid = runtime_valid(record)
+			if valid == true then return true end
+			if valid == nil then return nil end
+		end
+		if record then runtime_records[token] = nil end
+		local complete = cleanup_pair(token, owner, day, index, table_pos, frame_pos)
+		if complete then return false end
+		return nil
+	end
+
+	if not runtime.callbacks_registered and world.register_lbm and world.register_abm then
+		world.register_lbm({
+			name = "living_villages:market_orphan_props",
+			nodenames = {TABLE, FRAME},
+			run_at_every_load = true,
+			action = function(pos) api.check_prop(pos) end,
+		})
+		world.register_abm({
+			label = "living_villages:market_orphan_props",
+			nodenames = {TABLE, FRAME},
+			interval = 5,
+			chance = 1,
+			catch_up = false,
+			action = function(pos) api.check_prop(pos) end,
+		})
+		runtime.callbacks_registered = true
+	end
 
 	local function valid_input(layout, owner, day, items)
 		if type(layout) ~= "table" or type(layout.tables) ~= "table" or type(layout.frames) ~= "table"

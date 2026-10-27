@@ -10,6 +10,8 @@ local fail_drop, protected, violations, unloaded
 local remove_calls
 local storage_values
 local constructor_hooks, test_itemframes, test_site
+local registered_lbms, registered_abms
+local clock_value, day_value, timeofday_value, thunder_value, owner_valid
 local frame_name = "mcl_itemframes:invisible_frame"
 local table_name = "mcl_decor:table_wooden"
 
@@ -80,7 +82,7 @@ frame_def.on_rotate = function(pos, _node, user)
 end
 local stock_on_rightclick, stock_on_rotate = frame_def.on_rightclick, frame_def.on_rotate
 
-local function reset()
+local function reset(options)
 	frame_def.on_rightclick, frame_def.on_rotate = stock_on_rightclick, stock_on_rotate
 	frame_def._living_villages_market_interactions_wrapped = nil
 	world_nodes, metadata, displays, drops = {}, {}, {}, {}
@@ -89,9 +91,16 @@ local function reset()
 	fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame = nil, false, nil, nil, nil
 	fail_drop, protected, violations, unloaded = false, false, {}, {}
 	constructor_hooks = {}
+	registered_lbms, registered_abms = {}, {}
+	clock_value, day_value, timeofday_value, thunder_value, owner_valid = 100, 4, 0.65, false, true
 	storage_values = storage_values or {}
 	minetest = {
 		get_modpath = function() return "." end,
+		get_us_time = function() return clock_value * 1000000 end,
+		get_day_count = function() return day_value end,
+		get_timeofday = function() return timeofday_value end,
+		register_lbm = function(spec) registered_lbms[#registered_lbms + 1] = spec end,
+		register_abm = function(spec) registered_abms[#registered_abms + 1] = spec end,
 		get_mod_storage = function()
 			return {
 				get_int = function(_, name) return storage_values[name] or 0 end,
@@ -177,6 +186,8 @@ local function reset()
 			metadata[key(pos)] = nil
 		end,
 	}
+	mcl_weather = {get_weather = function() return thunder_value and "thunder" or "clear" end}
+	mcl_moon = nil
 	local site = {}
 	function site.valid(layout, reservation)
 			if reservation and reservation.layout ~= layout then return false, "reservation" end
@@ -201,7 +212,12 @@ local function reset()
 		end,
 	}
 	test_itemframes = itemframes
-	return dofile("market_props.lua").new({site = site, itemframes = itemframes})
+	options = options or {}
+	options.site, options.itemframes = site, itemframes
+	if options.validate_session == nil then
+		options.validate_session = function(record) return owner_valid, owner_valid and nil or "owner" end
+	end
+	return dofile("market_props.lua").new(options)
 end
 
 local function layout(x)
@@ -219,7 +235,7 @@ end
 
 local function place_owned(api, x, owner)
 	local value = layout(x)
-	local result = assert(api.setup(value, owner, 29, {"test:apple", "test:carrot"},
+	local result = assert(api.setup(value, owner, day_value, {"test:apple", "test:carrot"},
 		fixture_reservation(value, owner)))
 	return value, result
 end
@@ -844,5 +860,201 @@ assert(world_nodes[key(support_layout.frames[2])].name == "test:player_node"
 	and world_nodes[key(support_layout.tables[2])].name == table_name, "player node and its support survive")
 assert(support_meta:get_string("player:note") == "retain", "relinquishing does not clear unrelated metadata")
 assert(support_meta:get_string(frame_meta_prefix .. "token") == "", "relinquished table has no ownership token")
+
+-- The module registers one always-run LBM and one non-catching five-second ABM.
+reset()
+api = reset()
+assert(#registered_lbms == 1 and #registered_abms == 1, "one orphan LBM and ABM are registered")
+local lbm, abm = registered_lbms[1], registered_abms[1]
+assert(lbm.name == "living_villages:market_orphan_props" and lbm.run_at_every_load == true,
+	"LBM is namespaced and runs at every block load")
+assert(abm.label == "living_villages:market_orphan_props" and abm.interval == 5
+	and abm.chance == 1 and abm.catch_up == false, "ABM runs every five seconds without catch-up")
+assert(#lbm.nodenames == 2 and lbm.nodenames[1] == table_name and lbm.nodenames[2] == frame_name
+	and #abm.nodenames == 2 and abm.nodenames[1] == table_name and abm.nodenames[2] == frame_name,
+	"callbacks target exactly stock tables and invisible frames")
+local fresh_module = dofile("market_props.lua")
+fresh_module.new({site = test_site, itemframes = test_itemframes, core = minetest})
+assert(#registered_lbms == 1 and #registered_abms == 1, "repeated API construction does not duplicate callbacks")
+
+local function callback_action(kind)
+	return kind == "lbm" and registered_lbms[1].action or registered_abms[1].action
+end
+
+local function invoke_pair(kind, layout_value, reverse)
+	local positions = {}
+	for _, pos in ipairs(layout_value.tables) do positions[#positions + 1] = pos end
+	for _, pos in ipairs(layout_value.frames) do positions[#positions + 1] = pos end
+	if reverse then
+		local reversed = {}
+		for index = #positions, 1, -1 do reversed[#reversed + 1] = positions[index] end
+		positions = reversed
+	end
+	for _, pos in ipairs(positions) do callback_action(kind)(pos, minetest.get_node_or_nil(pos)) end
+end
+
+local function activate_runtime(api_value, stall, session)
+	local owner_ref = {session = session}
+	assert(api_value.activate(stall, owner_ref, session, clock_value + 40,
+		{bell_pos = {x = -10, y = 0, z = 0}}), "runtime session activates")
+	return owner_ref
+end
+
+-- Active props survive both callbacks; every API handle shares the same record.
+reset()
+local live_owner_checks = 0
+api = reset({validate_session = function() live_owner_checks = live_owner_checks + 1; return true end})
+local active_layout, active_stall = place_owned(api, 110, "active-owner")
+local session_ref = activate_runtime(api, active_stall, "active-session")
+local active_check = api.check_prop(active_layout.tables[1])
+assert(active_check == true, "registered live session validates its tagged table: " .. tostring(active_check)
+	.. ", validations=" .. live_owner_checks)
+local shared_api = dofile("market_props.lua").new({site = test_site, itemframes = test_itemframes,
+	core = minetest, validate_session = function() return owner_valid end})
+invoke_pair("lbm", active_layout)
+invoke_pair("abm", active_layout, true)
+assert(count_nodes(frame_name) == 2 and count_nodes(table_name) == 2,
+	"active stall survives LBM and ABM in either node order")
+assert(shared_api.release(active_stall.token, session_ref, "active-session"), "API handles share one token registry")
+invoke_pair("abm", active_layout)
+assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
+	"released runtime token is cleaned by the shared callback")
+assert_clean(active_layout, "orphan cleanup")
+
+-- A stall crossing the x=16 mapblock edge survives either block activation order.
+for _, reverse_blocks in ipairs({false, true}) do
+	reset()
+	api = reset()
+	local split_layout, split_stall = place_owned(api, 15, "split-owner")
+	activate_runtime(api, split_stall, "split-session")
+	local first, second = reverse_blocks and 2 or 1, reverse_blocks and 1 or 2
+	local function block_positions(index)
+		return {split_layout.tables[index], split_layout.frames[index]}
+	end
+	for _, pos in ipairs(block_positions(second)) do unloaded[key(pos)] = true end
+	for _, pos in ipairs(block_positions(first)) do callback_action("lbm")(pos, minetest.get_node_or_nil(pos)) end
+	assert(count_nodes(frame_name) == 2 and count_nodes(table_name) == 2,
+		"loaded half of active split stall survives")
+	for _, pos in ipairs(block_positions(second)) do unloaded[key(pos)] = nil end
+	for _, pos in ipairs(block_positions(second)) do callback_action("lbm")(pos, minetest.get_node_or_nil(pos)) end
+	assert(count_nodes(frame_name) == 2 and count_nodes(table_name) == 2,
+		"both split blocks survive in either activation order")
+	assert(api.release(split_stall.token), "split stall can be invalidated")
+	for _, pos in ipairs(block_positions(second)) do callback_action("abm")(pos, minetest.get_node_or_nil(pos)) end
+	for _, pos in ipairs(block_positions(first)) do callback_action("abm")(pos, minetest.get_node_or_nil(pos)) end
+	assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
+		"orphan cleanup completes across both mapblocks")
+	assert_clean(split_layout, "split block cleanup")
+end
+
+-- An unloaded bell is unknown through the injected session validator, not removal.
+reset()
+local bell_loaded = false
+api = reset({validate_session = function(record)
+	assert(record.context.bell_pos.x == -10, "controller context reaches session validation")
+	if not bell_loaded then return nil, "bell_unloaded" end
+	return true
+end})
+local bell_layout, bell_stall = place_owned(api, 112, "bell-owner")
+activate_runtime(api, bell_stall, "bell-session")
+assert(api.check_prop(bell_layout.tables[1]) == nil and count_nodes(table_name) == 2,
+	"unloaded bell defers cleanup without deleting active props")
+bell_loaded = true
+assert(api.check_prop(bell_layout.tables[1]) == true and count_nodes(table_name) == 2,
+	"reloaded bell validates the live stall")
+
+-- A restart starts with an empty registry and never reconstructs persisted stalls.
+reset()
+api = reset()
+local restart_layout, restart_stall = place_owned(api, 116, "restart-owner")
+activate_runtime(api, restart_stall, "restart-session")
+registered_lbms, registered_abms = {}, {}
+minetest._living_villages_market_props_runtime = nil
+local restarted = dofile("market_props.lua").new({site = test_site, itemframes = test_itemframes,
+	core = minetest, validate_session = function() return true end})
+assert(#registered_lbms == 1 and #registered_abms == 1, "new runtime registers fresh callbacks")
+invoke_pair("lbm", restart_layout)
+assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
+	"fresh registry cleans old tagged props")
+assert_clean(restart_layout, "restart cleanup")
+
+-- Calendar, weather, deadlines, lease and owner/session changes invalidate even a live owner.
+local invalidations = {
+	{name = "stale day", change = function() day_value = day_value + 1 end},
+	{name = "ordinary day", change = function() day_value = 5 end},
+	{name = "thunder", change = function() thunder_value = true end},
+	{name = "market window ended", change = function() timeofday_value = 0.75 end},
+	{name = "deadline time jump", change = function() clock_value = 142 end},
+	{name = "backward clock jump", change = function() clock_value = 99 end},
+	{name = "missing owner session", change = function() owner_valid = false end},
+	{name = "lease expiry", change = function() clock_value = 111 end},
+}
+for index, invalidation in ipairs(invalidations) do
+	reset()
+	api = reset()
+	local doomed_layout, doomed = place_owned(api, 120 + index * 5, "owner-" .. index)
+	activate_runtime(api, doomed, "session-" .. index)
+	invalidation.change()
+	invoke_pair("abm", doomed_layout)
+	assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
+		invalidation.name .. " invalidates the runtime token")
+	assert_clean(doomed_layout, invalidation.name)
+end
+
+reset()
+api = reset()
+local renewed_layout, renewed = place_owned(api, 165, "renewed-owner")
+local renewed_ref = activate_runtime(api, renewed, "renewed-session")
+clock_value = 109
+assert(api.renew(renewed.token, renewed_ref, "renewed-session"), "live owner renews its lease before expiry")
+clock_value = 118
+assert(api.check_prop(renewed_layout.tables[1]) == true, "renewed lease keeps the stall alive")
+clock_value = 120
+assert(api.check_prop(renewed_layout.tables[1]) == false, "renewed lease expires after its ten-second window")
+invoke_pair("abm", renewed_layout)
+assert_clean(renewed_layout, "renewed lease expiry")
+
+-- A surviving frame or table is cleaned alone. Unknown paired support defers safely.
+for _, survivor in ipairs({"frame", "table"}) do
+	for _, reverse in ipairs({false, true}) do
+		reset()
+		api = reset()
+		local lone_layout, lone = place_owned(api, survivor == "frame" and 170 or 180, "lone-" .. survivor)
+		api.release(lone.token)
+		local lost = survivor == "frame" and lone_layout.tables[1] or lone_layout.frames[1]
+		world_nodes[key(lost)] = {name = "air"}
+		metadata[key(lost)], displays[key(lost)] = nil, nil
+		local kept = survivor == "frame" and lone_layout.frames[1] or lone_layout.tables[1]
+		callback_action(reverse and "abm" or "lbm")(kept, minetest.get_node_or_nil(kept))
+		assert(world_nodes[key(kept)].name == "air", "lone " .. survivor .. " is cleaned")
+		assert(#drops == 0, "lone cleanup creates no drops")
+	end
+end
+
+reset()
+api = reset()
+local deferred_layout, deferred_stall = place_owned(api, 190, "deferred-owner")
+api.release(deferred_stall.token)
+unloaded[key(deferred_layout.frames[1])] = true
+local deferred = api.check_prop(deferred_layout.tables[1])
+assert(deferred == nil and world_nodes[key(deferred_layout.tables[1])].name == table_name,
+	"unknown paired frame defers table removal without force-loading")
+assert(metadata[key(deferred_layout.tables[1])].fields[frame_meta_prefix .. "token"] ~= "",
+	"deferred support stays tagged for a later retry")
+unloaded[key(deferred_layout.frames[1])] = nil
+invoke_pair("lbm", deferred_layout, true)
+assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
+	"deferred cleanup finishes once both blocks are available")
+
+-- Untagged market furniture exits before owner validation or destructive work.
+reset()
+local owner_checks = 0
+api = reset({validate_session = function() owner_checks = owner_checks + 1; return false end})
+world_nodes["200:0:0"] = {name = table_name}
+world_nodes["201:0:0"] = {name = frame_name}
+callback_action("lbm")({x = 200, y = 0, z = 0})
+callback_action("abm")({x = 201, y = 0, z = 0})
+assert(world_nodes["200:0:0"].name == table_name and world_nodes["201:0:0"].name == frame_name
+	and owner_checks == 0, "untagged furniture survives without owner validation")
 
 print("market props setup, packing and rollback tests passed")
