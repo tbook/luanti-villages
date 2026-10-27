@@ -12,6 +12,7 @@ local storage_values
 local constructor_hooks, test_itemframes, test_site
 local registered_lbms, registered_abms
 local clock_value, day_value, timeofday_value, thunder_value, owner_valid
+local timers
 local frame_name = "mcl_itemframes:invisible_frame"
 local table_name = "mcl_decor:table_wooden"
 
@@ -93,6 +94,7 @@ local function reset(options)
 	constructor_hooks = {}
 	registered_lbms, registered_abms = {}, {}
 	clock_value, day_value, timeofday_value, thunder_value, owner_valid = 100, 4, 0.65, false, true
+	timers = {}
 	storage_values = storage_values or {}
 	minetest = {
 		get_modpath = function() return "." end,
@@ -101,6 +103,7 @@ local function reset(options)
 		get_timeofday = function() return timeofday_value end,
 		register_lbm = function(spec) registered_lbms[#registered_lbms + 1] = spec end,
 		register_abm = function(spec) registered_abms[#registered_abms + 1] = spec end,
+		after = function(delay, callback) timers[#timers + 1] = {at = clock_value + delay, callback = callback} end,
 		get_mod_storage = function()
 			return {
 				get_int = function(_, name) return storage_values[name] or 0 end,
@@ -881,6 +884,18 @@ local function callback_action(kind)
 	return kind == "lbm" and registered_lbms[1].action or registered_abms[1].action
 end
 
+local function run_due_timers()
+	local index = 1
+	while index <= #timers do
+		if timers[index].at <= clock_value then
+			local timer = table.remove(timers, index)
+			timer.callback()
+		else
+			index = index + 1
+		end
+	end
+end
+
 local function invoke_pair(kind, layout_value, reverse)
 	local positions = {}
 	for _, pos in ipairs(layout_value.tables) do positions[#positions + 1] = pos end
@@ -902,24 +917,29 @@ end
 
 -- Active props survive both callbacks; every API handle shares the same record.
 reset()
-local live_owner_checks = 0
-api = reset({validate_session = function() live_owner_checks = live_owner_checks + 1; return true end})
+api = reset({validate_session = function() return false end})
 local active_layout, active_stall = place_owned(api, 110, "active-owner")
 local session_ref = activate_runtime(api, active_stall, "active-session")
-local active_check = api.check_prop(active_layout.tables[1])
-assert(active_check == true, "registered live session validates its tagged table: " .. tostring(active_check)
-	.. ", validations=" .. live_owner_checks)
+local later_valid = true
 local shared_api = dofile("market_props.lua").new({site = test_site, itemframes = test_itemframes,
-	core = minetest, validate_session = function() return owner_valid end})
+	core = minetest, validate_session = function() return later_valid end})
+assert(shared_api.activate(active_stall, session_ref, "active-session", clock_value + 40),
+	"later API handle registers the active session")
 invoke_pair("lbm", active_layout)
 invoke_pair("abm", active_layout, true)
 assert(count_nodes(frame_name) == 2 and count_nodes(table_name) == 2,
-	"active stall survives LBM and ABM in either node order")
-assert(shared_api.release(active_stall.token, session_ref, "active-session"), "API handles share one token registry")
-invoke_pair("abm", active_layout)
+	"registered callbacks use the later handle's validator for its record")
+later_valid = false
+invoke_pair("lbm", active_layout)
 assert(count_nodes(frame_name) == 0 and count_nodes(table_name) == 0,
-	"released runtime token is cleaned by the shared callback")
-assert_clean(active_layout, "orphan cleanup")
+	"later handle's invalid session is cleaned by the registered callback")
+local reactivated_layout, reactivated = place_owned(shared_api, 114, "second-owner")
+local second_ref = activate_runtime(shared_api, reactivated, "second-session")
+assert(not shared_api.release(active_stall.token, session_ref, "active-session"),
+	"invalid callback already removed the prior runtime token")
+assert(shared_api.release(reactivated.token, second_ref, "second-session"), "later handle releases its own token")
+invoke_pair("abm", reactivated_layout)
+assert_clean(reactivated_layout, "orphan cleanup")
 
 -- A stall crossing the x=16 mapblock edge survives either block activation order.
 for _, reverse_blocks in ipairs({false, true}) do
@@ -956,12 +976,24 @@ api = reset({validate_session = function(record)
 	return true
 end})
 local bell_layout, bell_stall = place_owned(api, 112, "bell-owner")
-activate_runtime(api, bell_stall, "bell-session")
-assert(api.check_prop(bell_layout.tables[1]) == nil and count_nodes(table_name) == 2,
-	"unloaded bell defers cleanup without deleting active props")
+local bell_ref = activate_runtime(api, bell_stall, "bell-session")
+clock_value = 105
+assert(api.renew(bell_stall.token, bell_ref, "bell-session"),
+	"unknown bell renews rather than invalidating the live session")
+invoke_pair("lbm", bell_layout)
+assert(count_nodes(table_name) == 2 and count_nodes(frame_name) == 2,
+	"unloaded bell keeps active props during a registered load check")
 bell_loaded = true
-assert(api.check_prop(bell_layout.tables[1]) == true and count_nodes(table_name) == 2,
-	"reloaded bell validates the live stall")
+invoke_pair("abm", bell_layout)
+assert(count_nodes(table_name) == 2 and count_nodes(frame_name) == 2,
+	"reloaded bell validates the live stall during the ABM check")
+clock_value = 110
+run_due_timers()
+assert(api.renew(bell_stall.token, bell_ref, "bell-session"), "reloaded session remains renewable")
+clock_value = 121
+run_due_timers()
+invoke_pair("abm", bell_layout)
+assert_clean(bell_layout, "genuine lease expiry after bell reload")
 
 -- A restart starts with an empty registry and never reconstructs persisted stalls.
 reset()
@@ -1013,6 +1045,36 @@ clock_value = 120
 assert(api.check_prop(renewed_layout.tables[1]) == false, "renewed lease expires after its ten-second window")
 invoke_pair("abm", renewed_layout)
 assert_clean(renewed_layout, "renewed lease expiry")
+
+-- Packing the frames retains the live record; final cleanup invalidates it before deferring.
+reset()
+api = reset()
+local final_layout, final_stall = place_owned(api, 166, "final-owner")
+local final_ref = activate_runtime(api, final_stall, "final-session")
+assert(api.remove_frames(final_stall), "staggered packing clears frames first")
+assert(api.check_prop(final_layout.tables[1]) == true, "frame phase retains a valid table lease")
+unloaded[key(final_layout.frames[1])] = true
+assert(not api.cleanup(final_stall), "final cleanup defers on an unloaded frame support")
+assert(not api.renew(final_stall.token, final_ref, "final-session"),
+	"final cleanup invalidates the matching lease before node cleanup")
+unloaded[key(final_layout.frames[1])] = nil
+invoke_pair("lbm", final_layout)
+assert_clean(final_layout, "deferred final cleanup")
+
+-- Lease expiry prunes a token even when every tagged prop has already disappeared.
+reset()
+api = reset()
+local vanished_layout, vanished = place_owned(api, 167, "vanished-owner")
+local vanished_ref = activate_runtime(api, vanished, "vanished-session")
+for _, pos in ipairs(vanished_layout.tables) do world_nodes[key(pos)] = {name = "air"}; metadata[key(pos)] = nil end
+for _, pos in ipairs(vanished_layout.frames) do
+	world_nodes[key(pos)] = {name = "air"}
+	metadata[key(pos)], displays[key(pos)] = nil, nil
+end
+clock_value = 111
+run_due_timers()
+assert(not api.renew(vanished.token, vanished_ref, "vanished-session"),
+	"bounded lease expiry removes a record with no remaining props or callbacks")
 
 -- A surviving frame or table is cleaned alone. Unknown paired support defers safely.
 for _, survivor in ipairs({"frame", "table"}) do

@@ -1,4 +1,4 @@
--- Places and tags the ordinary nodes used by market stalls (#288).
+-- Places, tags and packs ordinary market nodes; #290 adds transient orphan recovery.
 local core = minetest
 
 local props = {}
@@ -278,7 +278,17 @@ function props.new(options)
 	end
 
 	api.wrap_interactions()
-	api.cleanup = cleanup
+	-- Full cleanup invalidates ownership before attempting node edits. Use remove_frames
+	-- alone for the staged packing pause; the runtime lease stays live until tables go.
+	api.cleanup = function(stall)
+		if valid_stall(stall) then
+			local record = runtime_records[stall.token]
+			if record and record.owner == tostring(stall.owner) then
+				runtime_records[stall.token] = nil
+			end
+		end
+		return cleanup(stall)
+	end
 	api.remove_frames = remove_frames
 
 	local function parse_pair(value)
@@ -297,21 +307,39 @@ function props.new(options)
 	end
 
 	local function runtime_valid(record)
-		local clock = now()
+		local clock = record.now()
 		if type(clock) ~= "number" or clock < record.last_now then return false end
 		record.last_now = clock
 		if clock > record.deadline + 1 or clock >= record.lease_expires then return false end
-		if current_day() ~= record.day or not is_holiday() or not current_window() or is_thunder() then
+		if record.current_day() ~= record.day or not record.is_holiday()
+			or not record.current_window() or record.is_thunder() then
 			return false
 		end
-		local valid, reason = validate_session(record)
+		local valid, reason = record.validate_session(record)
 		if valid == nil then return nil, reason end
 		return valid == true
 	end
 
+	local function schedule_expiry(record)
+		if not record.after then return end
+		local expires = math.min(record.lease_expires, record.deadline + 1)
+		local delay = math.max(0, expires - record.now())
+		record.after(delay, function()
+			if runtime_records[record.stall.token] ~= record then return end
+			local clock = record.now()
+			local next_expiry = math.min(record.lease_expires, record.deadline + 1)
+			if clock >= next_expiry then
+				runtime_records[record.stall.token] = nil
+			else
+				schedule_expiry(record)
+			end
+		end)
+	end
+
 	-- A controller registers only after arrival and renews while its session remains active.
 	function api.activate(stall, owner_ref, session, deadline, context)
-		if not valid_stall(stall) or owner_ref == nil or session == nil or type(deadline) ~= "number" then
+		if not valid_stall(stall) or owner_ref == nil or session == nil or type(deadline) ~= "number"
+			or (runtime.itemframes and runtime.itemframes ~= itemframes) then
 			return false
 		end
 		local clock = now()
@@ -325,18 +353,29 @@ function props.new(options)
 			deadline = deadline,
 			last_now = clock,
 			lease_expires = clock + 10,
+			now = now,
+			current_day = current_day,
+			is_holiday = is_holiday,
+			current_window = current_window,
+			is_thunder = is_thunder,
+			validate_session = validate_session,
+			after = world.after,
 		}
+		schedule_expiry(runtime_records[stall.token])
 		return true
 	end
 
 	function api.renew(token, owner_ref, session)
 		local record = runtime_records[token]
 		if not record or record.owner_ref ~= owner_ref or record.session ~= session then return false end
-		local clock = now()
-		if runtime_valid(record) ~= true then
+		local valid = runtime_valid(record)
+		if valid == false then
 			runtime_records[token] = nil
 			return false
 		end
+		local clock = record.now()
+		if type(clock) ~= "number" or clock < record.last_now then return false end
+		record.last_now = clock
 		record.lease_expires = clock + 10
 		return true
 	end
@@ -391,6 +430,7 @@ function props.new(options)
 	end
 
 	if not runtime.callbacks_registered and world.register_lbm and world.register_abm then
+		runtime.itemframes = itemframes
 		world.register_lbm({
 			name = "living_villages:market_orphan_props",
 			nodenames = {TABLE, FRAME},
