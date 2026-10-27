@@ -299,7 +299,7 @@ function props.new(options)
 
 	local function current_window()
 		local ticks = (world.get_timeofday() * 24000) % 24000
-		return ticks >= 15000 and ticks < 17500
+		return ticks >= 10500 and ticks < 15000
 	end
 
 	local function same_pos(a, b)
@@ -316,8 +316,15 @@ function props.new(options)
 			return false
 		end
 		local valid, reason = record.validate_session(record)
+		if valid == false then return false end
+		local validate_context = record.context and record.context.validate_session
+		if validate_context then
+			local context_valid, context_reason = validate_context(record)
+			if context_valid == false then return false end
+			if context_valid == nil then return nil, context_reason end
+		end
 		if valid == nil then return nil, reason end
-		return valid == true
+		return true
 	end
 
 	local function schedule_expiry(record)
@@ -365,7 +372,7 @@ function props.new(options)
 		return true
 	end
 
-	function api.renew(token, owner_ref, session)
+	function api.renew(token, owner_ref, session, deadline)
 		local record = runtime_records[token]
 		if not record or record.owner_ref ~= owner_ref or record.session ~= session then return false end
 		local valid = runtime_valid(record)
@@ -376,6 +383,7 @@ function props.new(options)
 		local clock = record.now()
 		if type(clock) ~= "number" or clock < record.last_now then return false end
 		record.last_now = clock
+		if type(deadline) == "number" then record.deadline = deadline end
 		record.lease_expires = clock + 10
 		return true
 	end

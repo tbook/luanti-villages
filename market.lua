@@ -1,4 +1,4 @@
--- Representative market goods, eligibility and seller travel sessions (#291, #292).
+-- Representative market goods and seller sessions (#291-#293).
 -- This controller is called by the bell wrapper; it does not install entity hooks.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
@@ -57,13 +57,23 @@ function M.eligible(villager, attempt)
 	if not villager._id then return false, "missing_id" end
 	if villager.following then return false, "following" end
 	local day = core.get_day_count and core.get_day_count()
-	if day ~= nil and villager._villages_market_stock_day == day then return false, "already_stocked" end
+	if not (attempt and attempt.arrived) and day ~= nil
+		and villager._villages_market_stock_day == day then return false, "already_stocked" end
 	if not M.goods_for(villager, attempt) then return false, "no_goods" end
 	return true
 end
 
 local serial = 0
 local SETUP_CUTOFF = 14500
+local PACK_EARLIEST = 14750
+local PACK_LATEST = 14916
+local MARKET_END = 15000
+local PACK_DELAY = 1
+
+-- Entity serialization saves ordinary fields automatically. Integration must
+-- retain this daily guard and discard the live session machinery on reload.
+M.saved_fields = {"_villages_market_stock_day"}
+M.transient_fields = {"_villages_market_session", "_villages_market_attempted"}
 
 local function is_trading(self)
 	return self._trading_players and next(self._trading_players) ~= nil
@@ -81,15 +91,44 @@ local function time_ticks(world)
 	return ((world.get_timeofday and world.get_timeofday() or 0) * 24000) % 24000
 end
 
+local function hold_seller(self, session)
+	self.order = "stand"
+	if self.state == "gowp" then self.state = "stand" end
+	local velocity = self.object and self.object.get_velocity and self.object:get_velocity()
+	if velocity and self.object.set_velocity then
+		self.object:set_velocity({x = 0, y = velocity.y, z = 0})
+	end
+	local outward = session.layout.outward
+	if outward and self.set_yaw then self:set_yaw(math.atan2(-outward.x, outward.z)) end
+	if self.set_animation then self:set_animation("stand") end
+end
+
 function M.new(options)
 	options = options or {}
 	local site = assert(options.site, "market.new requires the shared market_site service")
-	assert(options.props, "market.new requires the shared market_props service")
+	local props = assert(options.props, "market.new requires the shared market_props service")
 	local navigation = options.navigation or {}
 	local get_stage = options.stage or function(self) return common.schedule_stage(nil, self) end
 	local get_ticks = options.ticks or function() return time_ticks(options.core or core) end
+	local get_day = options.day_count or function() return core.get_day_count and core.get_day_count() end
+	local random = options.random or math.random
+	local real_now = options.real_now or function()
+		return core.get_us_time and core.get_us_time() / 1000000 or os.time()
+	end
+	local get_node_or_nil = options.get_node_or_nil or core.get_node_or_nil
+	local is_thunder = options.is_thunder or function()
+		return mcl_weather and mcl_weather.get_weather
+			and mcl_weather.get_weather() == "thunder" or false
+	end
 	local standing_position = options.standing_position or cells.standing_position
 	local api = {}
+
+	local function cleanup_stall(self, session)
+		if not session.stall then return end
+		props.release(session.stall.token, self.object, session)
+		props.cleanup(session.stall)
+		session.stall = nil
+	end
 
 	local function fallback(self, session, reason)
 		if not session.fallback_logged then
@@ -97,6 +136,7 @@ function M.new(options)
 			core.log("action", "[living_villages] market seller browsing: " .. reason)
 		end
 		self._villages_market_attempted = true
+		cleanup_stall(self, session)
 		if session.reservation then site.release(session.reservation) end
 		if session.id and navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
 		self._villages_market_session = nil
@@ -112,9 +152,18 @@ function M.new(options)
 		return false
 	end
 
+	local function bell_valid(session)
+		local bell_pos = session.bell and session.bell.pos
+		if not bell_pos or not get_node_or_nil then return nil, "bell_unknown" end
+		local node = get_node_or_nil(bell_pos)
+		if not node then return nil, "bell_unloaded" end
+		return node.name == "mcl_bells:bell"
+	end
+
 	function api.leave(self, reason)
 		local session = self._villages_market_session
 		if not session then return false end
+		cleanup_stall(self, session)
 		if session.reservation then site.release(session.reservation) end
 		if session.id and navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
 		self._villages_market_session = nil
@@ -137,6 +186,7 @@ function M.new(options)
 			serial = serial + 1
 			session = {
 				id = tostring(self._id) .. ":" .. tostring(serial),
+				profession = M.profession(self),
 				bell = bell_session,
 				walk_elapsed = 0,
 				search = site.begin_search(center, tostring(self._id)),
@@ -153,8 +203,50 @@ function M.new(options)
 			api.leave(self, "seller no longer eligible")
 			return "browse"
 		end
+		if session.profession and M.profession(self) ~= session.profession then
+			api.leave(self, "seller profession changed")
+			return "browse"
+		end
+		if is_thunder() then
+			api.leave(self, "thunder")
+			return "browse"
+		end
+		local bell_ok = bell_valid(session)
+		if bell_ok == false then
+			api.leave(self, "bell removed")
+			return "browse"
+		end
 		if session.reservation and not site.renew(session.reservation) then
 			return fallback(self, session, "stall reservation expired")
+		end
+		if session.arrived then
+			local pos = self.object and self.object:get_pos()
+			local target = standing_position(session.layout.seller)
+			local dx, dy, dz = pos and pos.x - target.x, pos and pos.y - target.y, pos and pos.z - target.z
+			if not pos or dx * dx + dy * dy + dz * dz > 1 then
+				api.leave(self, "seller displaced")
+				return "browse"
+			end
+			if not props.renew(session.stall.token, self.object, session, real_now() + 600) then
+				api.leave(self, "stall lease expired")
+				return "browse"
+			end
+			local ticks = get_ticks()
+			if ticks >= MARKET_END then
+				cleanup_stall(self, session)
+				api.leave(self, "market closed")
+				return "holding"
+			elseif ticks >= session.pack_at and not session.packing_at then
+				session.packing_at = real_now()
+				props.remove_frames(session.stall)
+				core.log("action", "[living_villages] market seller began packing")
+			elseif session.packing_at and real_now() - session.packing_at >= PACK_DELAY then
+				cleanup_stall(self, session)
+				api.leave(self, "packed")
+				return "holding"
+			end
+			hold_seller(self, session)
+			return "holding"
 		end
 
 		if not session.reservation then
@@ -205,10 +297,41 @@ function M.new(options)
 			end
 			local valid = site.valid(session.layout, session.reservation)
 			if not valid then return fallback(self, session, "stall changed before arrival") end
+			local day = get_day()
+			if type(day) ~= "number" then return fallback(self, session, "world day unavailable") end
+			local items = M.goods_for(self, session)
+			if not items then return fallback(self, session, "seller goods unavailable") end
+			-- Consume the day's setup chance before any of the first prop writes.
+			self._villages_market_stock_day = day
+			session.pack_at = PACK_EARLIEST + random(0, PACK_LATEST - PACK_EARLIEST)
+			local stall, failure = props.setup(session.layout, tostring(self._id), day, items, session.reservation)
+			if not stall then return fallback(self, session, "stall setup failed: " .. tostring(failure)) end
+			session.stall = stall
+			local context = {
+				is_thunder = is_thunder,
+				validate_session = function()
+					local pos = self.object and self.object:get_pos()
+					local target = standing_position(session.layout.seller)
+					local dx, dy, dz = pos and pos.x - target.x, pos and pos.y - target.y, pos and pos.z - target.z
+					local valid = self._villages_market_session == session and session.arrived
+						and M.profession(self) == session.profession
+						and M.eligible(self, session) and get_stage(self) == "bell"
+						and not is_thunder() and pos ~= nil
+						and dx * dx + dy * dy + dz * dz <= 1
+					if not valid then return false end
+					local bell_ok, reason = bell_valid(session)
+					if bell_ok == nil then return nil, reason end
+					return bell_ok
+				end,
+			}
+			if not props.activate(stall, self.object, session, real_now() + 600, context) then
+				return fallback(self, session, "stall lease setup failed")
+			end
 			session.arrived = true
-			-- #293 begins selling after this confirmed transition.
+			core.log("action", "[living_villages] market seller opened a stall")
 			return "holding"
 		end
+
 		return "walking"
 	end
 
