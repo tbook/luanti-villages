@@ -7,6 +7,7 @@ local world_nodes, metadata, displays, drops
 local construct_count, write_count, pending
 local fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame
 local fail_drop, protected, violations, unloaded
+local remove_calls
 local storage_values
 local constructor_hooks, test_itemframes, test_site
 local frame_name = "mcl_itemframes:invisible_frame"
@@ -83,6 +84,7 @@ local function reset()
 	frame_def.on_rightclick, frame_def.on_rotate = stock_on_rightclick, stock_on_rotate
 	frame_def._living_villages_market_interactions_wrapped = nil
 	world_nodes, metadata, displays, drops = {}, {}, {}, {}
+	remove_calls = {}
 	construct_count, write_count, pending = 0, 0, {}
 	fail_add_at, fail_inventory, fail_clear_inventory, fail_display_at, replace_first_frame = nil, false, nil, nil, nil
 	fail_drop, protected, violations, unloaded = false, false, {}, {}
@@ -167,6 +169,7 @@ local function reset()
 			if def.on_construct then def.on_construct(pos) end
 		end,
 		remove_node = function(pos)
+			remove_calls[key(pos)] = (remove_calls[key(pos)] or 0) + 1
 			local old = world_nodes[key(pos)]
 			local def = old and old.name == frame_name and frame_def or {}
 			if def.on_destruct then def.on_destruct(pos) end
@@ -416,6 +419,70 @@ assert(metadata[key(stuck.frames[1])].lists.main[1]:get_name() == "test:apple",
 	"generated inventory remains in the retained frame")
 assert(#drops == 0, "failed inventory clear never invokes a dropping destructor")
 
+-- Rollback retains the intended pair coordinates even when a table or first frame write fails early.
+reset()
+api = reset()
+local second_table_failure = layout(50)
+fail_add_at = 2
+local second_table_result = api.setup(second_table_failure, "villager-early-a", 24,
+	{"test:apple", "test:carrot"}, fixture_reservation(second_table_failure, "villager-early-a"))
+assert(not second_table_result, "second table failure aborts setup")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0,
+	"rollback removes both matching tables although no frames were created")
+for _, pos in ipairs(second_table_failure.tables) do
+	assert(not metadata[key(pos)] or metadata[key(pos)].fields[frame_meta_prefix .. "token"] == nil,
+		"second-table rollback leaves no market tags")
+end
+assert(#drops == 0, "second-table rollback produces no drops")
+
+reset()
+api = reset()
+local first_frame_failure = layout(52)
+fail_add_at = 3
+local first_frame_result = api.setup(first_frame_failure, "villager-early-b", 24,
+	{"test:apple", "test:carrot"}, fixture_reservation(first_frame_failure, "villager-early-b"))
+assert(not first_frame_result, "first frame failure aborts setup")
+assert(count_nodes(table_name) == 0 and count_nodes(frame_name) == 0,
+	"rollback removes the owned first frame and both tables")
+assert_clean(first_frame_failure, "first-frame rollback")
+for _, list in ipairs({first_frame_failure.tables, first_frame_failure.frames}) do
+	for _, pos in ipairs(list) do
+		assert(not metadata[key(pos)] or metadata[key(pos)].fields[frame_meta_prefix .. "token"] == nil,
+			"first-frame rollback leaves no market tags")
+	end
+end
+
+-- A foreign frame at the intended second position survives early rollback without a remove attempt.
+reset()
+api = reset()
+local foreign_layout = layout(56)
+constructor_hooks[frame_name] = function(pos)
+	if key(pos) ~= key(foreign_layout.frames[1]) then return end
+	minetest.set_node(foreign_layout.frames[2], {name = frame_name})
+	local meta = minetest.get_meta(foreign_layout.frames[2])
+	meta:set_int(frame_meta_prefix .. "version", 1)
+	meta:set_string(frame_meta_prefix .. "token", "foreign-token")
+	meta:set_string(frame_meta_prefix .. "owner", "player")
+	meta:set_int(frame_meta_prefix .. "day", 3)
+	meta:set_string(frame_meta_prefix .. "role", "frame_2")
+	meta:set_string(frame_meta_prefix .. "pair", key(foreign_layout.tables[2]):gsub(":", ","))
+	meta:get_inventory():set_stack("main", 1, ItemStack("test:foreign", 2, {owner = "player"}))
+end
+local foreign_failure = api.setup(foreign_layout, "villager-early-c", 24,
+	{"test:apple", "test:carrot"}, fixture_reservation(foreign_layout, "villager-early-c"))
+assert(not foreign_failure, "foreign frame at a later intended position aborts setup")
+assert(world_nodes[key(foreign_layout.frames[2])].name == frame_name,
+	"foreign same-name frame survives early rollback")
+assert(remove_calls[key(foreign_layout.frames[2])] == nil,
+	"rollback never invokes the destructor on the foreign frame")
+assert(metadata[key(foreign_layout.frames[2])].fields[frame_meta_prefix .. "token"] == "foreign-token"
+	and metadata[key(foreign_layout.frames[2])].lists.main[1]:get_count() == 2,
+	"foreign frame identity and inventory remain intact")
+assert(#drops == 0, "early rollback creates no generated or foreign item drops")
+assert(world_nodes[key(foreign_layout.tables[2])].name == table_name
+	and metadata[key(foreign_layout.tables[2])].fields[frame_meta_prefix .. "token"] == "",
+	"table beneath the foreign frame is relinquished as support")
+
 -- A constructor-supplied same-name ownership tag is foreign and must not be overwritten.
 reset()
 api = reset()
@@ -657,7 +724,11 @@ complete = api.cleanup(retained)
 assert(not complete, "failed item drop defers cleanup")
 assert(world_nodes[key(retained_layout.frames[1])].name == frame_name, "failed drop keeps the frame")
 assert(metadata[key(retained_layout.frames[1])].lists.main[1]:get_name() == "test:emerald"
-	and metadata[key(retained_layout.frames[1])].lists.main[1].fields.serial == "safe", "failed drop retains exact inventory")
+	and metadata[key(retained_layout.frames[1])].lists.main[1]:get_count() == 1
+	and metadata[key(retained_layout.frames[1])].lists.main[1].fields.serial == "safe", "failed drop restores the complete inventory stack")
+local failed_attempt_drops = 0
+for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "safe" then failed_attempt_drops = failed_attempt_drops + 1 end end
+assert(failed_attempt_drops == 0, "failed add_item creates no partial player drop")
 assert(world_nodes[key(retained_layout.tables[1])].name == table_name, "failed frame cleanup retains table support")
 fail_drop = false
 assert(api.cleanup(retained), "cleanup retries successfully after item drop becomes available")
@@ -679,7 +750,7 @@ assert(not complete and world_nodes[key(clear_retry_layout.frames[1])].name == f
 	"inventory clear failure retains the owned frame")
 local retry_drops = 0
 for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "clear-retry" then retry_drops = retry_drops + 1 end end
-assert(retry_drops == 1, "first cleanup creates one player drop before clear failure")
+assert(retry_drops == 0, "clear failure happens before any player drop")
 local post_failure_wield = ItemStack("test:emerald", 1, {serial = "after-clear-failure"})
 frame_def.on_rightclick(clear_retry_layout.frames[1], minetest.get_node(clear_retry_layout.frames[1]), clicker,
 	post_failure_wield, {type = "node"})
@@ -688,10 +759,29 @@ for _, dropped in ipairs(drops) do if dropped.stack:get_name() == "test:apple" t
 assert(old_stack_drops == 1, "next interaction clears an already-dropped stack before stock behavior")
 assert(api.cleanup(clear_retry), "cleanup retries after the inventory becomes writable")
 for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "clear-retry" then retry_drops = retry_drops + 1 end end
-assert(retry_drops == 2, "retry observes the already-created drop and does not add another")
+assert(retry_drops == 1, "stock interaction drops the original stack once before retry")
 local after_failure_drops = 0
 for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "after-clear-failure" then after_failure_drops = after_failure_drops + 1 end end
 assert(after_failure_drops == 1, "the new player stack inserted after retryable cleanup is preserved")
+
+-- If clear fails, an ordinary frame dig lets the real destructor drop the stack exactly once.
+reset()
+api = reset()
+local dig_layout, dig_stall = place_owned(api, 93, "dig-after-clear-failure")
+frame_def.on_rightclick(dig_layout.frames[1], minetest.get_node(dig_layout.frames[1]), clicker,
+	ItemStack("test:emerald", 1, {serial = "dug-once"}), {type = "node"})
+fail_clear_inventory = key(dig_layout.frames[1])
+complete = api.cleanup(dig_stall)
+assert(not complete, "failed clear retains the item for ordinary digging")
+local dug_before = #drops
+minetest.set_node(dig_layout.frames[1], {name = "air"})
+assert(#drops == dug_before + 1 and drops[#drops].stack.fields.serial == "dug-once",
+	"stock destructor drops the retained player stack once")
+assert(api.cleanup(dig_stall), "cleanup removes the remaining table after the frame is dug")
+local dug_once_count = 0
+for _, dropped in ipairs(drops) do if dropped.stack.fields.serial == "dug-once" then dug_once_count = dug_once_count + 1 end end
+assert(dug_once_count == 1, "cleanup after ordinary digging creates no duplicate")
+assert(api.cleanup(dig_stall) and dug_once_count == 1, "repeated cleanup after digging remains idempotent")
 
 -- Replaced frame nodes are unowned and left in place; their owned table is relinquished as support.
 reset()

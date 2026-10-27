@@ -8,7 +8,6 @@ local FRAME = "mcl_itemframes:invisible_frame"
 local PREFIX = "living_villages:market_"
 local COUNTER_KEY = "market_props_token_counter"
 local TOUCH_KEY = "player_touched"
-local DROP_KEY = "player_stack_dropped"
 
 local function key(name)
 	return PREFIX .. name
@@ -80,7 +79,6 @@ function props.new(options)
 		meta:set_string(key("role"), "")
 		meta:set_string(key("pair"), "")
 		meta:set_string(key(TOUCH_KEY), "")
-		meta:set_string(key(DROP_KEY), "")
 	end
 
 	local function tagged_frame(pos, token, owner, day, index, table_pos)
@@ -97,10 +95,15 @@ function props.new(options)
 		local stack = inv:get_stack("main", 1)
 		local touched = meta:get_string(key(TOUCH_KEY)) == "1"
 		if touched and stack and not stack:is_empty() then
-			if meta:get_string(key(DROP_KEY)) ~= "1" then
-				local ok, object = pcall(world.add_item, pos, make_stack(stack))
-				if not ok or not object then return false end
-				meta:set_string(key(DROP_KEY), "1")
+			local preserved = make_stack(stack)
+			local cleared = pcall(inv.set_stack, inv, "main", 1, make_stack(""))
+			local remaining = inv:get_stack("main", 1)
+			if remaining and not remaining:is_empty() then return false end
+			if not cleared and not (remaining and remaining:is_empty()) then return false end
+			local ok, object = pcall(world.add_item, pos, make_stack(preserved))
+			if not ok or not object then
+				pcall(inv.set_stack, inv, "main", 1, make_stack(preserved))
+				return false
 			end
 		end
 
@@ -178,7 +181,7 @@ function props.new(options)
 	end
 
 	local function rollback(created, token, owner, day)
-		cleanup({layout = {tables = created.tables, frames = created.frames}, token = token, owner = owner, day = day})
+		cleanup({layout = created.intended, token = token, owner = owner, day = day})
 	end
 
 	local function player_name(player)
@@ -195,18 +198,6 @@ function props.new(options)
 
 	local function pack(...)
 		return {n = select("#", ...), ...}
-	end
-
-	local function clear_previously_dropped(pos, meta)
-		if meta:get_string(key(DROP_KEY)) ~= "1" then return true end
-		local inv = meta:get_inventory()
-		local cleared = pcall(inv.set_stack, inv, "main", 1, make_stack(""))
-		if not cleared then return false end
-		local stack = inv:get_stack("main", 1)
-		if stack and not stack:is_empty() then return false end
-		meta:set_string(key(DROP_KEY), "")
-		pcall(itemframes.update_entity, pos)
-		return true
 	end
 
 	function api.wrap_interactions()
@@ -230,10 +221,6 @@ function props.new(options)
 							and (role == "frame_1" or role == "frame_2")
 							and meta:get_string(key("pair")) == pos_key(pair)
 						if matching_tag and permitted(pos, player) then
-							if not clear_previously_dropped(pos, meta) then
-								if callback == "on_rightclick" then return select(3, ...) end
-								return nil
-							end
 							meta:set_string(key(TOUCH_KEY), "1")
 						end
 					end
@@ -284,10 +271,14 @@ function props.new(options)
 		local counter = storage:get_int(COUNTER_KEY) + 1
 		storage:set_int(COUNTER_KEY, counter)
 		local token = "market-" .. tostring(counter)
-		local created = {tables = {}, frames = {}, table_pairs = layout.frames}
+		local intended = {tables = {}, frames = {}}
+		for index = 1, 2 do
+			intended.tables[index] = copy_pos(layout.tables[index])
+			intended.frames[index] = copy_pos(layout.frames[index])
+		end
+		local created = {tables = {}, frames = {}, intended = intended}
 
 		local function place(pos, node_name, param2, kind, index, role, pair)
-			created[kind][index] = copy_pos(pos)
 			local before = world.get_node_or_nil(pos)
 			if not before or before.name ~= "air" then return false end
 			local ok = pcall(world.add_node, pos, {name = node_name, param2 = param2 or 0})
@@ -301,8 +292,10 @@ function props.new(options)
 				local meta = world.get_meta(pos)
 				if not has_market_tag(meta) then tag(pos, node_name, token, owner, day, role, pair) end
 			end
-			if not ok or not node or node.name ~= node_name
-				or not owned(pos, token, owner, day, role, node_name, pair) then
+			local is_owned = node and node.name == node_name
+				and owned(pos, token, owner, day, role, node_name, pair)
+			if is_owned then created[kind][index] = copy_pos(pos) end
+			if not ok or not is_owned then
 				return false
 			end
 			return true
