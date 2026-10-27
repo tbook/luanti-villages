@@ -253,17 +253,35 @@ end
 local function cancel_route(self, route_field)
 	local route = self[route_field]
 	self[route_field] = nil
-	if route and route.status == "travelling" then stop(self) end
+	local follow = self._villages_follow
+	local owns_follow = route and follow and follow.route_field == route_field and follow.route_id == route.id
+	local another_route = false
+	if not follow then
+		for _, field in ipairs({"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
+			"_villages_fish_route", "_villages_job_search_route", "_villages_tavern_route", "_villages_goto_route"}) do
+			local other = self[field]
+			if other and other.status == "travelling" then another_route = true; break end
+		end
+	end
+	if route and route.status == "travelling" and self.state == PATHFINDING
+		and (owns_follow or (not follow and not another_route)) then
+		stop(self)
+	end
 end
 
 local function fail(self, route_field, reason, target, retry_seconds, planner_report)
 	local now = core.get_gametime()
+	local previous = self[route_field]
 	set_route(self, route_field, {
 		status = "retry", reason = reason, retry_at = now + (retry_seconds or RETRY_SECONDS),
 		target = target and vector.new(target) or nil,
 		planner = planner_report,
+		market_token = previous and previous.market_token,
 	})
-	stop(self)
+	local follow = self._villages_follow
+	if previous and follow and follow.route_field == route_field and follow.route_id == previous.id then
+		stop(self)
+	end
 end
 
 -- Native path callbacks can fire after a route was canceled or replaced. Only
@@ -276,7 +294,11 @@ end
 local function arrival_callback(route_field, route_id, target, callback_arrived, sleep)
 	return function(entity)
 		if not owns_route(entity, route_field, route_id) then return end
-		entity[route_field] = {status = "arrived", id = route_id, target = vector.new(target)}
+		local route = entity[route_field]
+		entity[route_field] = {
+			status = "arrived", id = route_id, target = vector.new(target),
+			market_token = route.market_token,
+		}
 		if sleep then entity.order = "sleep" end
 		if callback_arrived then return callback_arrived(entity, target) end
 	end
@@ -651,6 +673,10 @@ local function start_route(self, target, path, arrived, route_field, route_id)
 	self.waypoints = waypoints
 	self.state = PATHFINDING
 	follower.begin(self)
+	if route_field and self._villages_follow then
+		self._villages_follow.route_field = route_field
+		self._villages_follow.route_id = route_id
+	end
 	return true
 end
 
@@ -738,6 +764,7 @@ local function plan_trip(self, destination, candidates, callback_arrived)
 		target = vector.new(first), goal = destination.goal and vector.new(destination.goal) or nil,
 		started_at = core.get_gametime(), wall_started_at = os.time(), callback = callback_arrived,
 		site = destination.site and vector.new(destination.site) or nil,
+		market_token = destination.market_token,
 	})
 	if destination.planner_path then
 		if start_route(self, first, destination.planner_path,
@@ -774,6 +801,7 @@ local function recover_route(self, destination)
 			goal = route.goal and vector.new(route.goal) or nil,
 			started_at = core.get_gametime(), wall_started_at = os.time(), callback = route.callback,
 			site = route.site and vector.new(route.site) or nil,
+			market_token = route.market_token,
 		})
 		plan_route_later(self, destination.route_field, planning.id, candidates, {
 			callback = route.callback, sleep = destination.sleep, reason = reason, fail_target = route.target,
@@ -917,7 +945,7 @@ local function install(def)
 		return original_door_action(self, action)
 	end
 
-	def.gopath = function(self, target, callback_arrived, prioritised)
+	def.gopath = function(self, target, callback_arrived, prioritised, market_token)
 		-- Like vanilla's, a request does not interrupt a walk in progress.
 		if self.state == PATHFINDING then return end
 		local destination
@@ -1030,6 +1058,7 @@ local function install(def)
 			destination = {
 				pos = goal, goal = goal, route_field = "_villages_goto_route", kind = "destination",
 				candidates = cells.can_stand(goal) and {goal} or approaches(goal),
+				market_token = market_token,
 			}
 		end
 		local route = self[destination.route_field]
@@ -1203,4 +1232,15 @@ local function install(def)
 end
 
 -- The second value is for the tests.
-return install, {nodes_for_reach = nodes_for_reach, backoff_seconds = backoff_seconds}
+local function cancel_goto(self, market_token)
+	local route = self._villages_goto_route
+	if not route or not market_token or route.market_token ~= market_token then return false end
+	cancel_route(self, "_villages_goto_route")
+	return true
+end
+
+return install, {
+	nodes_for_reach = nodes_for_reach,
+	backoff_seconds = backoff_seconds,
+	cancel_goto = cancel_goto,
+}

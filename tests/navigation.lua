@@ -1086,6 +1086,40 @@ ownership_entity.callback_arrived(ownership_entity)
 assert(ownership_entity._villages_bed_route.status == "arrived")
 assert(ownership_callback_calls == 1)
 
+local market_walk_entity = {
+	_id = "market-walker", state = "stand",
+	object = {
+		get_pos = function() return {x = 5, y = 0, z = 0} end,
+		set_velocity = function() end,
+	},
+}
+assert(ownership_def.gopath(market_walk_entity, {x = 2, y = 0, z = 2}, function() end, true, "market-session"))
+settle()
+local market_route = market_walk_entity._villages_goto_route
+assert(market_route and market_route.market_token == "market-session", "generic goto retains market session identity")
+assert(market_walk_entity._villages_follow.route_field == "_villages_goto_route"
+	and market_walk_entity._villages_follow.route_id == market_route.id,
+	"follower identifies the route it belongs to")
+market_walk_entity.callback_arrived(market_walk_entity)
+assert(market_walk_entity._villages_goto_route.status == "arrived"
+	and market_walk_entity._villages_goto_route.market_token == "market-session",
+	"arrival preserves the route's market session identity")
+
+-- Market cleanup can invalidate only its own queued or active goto route.
+local market_route_entity = {
+	state = "gowp", waypoints = {}, _target = {x = 1},
+	_villages_follow = {route_field = "_villages_goto_route", route_id = 41},
+	_villages_goto_route = {status = "travelling", id = 41, market_token = "market-a"},
+	object = {set_velocity = function() end},
+}
+assert(nav.cancel_goto(market_route_entity, "market-stale") == false, "stale market session cannot cancel a replacement")
+assert(market_route_entity._villages_goto_route.id == 41 and market_route_entity.state == "gowp")
+assert(nav.cancel_goto(market_route_entity, "market-a"), "owned market route cancels")
+assert(market_route_entity._villages_goto_route == nil and market_route_entity.state == "stand")
+local queued_market_route = {_villages_goto_route = {status = "planning", id = 42, market_token = "market-b"}}
+assert(nav.cancel_goto(queued_market_route, "market-b"), "owned planning route is invalidated")
+assert(queued_market_route._villages_goto_route == nil, "late planner result has no current route identity")
+
 -- Following cancels an owned route instead of allowing recovery to override the
 -- player's instruction on the next villager tick.
 local following_entity = {
@@ -1100,6 +1134,15 @@ ownership_def.do_custom(following_entity, 0.1)
 settle()
 assert(not following_entity._villages_bed_route)
 assert(following_entity.state == "stand")
+local following_without_route = {
+	following = {}, state = "stand",
+	_villages_follow = {route_field = "_villages_bed_route", route_id = 2},
+	object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+}
+ownership_def.do_custom(following_without_route, 0.1)
+settle()
+assert(following_without_route._villages_follow ~= nil,
+	"canceling absent routes with a stale follower leaves unrelated follower state alone")
 
 local stalled_def = {
 	on_activate = function() end,
