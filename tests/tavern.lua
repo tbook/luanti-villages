@@ -238,22 +238,37 @@ seat.stand(ida)
 def.do_custom(hal, 0.1)
 assert(not hal._villages_seat and not hal._villages_seated, "does not take a chair again")
 
--- Holiday evening (#128): guests head for the tavern from 13:30, not 15:30,
--- and the 17:00 leave-by is unchanged. Day 8 is a holiday; day 7 is not.
-time, day = 13400 / 24000, 8
+-- Holiday market handoff (#285): guests head to the tavern at 15:00, while
+-- the 17:00 leave-by still turns back a guest who has not arrived. Day 8 is a
+-- holiday; day 7 is not.
+time, day = 14999 / 24000, 8
 local jo = villager("jo", {x = 2, y = 0, z = 0}, {_bed = {x = 0, y = 0, z = 0}})
 count = #gopaths
 def.do_custom(jo, 0.1)
-assert(#gopaths == count and jo._villages_tavern_target == nil, "not before 13:30")
-time = 13600 / 24000
+assert(#gopaths == count and jo._villages_tavern_target == nil, "not before 15:00")
+time = 15000 / 24000
 assert(common.schedule_stage(nil, jo) == "tavern")
 def.do_custom(jo, 0.1)
-assert(#gopaths == count + 1 and vector.equals(jo._villages_tavern_target, jukebox), "holiday guests set out at 13:30")
+assert(#gopaths == count + 1 and vector.equals(jo._villages_tavern_target, jukebox), "holiday guests set out at 15:00")
+
+-- A guest who arrives stays through the new 17:30 end of Tavern.
+local guest = villager("guest", {x = 2, y = 0, z = 0}, {_bed = {x = 0, y = 0, z = 0}})
+def.do_custom(guest, 0.1)
+guest.object:set_pos({x = 19, y = 0, z = 0})
+def.do_custom(guest, 0.1)
+assert(guest._villages_tavern_arrived, "holiday guest arrives")
+time = 17499 / 24000
+def.do_custom(guest, 0.1)
+assert(guest._villages_tavern_arrived, "guest stays through 17:29")
+time = 17500 / 24000
+def.do_custom(guest, 0.1)
+assert(guest._villages_tavern_target == nil, "guest leaves at 17:30")
+
 time = 17100 / 24000
 def.do_custom(jo, 0.1)
 assert(jo._villages_tavern_target == nil and jo._villages_skip_tavern == 8, "holiday leave-by is still 17:00")
 -- The same hour on an ordinary day is still the afternoon.
 day = 7
-assert(common.schedule_stage(13600 / 24000, villager("kay", {x = 0, y = 0, z = 0})) == "work")
+assert(common.schedule_stage(15000 / 24000, villager("kay", {x = 0, y = 0, z = 0})) == "work")
 
 print("tavern.lua: ok")

@@ -12,8 +12,8 @@
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local JUKEBOX = "mcl_jukebox:jukebox"
--- Dinner begins at 15:30 and the tavern closes at 17:30 (common.lua's Home).
-local START = 15500
+-- Holiday tavern time begins at 15:00; Home closes it at 17:30 (common.lua).
+local START = 15000
 local STOP = 17500
 -- A positional sound is attenuated by the client (OpenAL inverse distance):
 -- the `gain` given is the gain at 3 nodes, and it falls as 3 * gain / distance,

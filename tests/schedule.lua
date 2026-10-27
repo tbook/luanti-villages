@@ -111,8 +111,9 @@ for _, case in ipairs({
 	{6999, "putter", "pulpit", "sleep"}, {7000, "church", "service", "putter"},
 	{7999, "church", "service", "putter"}, {8000, "church", "service", "free"},
 	{10499, "church", "service", "free"}, {10500, "bell", "bell", "free"},
-	{12999, "bell", "bell", "free"}, {13000, "bell", "bell", "staff"},
-	{13499, "bell", "bell", "staff"}, {13500, "tavern", "tavern", "staff"},
+	{12999, "bell", "bell", "free"}, {13000, "bell", "bell", "free"},
+	{14499, "bell", "bell", "free"}, {14500, "bell", "bell", "staff"},
+	{14999, "bell", "bell", "staff"}, {15000, "tavern", "tavern", "staff"},
 	{17499, "tavern", "tavern", "staff"}, {17500, "home", "home", "staff"},
 	{18499, "home", "home", "staff"}, {18500, "sleep", "sleep", "home"},
 	{18999, "sleep", "sleep", "home"}, {19000, "sleep", "sleep", "sleep"},
@@ -126,7 +127,7 @@ for _, case in ipairs({
 end
 -- Tavern skip and thunder still apply; vanilla sees only unknown activities.
 villager._villages_skip_tavern = 4
-assert(common.schedule_stage(at(15000), villager) == "home")
+assert(common.schedule_stage(at(16000), villager) == "home")
 villager._villages_skip_tavern = nil
 assert(common.get_activity(at(8000)) == "church")
 assert(common.get_activity(at(6000)) == "putter")
@@ -138,6 +139,6 @@ weather = "clear"
 -- Next day is ordinary again.
 day = 5
 assert(common.schedule_stage(at(8000), villager) == "work")
-assert(common.schedule_stage(at(14500), keeper) == "staff" and common.schedule_stage(at(13500), keeper) == "free")
+assert(common.schedule_stage(at(14000), keeper) == "staff" and common.schedule_stage(at(13999), keeper) == "free")
 
 print("schedule.lua: ok")

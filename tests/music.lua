@@ -144,13 +144,20 @@ holiday = false
 tick()
 check(#played == 0, "silent on an ordinary day")
 holiday = true
+time = 14999 / 24000
+tick()
+check(#played == 0, "silent just before holiday tavern time")
 time = 15000 / 24000
 tick()
-check(#played == 0, "silent before dinner")
+check(#played == 1 and music.is_playing(jukebox), "holiday music starts at 15:00")
 
 -- A disc a player put in during dinner is already playing to them.
+time = 17500 / 24000
+tick_alone()
+check(not music.is_playing(jukebox), "holiday music stops at 17:30")
 day = 17
 disc = nil
+played, stopped = {}, {}
 time = 15600 / 24000
 minetest.registered_nodes["mcl_jukebox:jukebox"].on_rightclick(jukebox, nil, nil, "mcl_jukebox:record_far")
 tick(); tick()
