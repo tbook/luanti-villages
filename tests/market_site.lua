@@ -1,5 +1,6 @@
 local root = debug.getinfo(1, "S").source:sub(2):match("(.*/)tests/") or "./"
 local world, groups, unloaded, nearby_objects, last_query_radius
+local forbidden_calls = {writes = 0, emerges = 0, paths = 0}
 
 local function key(p)
 	return p.x .. ":" .. p.y .. ":" .. p.z
@@ -40,6 +41,9 @@ minetest = {
 		return 1
 	end,
 	is_protected = function() return false end,
+	set_node = function() forbidden_calls.writes = forbidden_calls.writes + 1 end,
+	emerge_area = function() forbidden_calls.emerges = forbidden_calls.emerges + 1 end,
+	find_path = function() forbidden_calls.paths = forbidden_calls.paths + 1 end,
 	get_objects_inside_radius = function(center, radius)
 		last_query_radius = radius
 		local result = {}
@@ -242,4 +246,99 @@ install_air_destinations(layout)
 unloaded = key({x = layout.seller.x, y = layout.seller.y, z = layout.seller.z})
 expect_invalid(layout, nil, "blocked_body")
 
-print("market site layout tests passed")
+-- Search randomness and expiry are injected so the lease tests are repeatable.
+local function options(angle, radius, clock, calls)
+	return {
+		random = function(low, high)
+			if calls then calls.count = calls.count + 1 end
+			if high == 35999 then return angle end
+			if high == 1200 then return radius end
+			error("unexpected random range")
+		end,
+		now = function() return clock.value end,
+	}
+end
+
+local clock = {value = 0}
+reset()
+local first_search = site.begin_search({x = 10, y = 1, z = 10}, "seller-a", options(0, 600, clock))
+local status, first_reservation = site.step_search(first_search)
+assert(status == "found" and first_reservation.owner == "seller-a", "first valid candidate is reserved")
+assert(site.valid(first_reservation.layout, first_reservation), "active reservation revalidates")
+
+-- This trader approaches the same pair from the opposite side. The layouts
+-- have reversed outward directions and identical exclusive/clearance columns.
+local random_calls = {count = 0}
+local opposite = site.begin_search({x = 22, y = 1, z = 10}, "seller-b", options(18000, 600, clock, random_calls))
+for step = 1, 12 do
+	local calls_before = random_calls.count
+	local result = site.step_search(opposite)
+	assert(opposite.sampled <= step * 4, "no step examines more than four horizontal candidates")
+	assert(random_calls.count - calls_before <= 8, "a step generates no more than four horizontal candidates")
+	if step < 12 then assert(result == "pending", "conflicting search remains pending") end
+end
+assert(site.step_search(opposite) == "exhausted", "conflicting opposite-facing stall exhausts at 48")
+assert(opposite.sampled == 48, "search samples no more than 48 horizontal candidates")
+assert(site.release(first_reservation), "release frees the first reservation")
+local after_release = site.begin_search({x = 22, y = 1, z = 10}, "seller-b", options(18000, 600, clock))
+local released_status, released_reservation = site.step_search(after_release)
+assert(released_status == "found", "released space is available")
+assert(site.release(released_reservation), "new reservation releases cleanly")
+
+-- Neighboring stalls share clearance cells, provided no table/seller column
+-- from either stall occupies the other's clearance.
+local shared = site.begin_search({x = 10, y = 1, z = 10}, "seller-shared", options(2665, 670, clock))
+local shared_status, shared_reservation = site.step_search(shared)
+assert(shared_status == "found", "empty overlapping aisles are allowed")
+assert(site.release(shared_reservation), "shared-aisle reservation releases")
+
+-- The same X/Z layout is independent on another floor, including head space.
+reset()
+for x = 0, 25 do
+	for z = 0, 25 do world[key({x = x, y = 2, z = z})] = "test:stone" end
+end
+local upper = site.begin_search({x = 10, y = 3, z = 10}, "upper", options(0, 600, clock))
+local upper_status, upper_reservation = site.step_search(upper)
+assert(upper_status == "found", "separate-floor stall does not conflict")
+assert(site.release(upper_reservation), "upper reservation releases")
+
+-- Stale reservation objects cannot extend or release a replacement lease.
+reset()
+local stale_search = site.begin_search({x = 10, y = 1, z = 10}, "seller", options(0, 600, clock))
+local _, stale = site.step_search(stale_search)
+assert(site.release(stale), "initial lease releases")
+local replacement_search = site.begin_search({x = 10, y = 1, z = 10}, "seller", options(0, 600, clock))
+local _, replacement = site.step_search(replacement_search)
+assert(replacement and replacement ~= stale, "replacement lease has fresh identity")
+assert(not site.release(stale) and not site.renew(stale), "stale token cannot release or renew replacement")
+assert(site.valid(stale.layout, stale) == false, "stale reservation fails arrival validation")
+assert(site.valid(replacement.layout, replacement), "stale operations leave replacement active")
+local wrong_owner = {}
+for key_name, value in pairs(stale) do wrong_owner[key_name] = value end
+wrong_owner.owner, wrong_owner.token = "another-seller", replacement.token
+assert(not site.release(wrong_owner) and not site.renew(wrong_owner),
+	"matching a replacement token with the wrong owner cannot mutate its lease")
+clock.value = 10
+assert(not site.renew(replacement), "lease expires after ten real seconds")
+local expiry_search = site.begin_search({x = 10, y = 1, z = 10}, "after-expiry", options(0, 600, clock))
+local expiry_status, expiry_reservation = site.step_search(expiry_search)
+assert(expiry_status == "found", "expired reservation frees its layout")
+
+-- Arrival performs the same read-only validation against the changed world.
+assert(site.valid(expiry_reservation.layout, expiry_reservation), "arrival is valid before world change")
+world[key(expiry_reservation.layout.frames[1])] = "test:stone"
+expect_invalid(expiry_reservation.layout, expiry_reservation, "destination_not_air")
+assert(site.release(expiry_reservation), "arrival failure can release its lease")
+
+-- The rounded, completed table-pair midpoint must still fit the 4–12 range.
+local edge = site.begin_search({x = 10, y = 1, z = 10}, "edge", options(0, 1200, clock))
+assert(site.step_search(edge) == "pending", "out-of-range rounded midpoint is rejected")
+for _ = 1, 10 do assert(site.step_search(edge) == "pending", "edge samples remain bounded") end
+assert(site.step_search(edge) == "exhausted" and edge.sampled == 48,
+	"rounded midpoint outside twelve nodes never reserves")
+
+-- The site module must only read the map; it never edits, emerges, or routes.
+assert(forbidden_calls.writes == 0 and forbidden_calls.emerges == 0 and forbidden_calls.paths == 0,
+	"search and reservations perform no map writes, emerges, or pathfinding")
+
+print("market site layout and reservation tests passed")
