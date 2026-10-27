@@ -92,13 +92,17 @@ local function time_ticks(world)
 end
 
 local function hold_seller(self, session)
+	if not session.holding_order then
+		session.previous_order = self.order
+		session.holding_order = true
+	end
 	self.order = "stand"
-	if self.state == "gowp" then self.state = "stand" end
+	self.state = "stand"
 	local velocity = self.object and self.object.get_velocity and self.object:get_velocity()
 	if velocity and self.object.set_velocity then
 		self.object:set_velocity({x = 0, y = velocity.y, z = 0})
 	end
-	local outward = session.layout.outward
+	local outward = session.layout and session.layout.outward
 	if outward and self.set_yaw then self:set_yaw(math.atan2(-outward.x, outward.z)) end
 	if self.set_animation then self:set_animation("stand") end
 end
@@ -139,6 +143,7 @@ function M.new(options)
 		cleanup_stall(self, session)
 		if session.reservation then site.release(session.reservation) end
 		if session.id and navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
+		if session.holding_order and self.order == "stand" then self.order = session.previous_order end
 		self._villages_market_session = nil
 		return "browse"
 	end
@@ -160,25 +165,50 @@ function M.new(options)
 		return node.name == "mcl_bells:bell"
 	end
 
+	local function start_market_walk(self, session)
+		local target = standing_position(session.layout.seller)
+		local started = self:gopath(target, function(entity)
+			local route = entity._villages_goto_route
+			if entity._villages_market_session == session and route
+				and route.market_token == session.id then
+				session.callback_arrived = true
+			end
+		end, true, session.id)
+		local route = self._villages_goto_route
+		if not started or not route or route.market_token ~= session.id then return false end
+		session.route_id = route.id
+		session.route_paused = nil
+		return true
+	end
+
 	function api.leave(self, reason)
 		local session = self._villages_market_session
 		if not session then return false end
 		cleanup_stall(self, session)
 		if session.reservation then site.release(session.reservation) end
 		if session.id and navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
+		if session.holding_order and self.order == "stand" then self.order = session.previous_order end
 		self._villages_market_session = nil
 		self._villages_market_attempted = true
 		return true
 	end
 
-	function api.tick(self, bell_session, dtime)
+	function api.tick(self, bell_session, dtime, existing_only)
 		-- Integration calls this before bell.lua's trading early return. Trading is
 		-- passed through here so it can pause the distance-based walk deadline.
 		local session = self._villages_market_session
 		if not session then
+			if existing_only then return "browse" end
 			if self._villages_market_attempted or not bell_session
 				or get_stage(self) ~= "bell" or get_ticks() >= SETUP_CUTOFF then return "browse" end
 			self._villages_market_attempted = true
+			-- A route already in progress belongs to the role or a system that
+			-- began it before this seller session. Do not replace its goto target.
+			local goto_route = self._villages_goto_route
+			if unrelated_route(self) or (goto_route
+				and (goto_route.status == "planning" or goto_route.status == "travelling")) then
+				return "browse"
+			end
 			local eligible = M.eligible(self, {})
 			if not eligible then return "browse" end
 			local center = bell_session.center
@@ -248,28 +278,57 @@ function M.new(options)
 			hold_seller(self, session)
 			return "holding"
 		end
+		if existing_only then
+			-- A queued planner result can start a follower after do_custom returns.
+			-- Invalidate only this market route while a player trades, then plan it
+			-- again from the same reservation when the trade closes.
+			local route = self._villages_goto_route
+			if unrelated_route(self) or (route and route.market_token ~= session.id
+				and (route.status == "planning" or route.status == "travelling")) then
+				return fallback(self, session, "market movement was replaced during trade")
+			end
+			if route and route.market_token == session.id
+				and (route.status == "planning" or route.status == "travelling"
+					or route.status == "trade_paused") then
+				if navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
+				session.route_paused = true
+			end
+			hold_seller(self, session)
+			return "holding"
+		end
 
 		if not session.reservation then
 			if get_ticks() >= SETUP_CUTOFF then return fallback(self, session, "search reached setup cutoff") end
 			local status, reservation = site.step_search(session.search)
-			if status == "pending" then return "holding" end
+			if status == "pending" then
+				hold_seller(self, session)
+				return "holding"
+			end
 			if status == "exhausted" then return fallback(self, session, "no stall site found") end
 			session.reservation = reservation
 			session.layout = reservation.layout
-			local target = standing_position(session.layout.seller)
-			local started = self:gopath(target, function(entity)
-				if entity._villages_market_session == session then session.callback_arrived = true end
-			end, true, session.id)
-			local route = self._villages_goto_route
-			if not started or not route or route.market_token ~= session.id then
+			if not start_market_walk(self, session) then
 				return fallback(self, session, "no route to stall")
 			end
-			session.route_id = route.id
 			return "walking"
 		end
 
 		local route = self._villages_goto_route
+		if route and route.market_token == session.id and route.status == "trade_paused" then
+			if navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
+			session.route_paused = true
+			route = nil
+		end
 		if not route or route.market_token ~= session.id then
+			if session.route_paused and not route and session.reservation then
+				if unrelated_route(self) then
+					return fallback(self, session, "another route took movement ownership")
+				end
+				if not start_market_walk(self, session) then
+					return fallback(self, session, "no route to stall after trade")
+				end
+				return "walking"
+			end
 			-- Another system took movement ownership; its route belongs to it.
 			return fallback(self, session, "market walk was replaced")
 		end

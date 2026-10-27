@@ -116,3 +116,11 @@ The sleeping position, bed
 occupancy, pose, and wake-up behavior are adapted from Mineclonia's `mobs_mc/villager.lua`.
 The villager model and textures come from Mineclonia, and the pulpit texture is a recolored
 VoxeLibre texture.
+# Market days
+
+On holidays, adult villagers gather around the village bell after church. Eligible
+traders open a small stall with two representative profession goods; players can
+trade with them as usual. Other villagers wander and converse around the market.
+Sellers pack their displays before the evening tavern visit. Stalls use ordinary
+tables and invisible item frames, so normal protection, digging, and theft behavior
+still applies.

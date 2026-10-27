@@ -17,7 +17,7 @@ local SEARCH_HEIGHT = 16
 local SEARCH_SECONDS = 5
 -- Villagers drift within this many nodes of the bell, and take a spot at least
 -- SPOT_MIN from it and SPOT_SPACING from each other's.
-local GATHER_RADIUS = 4
+local GATHER_RADIUS = 14
 local SPOT_MIN = 1.5
 local SPOT_SPACING = 1.5
 local SPOT_TRIES = 24
@@ -37,6 +37,8 @@ local UNREACHABLE_SECONDS = 200
 local FIELDS = {"_villages_bell", "_villages_bell_skipped", "_villages_bell_checked", "_villages_wander_anchor"}
 
 local spots = {}
+local market
+local navigation
 
 local function key(pos)
 	return pos.x .. "," .. pos.y .. "," .. pos.z
@@ -128,7 +130,9 @@ local function release_spot(bell)
 end
 
 local function stop_walking(self)
-	common.stop_walk(self)
+	local bell = self._villages_bell
+	if not bell or not bell.walk_token then return end
+	if navigation and navigation.cancel_goto then navigation.cancel_goto(self, bell.walk_token) end
 end
 
 -- The Bell stage for an adult with nothing else holding it.
@@ -138,6 +142,10 @@ end
 
 -- Let the gathering go: free the spot, and stop walking to it or about it.
 local function leave(self)
+	if market and market.leave then market.leave(self, "bell session ended") end
+	-- An abandoned attempt is scoped to this gathering/activation. A later
+	-- holiday bell may give the villager another chance.
+	self._villages_market_attempted = nil
 	local bell = self._villages_bell
 	if bell then
 		release_spot(bell)
@@ -161,7 +169,7 @@ end
 -- Any other non-answer is a failure, and two give the bell up.
 local function start_walk(self, bell, spot)
 	if self.ready_to_path and not self:ready_to_path(true) then return true end
-	if self:gopath(spot, function() end, true) then return true end
+	if self:gopath(spot, function() end, true, bell.walk_token) then return true end
 	bell.failures = (bell.failures or 0) + 1
 	return bell.failures < 2
 end
@@ -177,11 +185,33 @@ end
 -- by day) walks it off on its own errand (#246).
 local function own_walk(self, bell)
 	if bell.arrived then return false end
+	local route = self._villages_goto_route
+	if not route or route.market_token ~= bell.walk_token then return false end
 	local search = self._villages_job_search_route
 	return not (search and search.status == "travelling")
 end
 
-local function join(self, pos, dtime)
+local function competing_route(self, bell)
+	for _, field in ipairs({"_villages_bed_route", "_villages_job_route", "_villages_farm_route",
+		"_villages_fish_route", "_villages_job_search_route", "_villages_tavern_route"}) do
+		local route = self[field]
+		if route and (route.status == "planning" or route.status == "travelling") then return true end
+	end
+	local route = self._villages_goto_route
+	return route and route.market_token ~= bell.walk_token
+		and (route.status == "planning" or route.status == "travelling") or false
+end
+
+local function cancel_bell_walk(self, bell)
+	local route = self._villages_goto_route
+	if not route or route.market_token ~= bell.walk_token then return false end
+	if navigation and navigation.cancel_goto then
+		return navigation.cancel_goto(self, bell.walk_token)
+	end
+	return false
+end
+
+local function join(self, pos, dtime, market_only)
 	local bell = self._villages_bell
 	-- A bell that has been taken down is no longer a place to gather: look for
 	-- another.
@@ -198,17 +228,46 @@ local function join(self, pos, dtime)
 			return
 		end
 		local center = center_of(site)
-		bell = {pos = site, center = center, since = now(), limit = walk_limit(self, center)}
+		bell = {pos = site, center = center, since = now(), limit = walk_limit(self, center),
+			walk_token = "bell:" .. tostring(self._id)}
 		self._villages_bell = bell
 	end
 	local center = bell.center
+	-- Sellers use the same bell lookup/session as browsers, but own their route
+	-- and standing spot. Run this before the browser's trading/route handling so
+	-- its reservation and prop lease keep renewing during an open trade.
+	if market and self._id then
+		local result = market.tick(self, bell, dtime, market_only)
+		if result == "holding" then
+			self._villages_wander_anchor = nil
+			return false
+		elseif result == "walking" then
+			self._villages_wander_anchor = nil
+			if self.state == "gowp" then self.jump = true end
+			return true
+		end
+	end
+	if market_only then
+		-- A queued browser route may finish planning after a trade begins. Keep
+		-- it from starting under the trade; the ordinary tick will submit it again.
+		cancel_bell_walk(self, bell)
+		return
+	end
+	-- The route queue may have completed while the trade was open, or a short
+	-- trade may have ended before another market-only tick could cancel it.
+	local route = self._villages_goto_route
+	if route and route.market_token == bell.walk_token and route.status == "trade_paused" then
+		cancel_bell_walk(self, bell)
+	end
 	if self.state == "gowp" then
 		-- On the way to its spot: keep it held, and let the walk finish.
-		hold_spot(self, bell)
-		if not own_walk(self, bell) then
+		if own_walk(self, bell) then
+			hold_spot(self, bell)
+		elseif not bell.arrived then
 			-- Not timed: its clock stands still while another errand walks it.
 			bell.since = bell.since + dtime
-		elseif now() - bell.since > bell.limit then
+		end
+		if own_walk(self, bell) and now() - bell.since > bell.limit then
 			skip(self, bell.pos, "the walk took too long")
 			leave(self)
 		end
@@ -235,6 +294,13 @@ local function join(self, pos, dtime)
 		skip(self, bell.pos, "the walk took too long")
 		return leave(self)
 	end
+	if competing_route(self, bell) then
+		-- Let job, role and replacement goto routes finish before taking over
+		-- movement. This also keeps a trade-paused bell walk from stealing a
+		-- route that was installed while the trade was open.
+		bell.since = bell.since + dtime
+		return
+	end
 	if not bell.spot then
 		bell.spot = pick_spot(center, self._id)
 		if not bell.spot then
@@ -253,31 +319,50 @@ local function trading(self)
 	return self._trading_players and next(self._trading_players) ~= nil
 end
 
-local function install(def)
+local function install(def, market_controller, navigation_api)
+	market = market_controller
+	navigation = navigation_api
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
 	local original_staticdata = def.get_staticdata
 	local original_die = def.on_die
+	local original_deactivate = def.on_deactivate
 
 	-- The gathering is this session's: a reloaded villager looks for the bell
 	-- again.
 	def.on_activate = function(self, staticdata, dtime)
 		local result = original_activate(self, staticdata, dtime)
+		if market and market.leave then market.leave(self, "activation") end
 		for _, field in ipairs(FIELDS) do self[field] = nil end
+		self._villages_market_session = nil
+		self._villages_market_attempted = nil
 		return result
 	end
 
 	def.get_staticdata = function(self)
 		local kept = {}
 		for _, field in ipairs(FIELDS) do kept[field], self[field] = self[field], nil end
+		local market_session, market_attempted = self._villages_market_session, self._villages_market_attempted
+		local order = self.order
+		self._villages_market_session, self._villages_market_attempted = nil, nil
+		if market_session and market_session.holding_order and order == "stand" then
+			self.order = market_session.previous_order
+		end
 		local saved = original_staticdata(self)
 		for _, field in ipairs(FIELDS) do self[field] = kept[field] end
+		self._villages_market_session, self._villages_market_attempted = market_session, market_attempted
+		self.order = order
 		return saved
 	end
 
 	def.on_die = function(self, pos, cmi_cause)
 		leave(self)
 		return original_die(self, pos, cmi_cause)
+	end
+
+	def.on_deactivate = function(self, removal)
+		leave(self)
+		if original_deactivate then return original_deactivate(self, removal) end
 	end
 
 	def.do_custom = function(self, dtime)
@@ -287,15 +372,22 @@ local function install(def)
 		local result = original_custom(self, dtime)
 		if result == false then return result end
 		if not gathering(self) then return result end
+		local pos = self.object:get_pos()
 		-- Someone is trading with it: vanilla has stopped it, and the time
 		-- spent does not count against its walk.
 		if trading(self) then
+			-- Renew an active seller while trading, but do not start or continue a
+			-- browser route until the trade closes.
+			local handled = pos and join(self, pos, dtime, true)
+			if handled ~= nil then return handled and result or false end
 			local bell = self._villages_bell
 			if bell then bell.since = bell.since + dtime end
 			return result
 		end
-		local pos = self.object:get_pos()
-		if pos then join(self, pos, dtime) end
+		if pos then
+			local handled = join(self, pos, dtime)
+			if handled ~= nil then return handled and result or false end
+		end
 		-- Vanilla's player scan turns jumping off near a player, which would
 		-- leave a villager someone is watching unable to climb a step on its
 		-- way (as at the church, church.lua).

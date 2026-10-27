@@ -695,6 +695,19 @@ local function plan_route_later(self, route_field, route_id, candidates, opts)
 		function(target, path, failure, _, report)
 			local route = current()
 			if not route then return end
+			-- A seller can be traded with while its queued market path is being
+			-- planned. Bell visitors can also be traded with while their bell path
+			-- is queued. Do not start either follower under trade; their owners
+			-- cancel the deferred route and resume it after the trade.
+			local market_session = self._villages_market_session
+			local bell_session = self._villages_bell
+			local owned_gathering_route = (market_session and route.market_token == market_session.id)
+				or (bell_session and route.market_token == bell_session.walk_token)
+			if owned_gathering_route
+				and self._trading_players and next(self._trading_players) then
+				route.status = "trade_paused"
+				return
+			end
 			if target and path then
 				route.status, route.planner = "travelling", report
 				self._villages_far_failed = nil
