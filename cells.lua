@@ -178,15 +178,19 @@ function cells.can_stand(pos)
 		and cells.has_floor(pos)
 end
 
--- Whether a villager can step from the cell `from` to the adjacent cell `to`,
--- both already known to be standable. Only a rise needs more: it is a jump, which
--- swings the head through the column one above the current head, at
--- `from.y + 2`, a cell `can_stand(to)` never looks at. So a low roof over the
--- villager's own side keeps it from jumping even when the taller neighboring room
--- is open (#56).
+-- Whether a villager can step between adjacent standable cells. A rise swings
+-- its head above the departure cell (#56). On a descent, the body remains at
+-- the higher floor's height until it clears the edge. A low ceiling over the
+-- lower cell can stop it before it gets far enough to fall (#280).
 function cells.can_move(from, to)
-	if to.y <= from.y then return true end
-	return cells.is_open({x = from.x, y = from.y + 2, z = from.z}, {door = true})
+	if to.y > from.y then
+		return cells.is_open({x = from.x, y = from.y + 2, z = from.z}, {door = true})
+	end
+	if to.y < from.y then
+		local high = cells.standing_position(from)
+		return cells.has_head_room({x = to.x, y = high.y, z = to.z})
+	end
+	return true
 end
 
 -- Whether every node the standing box at `pos` touches, from layer `bottom` to
