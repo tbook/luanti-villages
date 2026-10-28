@@ -128,6 +128,8 @@ mcl_mobs = {mob_class = {
 }}
 
 dofile("init.lua")
+assert(entity_def.initial_properties.collisionbox[5] == 1.92,
+	"new villagers use the adjusted box that clears carpet under a 2-node ceiling")
 
 local function make_villager(id, is_child, start_pos)
 	local props = {mesh = "old.b3d", textures = {"old.png"}}
@@ -166,7 +168,7 @@ assert(alice_props.textures[1]:find("profession_weaponsmith", 1, true))
 assert(alice_props.textures[1]:find("badge_iron", 1, true))
 assert(alice_props.collisionbox[5] == 0.3)
 local saved = entity_def.get_staticdata(alice)
-assert(saved.collisionbox[5] == 1.94)
+assert(saved.collisionbox[5] == 1.92)
 assert(saved.animation.stand_start == 1)
 assert(saved.head_swivel == "head.control")
 assert(not saved._villages_sleeping)
@@ -252,7 +254,7 @@ time = 0.5
 entity_def.do_custom(alice, 1)
 assert(not alice._villages_sleeping)
 assert(alice.last_animation == "stand")
-assert(alice_props.collisionbox[5] == 1.94)
+assert(alice_props.collisionbox[5] == 1.92)
 local alice_pos = alice.object:get_pos()
 assert(alice_pos.x == 1 and alice_pos.y == 0 and alice_pos.z == 0,
 	"waking must return a villager to its pre-sleep standing position")
@@ -266,15 +268,17 @@ metadata[key(top)].player = ""
 
 time = 0.9
 local child, child_props = make_villager("alice", true)
+child.base_colbox = {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3} -- saved before #311
 objects = {child.object}
 entity_def.on_activate(child, "", 0)
 assert(child._villages_sleeping)
+assert(child.base_colbox[5] == 1.92, "activation updates an older saved adult box before child scaling")
 assert(child_props.collisionbox[5] == 0.15)
 
 nodes[key(bed)] = {name = "air", param2 = 0}
 entity_def.do_custom(child, 1)
 assert(not child._villages_sleeping, "removing the bed must wake its occupant")
-assert(child_props.collisionbox[5] == 0.97)
+assert(child_props.collisionbox[5] == 0.96)
 
 -- A growing child (#177): the engine keeps visual_size as float32, so a scale
 -- like 0.64 reads back as 0.63999999. refresh_visual must not resend

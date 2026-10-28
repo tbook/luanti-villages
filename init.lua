@@ -280,6 +280,12 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("living_villages") .. "/nitwit.lua")(def)
 
 	local original_box = table.copy(def.initial_properties.collisionbox)
+	-- A villager on carpet stands 1/16 node higher. The vanilla 1.94 top
+	-- then clips a 2-node doorway ceiling by 1/80 node, trapping it inside
+	-- the doorway (#311). Leave enough clearance for carpet while keeping
+	-- the model and its horizontal collision footprint intact.
+	original_box[5] = math.min(original_box[5], 1.92)
+	def.initial_properties.collisionbox = table.copy(original_box)
 	local original_anim = table.copy(def.animation)
 	local original_child_anim = table.copy(def._child_animations)
 	local original_head_swivel = def.head_swivel
@@ -461,6 +467,11 @@ core.register_on_mods_loaded(function()
 			or table.copy(def.animation)
 		self.head_swivel = def.head_swivel
 		self.head_bone_position = def.head_bone_position
+		-- mcl_mobs keeps the adult source box in base_colbox and halves it for
+		-- children. Older saved villagers still carry the vanilla 1.94 top;
+		-- sync that source box too so later growth does not restore it (#311).
+		self.base_colbox = table.copy(self.base_colbox or original_box)
+		self.base_colbox[5] = math.min(self.base_colbox[5], original_box[5])
 		self.collisionbox = normal_box(self, original_box)
 		self.object:set_properties({collisionbox = self.collisionbox})
 		refresh_visual(self)

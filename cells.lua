@@ -2,7 +2,7 @@
 -- (#161). Before this there were three: core.find_path's one-block walker,
 -- navigation.lua's planner checks and common.lua's wander checks, and they
 -- disagreed. This module classifies a cell from the real node definitions, for
--- mobs_mc/villager.lua's body (collisionbox 0.6 wide, 1.95 tall); no side effects.
+-- mobs_mc:villager's adjusted body (collisionbox 0.6 wide, 1.93 tall); no side effects.
 --
 -- The planner (through navigation.lua), wander.lua, seat.lua and church.lua reach
 -- it through common.lua, and fisherman.lua and diagnostic.lua call it directly.
@@ -10,13 +10,13 @@ local core = minetest
 
 local cells = {}
 
--- mobs_mc/villager.lua's collisionbox: {-0.3, -0.01, -0.3, 0.3, 1.94, 0.3}.
+-- living_villages adjusts the top of mobs_mc:villager's box to 1.92 (#311).
 local HALF_WIDTH = 0.3
 local HEIGHT_NODES = 2
 local EDGE = 0.001
--- The collisionbox's vertical extent from the entity position: {..., -0.01, ..., 1.94, ...}.
+-- The collisionbox's vertical extent from the entity position: {..., -0.01, ..., 1.92, ...}.
 local BODY_BOTTOM = -0.01
-local BODY_TOP = 1.94
+local BODY_TOP = 1.92
 -- A box this close to the feet or less above them is what the villager stands
 -- on, not something in its way; a head overlap smaller than the tolerance is a touch.
 local FLOOR_SLOP = 0.1
