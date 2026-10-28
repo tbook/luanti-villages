@@ -222,9 +222,27 @@ world = {}
 put(0, 0, 0, "mcl_core:stone"); put(1, 1, 0, "mcl_core:stone")
 local from, to = {x = 0, y = 1, z = 0}, {x = 1, y = 2, z = 0}
 assert(cells.can_move(from, to), "open above")
+assert(cells.can_move(to, from), "open descent")
 put(0, 3, 0, "mcl_core:stone")
 assert(not cells.can_move(from, to), "a low roof stops the jump")
-assert(cells.can_move(to, from), "a drop needs no headroom")
+assert(not cells.can_move(to, from), "a low roof stops the descent while still high")
+
+-- A stair in the upper cell beside a lower church floor (#280): the lower
+-- cell is standable, but its ceiling catches the head before the feet leave
+-- the stair. The planner must take the open side of the stair instead.
+world = {}
+for x = -1, 0 do for z = 0, 1 do put(x, 0, z, "mcl_core:stone") end end
+put(0, 1, 0, "mcl_stairs:stair_cobble")
+put(0, 3, 1, "mcl_core:stone")
+local stair = {x = 0, y = 2, z = 0}
+local lower = {x = 0, y = 1, z = 1}
+assert(cells.can_stand(stair) and cells.can_stand(lower), "both endpoints are standable")
+assert(not cells.can_move(stair, lower), "the direct step under the ceiling is blocked")
+local around = planner.find_path(stair, cells.can_stand,
+	function(pos) return pos.x == lower.x and pos.y == lower.y and pos.z == lower.z end,
+	{range = 3, clear = cells.can_move})
+assert(around and #around > 2, "the route uses the open side of the stair")
+assert(around[2].x == -1 and around[2].z == 0, "the first step avoids the low ceiling")
 
 -- The standing box reaches into the next column when the villager is off center.
 world = {}; put(0, 0, 0, "mcl_core:stone"); put(1, 1, 0, "mcl_core:stone")
