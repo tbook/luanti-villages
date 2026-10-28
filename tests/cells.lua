@@ -232,8 +232,8 @@ assert(cells.has_standing_space({x = 0, y = 1, z = 0}), "centered")
 assert(not cells.has_standing_space({x = 0.45, y = 1, z = 0}), "box reaches into the wall")
 
 -- Head room over a bed top (#191): the bed's collision tops out at 0.0625 over
--- its node's centre, so a villager on it has its head 0.0125 into a top-half
--- slab two nodes up; a full node over the feet cell blocks it as well.
+-- its node's centre, so a villager on it clears a top-half slab two nodes up;
+-- a full node over the feet cell blocks it as well.
 defs["mcl_beds:bed_red_bottom"] = {walkable = true, collision_box = box(0.06)}
 defs["mcl_stairs:slab_wood_top"] = {
 	walkable = true, drawtype = "nodebox", node_box = {type = "fixed", fixed = {-0.5, 0, -0.5, 0.5, 0.5, 0.5}},
@@ -243,7 +243,7 @@ put(0, 0, 0, "mcl_core:stone"); put(0, 1, 0, "mcl_beds:bed_red_bottom")
 local on_bed = {x = 0, y = 1.0725, z = 0}
 assert(cells.has_head_room(on_bed), "open air over a bed")
 put(0, 3, 0, "mcl_stairs:slab_wood_top")
-assert(not cells.has_head_room(on_bed), "a top slab two nodes above the bed is in the villager's head")
+assert(cells.has_head_room(on_bed), "the top slab clears the adjusted collision box")
 put(2, 0, 0, "mcl_core:stone"); put(2, 3, 0, "mcl_stairs:slab_wood_top")
 assert(cells.has_head_room({x = 2, y = 0.51, z = 0}), "the same ceiling clears a villager on the floor")
 put(0, 3, 0, "air"); put(0, 4, 0, "mcl_stairs:slab_wood_top")
@@ -252,7 +252,7 @@ put(0, 3, 0, "mcl_core:stone")
 assert(not cells.has_head_room(on_bed), "a full node above blocks")
 put(0, 3, 0, "air")
 -- Off centre, the box reaches into the next column.
-put(1, 3, 0, "mcl_stairs:slab_wood_top"); put(0, 4, 0, "air")
+put(1, 3, 0, "mcl_core:stone"); put(0, 4, 0, "air")
 assert(not cells.has_head_room({x = 0.3, y = 1.0725, z = 0}), "the box reaches under the neighbouring ceiling")
 assert(cells.has_head_room({x = 0.1, y = 1.0725, z = 0}), "but not from the middle of the cell")
 

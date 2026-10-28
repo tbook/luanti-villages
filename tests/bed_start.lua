@@ -1,10 +1,7 @@
 -- Run with: lua tests/bed_start.lua
--- A villager standing on a bed top walks out of the room (#191). In the stock
--- large house the bed sits under a top-half slab ceiling 1.9375 above the
--- bed's top, and the villager is 1.95 tall: on the bed it does not fit, so it
--- cannot walk and every route from there ended 'no progress along the route'.
--- Such a villager is set down on the planner's start cell before the walk; one
--- that fits (the small house) walks off the bed as before.
+-- A villager standing on a bed top walks out of the room (#191). The adjusted
+-- collision box (#311) fits under the large house's top-half slab ceiling, so
+-- it can walk off the bed without being set down. The small house still works.
 local scene = dofile("tests/support/stock_scene.lua")
 
 local BED_TOP = 0.0625
@@ -54,25 +51,14 @@ local function leave(name, rotation, doors_open, offset, mutate)
 	return results, world
 end
 
--- Large house: the slab ceiling is too low for the villager on the bed.
+-- Large house: the adjusted collision box clears the slab ceiling.
 for rotation = 0, 3 do
-	local results, world = leave("large_house", rotation, true)
+	local results = leave("large_house", rotation, true)
 	assert(#results == 4, "the large house has two beds, one above the other")
 	for _, r in ipairs(results) do
-		if r.bed.y > 3 then
-			-- The upstairs bed has the roof well above it and needs no help.
-			assert(#r.placed == 0, "a villager that fits on its bed is not moved")
-		else
-			assert(#r.placed == 1, ("large house r%d bed %s: villager must be set down off the bed, was set %d times")
-				:format(rotation * 90, r.half, #r.placed))
-			local p = r.placed[1]
-			local cx, cz = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
-			-- On the floor beside the bed: not on a bed, and below the bed's top.
-			local node = world.get({x = cx, y = r.bed.y, z = cz}).name
-			assert(not node:find("bed"), "set down on a bed: " .. node)
-			assert(p.y < r.bed.y, "set down at the floor, not on the bed top: y " .. p.y)
-			assert(r.entity.current_target and r.entity.waypoints, "a walk follows")
-		end
+		assert(#r.placed == 0, ("large house r%d bed %s: a villager that clears the ceiling is not moved")
+			:format(rotation * 90, r.half))
+		assert(r.entity.current_target and r.entity.waypoints, "a walk follows from the bed")
 	end
 end
 
@@ -83,13 +69,23 @@ for rotation = 0, 3 do
 	end
 end
 
--- At the edge of the bed top rather than its centre, shut doors included.
+-- Near the edge of the bed top, the reduced collision height can clear the
+-- slab from one side; if the body still reaches a neighboring ceiling, any
+-- set-down must remain safe.
 for rotation = 0, 3 do
 	for _, offset in ipairs({-0.25, 0.25}) do
-		for _, r in ipairs(leave("large_house", rotation, false, offset)) do
+		local results, world = leave("large_house", rotation, false, offset)
+		for _, r in ipairs(results) do
 			if r.bed.y <= 3 then
-				assert(#r.placed == 1, ("large house r%d offset %.2f: villager at the bed's edge must be set down")
-					:format(rotation * 90, offset))
+				if #r.placed == 0 then
+					assert(r.entity.current_target and r.entity.waypoints, "a walk follows from the bed edge")
+				else
+					assert(#r.placed == 1, "a cramped villager is set down only once")
+					local p = r.placed[1]
+					local cx, cz = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
+					assert(not world.get({x = cx, y = r.bed.y, z = cz}).name:find("bed"), "set down on a bed")
+					assert(p.y < r.bed.y, "set down at floor height")
+				end
 			end
 		end
 	end
@@ -98,6 +94,14 @@ end
 -- Only a diagonal cell is open, across a corner: the villager is not carried
 -- through the wall corner but left where it is.
 local function wall_in(world)
+	local roofed = false
+	for x = 30, 42 do for y = 1, 3 do for z = 30, 42 do
+		if not roofed and world.get({x = x, y = y, z = z}).name == "mcl_beds:bed_red_bottom" then
+			world.set({x = x, y = y + 2, z = z}, "mcl_core:stone")
+			roofed = true
+		end
+	end end end
+	assert(roofed, "the lower bed has a low full-block ceiling")
 	for x = 37, 38 do
 		for z = 37, 38 do
 			if not (x == 37 and z == 37) and world.get({x = x, y = 2, z = z}).name:find("carpet") then
