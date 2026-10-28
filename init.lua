@@ -589,7 +589,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("living_villages") .. "/conversation.lua").install(def)
 	-- Outermost, so it sees "walk" after everything else has had its say.
 	dofile(core.get_modpath("living_villages") .. "/wander.lua")(def)
-	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def, flock)
+	dofile(core.get_modpath("living_villages") .. "/diagnostic.lua")(def, flock, navigation_api)
 	dofile(core.get_modpath("living_villages") .. "/paths.lua").install(def, path_storage)
 	dofile(core.get_modpath("living_villages") .. "/floor_guard.lua")(def)
 end)

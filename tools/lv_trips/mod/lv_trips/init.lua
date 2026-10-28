@@ -26,6 +26,7 @@
 local core = minetest
 local modpath = core.get_modpath("lv_trips")
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
+local search_claim_fixture = dofile(modpath .. "/search_claim_fixture.lua")
 
 local settings = core.settings
 local function setting(name, default)
@@ -737,6 +738,7 @@ local function run_jump(list)
 	log(string.format("jump %s -> %s at t=0 (villagers=%d far=%s lag=%s)", from.name, to.name, #list, tostring(FAR.secs), tostring(lag)))
 	local began, last_logged, lagged = elapsed_real, -1, false
 	max_dtime = 0
+	local claim_fixture_done = false
 	while elapsed_real - began < WATCH do
 		coroutine.yield()
 		local t = elapsed_real - began
@@ -747,6 +749,42 @@ local function run_jump(list)
 		end
 		local logging = elapsed_real - last_logged >= 1
 		if logging then last_logged = elapsed_real end
+		-- Optional race fixture: claim a search's current, still-free candidate on this
+		-- disposable clone while at least two unemployed villagers have pending searches.
+		-- This deliberately edits only the probe clone and is disabled by default.
+		if not claim_fixture_done and setting("claim_search_candidate", "0") == "1" then
+			local pending_searches = 0
+			for _, v in ipairs(list) do
+				local search = v._villages_job_search_diagnostics
+				local route = v._villages_job_search_route
+				if search_claim_fixture.is_pending(search, route) then
+					pending_searches = pending_searches + 1
+				end
+			end
+			if search_claim_fixture.has_competitors(pending_searches) then
+				for _, v in ipairs(list) do
+					local search = v._villages_job_search_diagnostics
+					local route = v._villages_job_search_route
+					local candidate = search and search.current_candidate
+					if candidate and route and search.route_id == route.id and route.status == "planning" then
+						local meta = core.get_meta(candidate)
+						if meta:get_string("villager") == "" then
+							for _, claimant in ipairs(list) do
+								if claimant ~= v and not claimant.child and claimant._profession == "unemployed" and claimant._id then
+								meta:set_string("villager", tostring(claimant._id))
+								claim_fixture_done = true
+								core.log("action", string.format("[lv_trips] claim-fixture synthetic clone-only station=%s claimant=%s searcher=%s route=%s job=%s pending_searches=%d",
+									core.pos_to_string(candidate, 1), tostring(claimant._id), villager_id(v),
+									tostring(search.route_id), tostring(search.job_id), pending_searches))
+									break
+								end
+							end
+						end
+					end
+					if claim_fixture_done then break end
+				end
+			end
+		end
 		for id, st in pairs(states) do
 			local v = st.entity
 			local pos = v.object:get_pos()
@@ -765,12 +803,24 @@ local function run_jump(list)
 				end
 				if not st.first_move and vector.distance(pos, st.start) >= 1 then st.first_move = t end
 				if logging then
-					core.log("action", string.format("[lv_trips] jump t=%.1f id=%s pos=(%.1f,%.1f,%.1f) state=%s order=%s route=%s follow=%s wp=%s left=%d door=%s",
+					local search = v._villages_job_search_diagnostics
+					local active_search = search and v._villages_job_search_route
+						and search.route_id == v._villages_job_search_route.id
+					local current = active_search and search.current_candidate
+					local candidate_owner = current and core.get_meta(current):get_string("villager") or "-"
+					local search_note = search and string.format("%s/%s/%s/%s/r%d/c%dof%d/n%d/pending_sample=%s/current=%s",
+						active_search and "current" or "retained", tostring(search.route_id),
+						tostring(search.job_id or "none"), tostring(search.state),
+						search.resumes or 0, search.examined or 0, search.total or 0, search.nodes_searched or 0,
+						tostring(search.pending or "unknown"),
+						current and (core.pos_to_string(current, 1) .. "/owner=" .. candidate_owner) or "-")
+						or "-"
+					core.log("action", string.format("[lv_trips] jump t=%.1f id=%s pos=(%.1f,%.1f,%.1f) state=%s order=%s route=%s follow=%s wp=%s left=%d door=%s job_search=%s",
 						t, id, pos.x, pos.y, pos.z, tostring(v.state), tostring(v.order),
 						route and (route.status .. "/" .. tostring(route.reason)) or (planning and "planning" or "-"),
 						tostring(v._villages_follow ~= nil),
 						v.current_target and v.current_target.pos and core.pos_to_string(v.current_target.pos, 1) or "-",
-						v.waypoints and #v.waypoints or 0, door_note(pos)))
+						v.waypoints and #v.waypoints or 0, door_note(pos), search_note))
 				end
 			end
 		end

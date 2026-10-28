@@ -1,10 +1,12 @@
 local settings = {}
 local logged = {}
 local steps = {}
+local game_now = 0
 minetest = {
 	settings = {get = function(_, name) return settings[name] end},
 	register_globalstep = function(callback) table.insert(steps, callback) end,
 	log = function(_, message) table.insert(logged, message) end,
+	get_gametime = function() return game_now end,
 }
 local queue = dofile("route_queue.lua")
 local planner = dofile("planner.lua")
@@ -47,6 +49,27 @@ assert(#order == 3)
 assert(step_count > 10, "long jobs span many steps")
 assert(queue.stats.max_step_ms <= 5)
 
+-- Search inspection is identity-scoped, read-only and reports queue lifecycle.
+local progress_job = queue.submit(job("progress", 5), function() end)
+local queued = queue.inspect(progress_job)
+assert(queued.state == "waiting" and queued.live and queued.resumes == 0)
+queue.step(0.001)
+local yielded = queue.inspect(progress_job)
+assert(yielded.id == queued.id and yielded.state == "yielded" and yielded.live and yielded.resumes == 1)
+local pending_before_inspect = queue.pending()
+local second_read = queue.inspect(progress_job)
+assert(second_read.resumes == yielded.resumes and second_read.state == yielded.state
+	and queue.pending() == pending_before_inspect, "inspection does not advance or alter a search")
+assert(queue.drain())
+local completed = queue.inspect(progress_job)
+assert(completed.state == "completed" and not completed.live and completed.resumes > 1)
+assert(queue.diagnostics().completed_last_minute > 0)
+for _ = 1, 200 do queue.submit(function() return true end, function() end) end
+assert(queue.drain())
+assert(queue.diagnostics().completed_last_minute >= 200, "recent throughput keeps counts above 128")
+game_now = 60
+assert(queue.diagnostics().completed_last_minute == 0, "throughput expires outside the 60 game-second window")
+
 -- The budget is a setting.
 settings.living_villages_route_budget_ms = "10"
 local done = false
@@ -66,10 +89,18 @@ assert(not ran and not finished_any)
 
 -- An error is logged and reported, and does not stop other jobs.
 local err, other = nil, false
-queue.submit(function() error("boom") end, function() end, {on_error = function(m) err = m end})
+local failed_job = queue.submit(function() error("boom") end, function() end, {on_error = function(m) err = m end})
 queue.submit(function() return 1 end, function() other = true end)
 assert(queue.drain())
 assert(err and err:find("boom") and other and logged[#logged]:find("route job failed"))
+assert(queue.inspect(failed_job).state == "failed" and queue.inspect(failed_job).error:find("boom"))
+
+local canceled_job = queue.submit(function() error("canceled job ran") end, function() end)
+local before_cancel = queue.pending()
+assert(queue.cancel(canceled_job.id))
+assert(queue.pending() == before_cancel, "marking cancellation leaves the queue order and backlog intact")
+assert(queue.inspect(canceled_job).state == "canceled" and not queue.inspect(canceled_job).live)
+assert(not queue.cancel(canceled_job.id), "terminal jobs stay terminal")
 
 -- The planner pauses a search through the queue and gets the same answer.
 local function can_stand(pos) return pos.y == 1 and pos.x >= 0 and pos.x <= 400 and pos.z == 0 end

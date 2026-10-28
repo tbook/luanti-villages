@@ -240,6 +240,15 @@ local function stop(self)
 end
 
 local function set_route(self, route_field, route)
+	local previous = self[route_field]
+	if route_field == "_villages_job_search_route" and previous and previous.id then
+		local search = self._villages_job_search_diagnostics
+		if search and search.route_id == previous.id
+			and (search.state == "waiting" or search.state == "yielded" or search.state == "running") then
+			route_queue.cancel(search.job_id)
+			search.state = "superseded"
+		end
+	end
 	self._villages_route_id = (self._villages_route_id or 0) + 1
 	route.id = self._villages_route_id
 	local pos = self.object:get_pos()
@@ -252,6 +261,14 @@ end
 
 local function cancel_route(self, route_field)
 	local route = self[route_field]
+	if route_field == "_villages_job_search_route" and route then
+		local search = self._villages_job_search_diagnostics
+		if search and search.route_id == route.id
+			and (search.state == "waiting" or search.state == "yielded" or search.state == "running") then
+			route_queue.cancel(search.job_id)
+			search.state = "canceled"
+		end
+	end
 	self[route_field] = nil
 	local follow = self._villages_follow
 	local owns_follow = route and follow and follow.route_field == route_field and follow.route_id == route.id
@@ -334,7 +351,7 @@ end
 
 -- `avoid` lists positions (a villager that was in the way) whose cells the
 -- route may not use.
-local function plan_stair_route(self, candidates, avoid)
+local function plan_stair_route(self, candidates, avoid, on_progress)
 	local start = self.object:get_pos()
 	start = start and nearest_walk_position(start)
 	if not start then return nil, nil, "stair planner found no nearby walk position" end
@@ -385,6 +402,7 @@ local function plan_stair_route(self, candidates, avoid)
 		range = range,
 		max_nodes = nodes_for_reach(nearest_reach),
 		checkpoint = route_queue.checkpoint,
+		progress = on_progress,
 		heuristic = distance_to_target,
 		distance = distance_to_target,
 		clear = cells.can_move,
@@ -395,6 +413,7 @@ local function plan_stair_route(self, candidates, avoid)
 			return door_crossing(door, from_pos, to_pos) ~= false
 		end,
 	})
+	if on_progress then on_progress(visited) end
 	local report = {
 		start = vector.new(start), candidates = {}, status = status, searched = visited, reach = nearest_reach,
 		closest = details and details.closest and vector.new(details.closest) or nil,
@@ -434,7 +453,7 @@ end
 
 -- Do not claim here: native get_a_job still finds this station within one
 -- block and invokes its own employ function after the villager arrives.
-local function job_search_target(self)
+local function job_search_target(self, progress)
 	if self._jobsite or not self._id then return end
 	local pos = self.object:get_pos()
 	if not pos then return end
@@ -442,21 +461,37 @@ local function job_search_target(self)
 	local minp = {x = pos.x - range, y = pos.y - range, z = pos.z - range}
 	local maxp = {x = pos.x + range, y = pos.y + range, z = pos.z + range}
 	local sites = core.find_nodes_in_area(minp, maxp, common.workstation_search_nodes())
+	if progress then progress.total = #sites end
 	local profession = has_traded(self) and self._profession or nil
 	local best
-	for _, site in ipairs(sites) do
+	for index, site in ipairs(sites) do
 		route_queue.checkpoint()
+		if progress then progress.current_candidate = vector.new(site) end
+		if progress then progress.pending = route_queue.pending() end
 		local node = core.get_node_or_nil(site)
 		if node and core.get_meta(site):get_string("villager") == ""
 			and (not profession or common.workstation_profession(node.name) == profession) then
 			-- Native employ uses find_node_near(..., 1, ...); a diagonal
 			-- destination is not close enough to complete the native claim.
 			local candidates = approaches(site, true)
-			local stair_target, stair_path, _, stair_cost = plan_stair_route(self, candidates)
+			local node_base = progress and progress.nodes_searched or 0
+			local stair_target, stair_path, _, stair_cost = plan_stair_route(self, candidates, nil, function(nodes)
+				if progress then
+					progress.nodes_searched = node_base + nodes
+					progress.last_progress_at = core.get_gametime()
+					progress.pending = route_queue.pending()
+				end
+			end)
 			if stair_target and stair_path and better_jobsite(pos, site, stair_cost, best) then
 				best = {site = site, candidates = candidates, target = stair_target,
 					planner_path = stair_path, cost = stair_cost}
 			end
+		end
+		if progress then
+			progress.examined = index
+			progress.current_candidate = nil
+			progress.last_progress_at = core.get_gametime()
+			progress.pending = route_queue.pending()
 		end
 	end
 	return best
@@ -754,7 +789,16 @@ local ROUTE_FIELDS = {
 local function supersede_planning(self, route_field)
 	for _, field in ipairs(ROUTE_FIELDS) do
 		local route = self[field]
-		if field ~= route_field and route and route.status == "planning" then self[field] = nil end
+		if field ~= route_field and route and route.status == "planning" then
+			if field == "_villages_job_search_route" then
+				local search = self._villages_job_search_diagnostics
+				if search and search.route_id == route.id then
+					route_queue.cancel(search.job_id)
+					search.state = "superseded"
+				end
+			end
+			self[field] = nil
+		end
 	end
 end
 
@@ -838,6 +882,7 @@ local TRIP_FIELDS = {
 	"_villages_farm_target", "_villages_fish_target", "_villages_door_entry",
 	"_villages_follow", "_villages_follow_failed", "_villages_promotion_station",
 	"_villages_promotion_reached", "_villages_promotion_pending",
+	"_villages_job_search_diagnostics",
 }
 
 local function install(def)
@@ -893,6 +938,7 @@ local function install(def)
 		self._villages_promotion_station = nil
 		self._villages_promotion_reached = nil
 		self._villages_promotion_pending = nil
+		self._villages_job_search_diagnostics = nil
 		if had_managed_route then stop(self) end
 		return result
 	end
@@ -1016,12 +1062,18 @@ local function install(def)
 					local searching = set_route(self, "_villages_job_search_route", {
 						status = "planning", target = vector.new(target),
 					})
+					local search = {
+						route_id = searching.id, state = "waiting", submitted_at = core.get_gametime(),
+						examined = 0, total = 0, nodes_searched = 0,
+					}
+					self._villages_job_search_diagnostics = search
 					local function current()
 						local active = self._villages_job_search_route
 						return active and active.status == "planning" and active.id == searching.id
 					end
 					stop(self)
-					route_queue.submit(function() return job_search_target(self) or false end, function(found)
+					route_queue.submit(function() return job_search_target(self, search) or false end, function(found)
+						search.state, search.finished_at = "completed", core.get_gametime()
 						if not current() then return end
 						self._villages_job_search_route = nil
 						job_selections[self] = {found = found or nil}
@@ -1029,9 +1081,17 @@ local function install(def)
 					end, {
 						valid = function() return current() and self.object:get_pos() ~= nil end,
 						on_error = function(message)
+							search.state, search.finished_at, search.error = "failed", core.get_gametime(), tostring(message)
 							if current() then
 								fail(self, "_villages_job_search_route", "workstation search failed: " .. tostring(message), target)
 							end
+						end,
+						on_state = function(state, job)
+							search.job_id = job.id
+							search.state, search.resumes = state, job.resumes
+							search.last_resume_at = job.last_resume_at
+							search.finished_at, search.error = job.finished_at, job.error
+							search.pending = route_queue.pending()
 						end,
 					})
 					return true
@@ -1256,4 +1316,28 @@ return install, {
 	nodes_for_reach = nodes_for_reach,
 	backoff_seconds = backoff_seconds,
 	cancel_goto = cancel_goto,
+	job_search_diagnostics = function(entity, route)
+		if not route or not route.id then return nil end
+		local record = entity._villages_job_search_diagnostics
+		local queue_stats = route_queue.diagnostics()
+		if not record or record.route_id ~= route.id then
+			return {route_id = route.id, state = "no matching telemetry", job_state = "no matching queue job", live = false,
+				pending = queue_stats.pending, completed_last_minute = queue_stats.completed_last_minute}
+		end
+		local job = route_queue.inspect_id(record.job_id)
+		return {
+			route_id = record.route_id, job_id = record.job_id or (job and job.id),
+			state = record.state,
+			job_state = (record.state == "superseded" or record.state == "canceled") and record.state
+				or job and job.state or record.state or "no matching queue job",
+			live = job and job.live or false,
+			submitted_at = record.submitted_at, last_progress_at = record.last_progress_at,
+			last_resume_at = (job and job.last_resume_at) or record.last_resume_at,
+			resumes = (job and job.resumes) or record.resumes or 0,
+			examined = record.examined, total = record.total, current_candidate = record.current_candidate,
+			nodes_searched = record.nodes_searched,
+				finished_at = record.finished_at, error = record.error, pending = queue_stats.pending,
+				completed_last_minute = queue_stats.completed_last_minute,
+		}
+	end,
 }

@@ -11,6 +11,7 @@ local jobsite_present = true
 local nearby_objects = {}
 local search_sites = {}
 local job_search_scans = 0
+local job_search_error
 local jobsite_claimed = true
 local globalstep = nil
 local all_steps = {}
@@ -99,6 +100,7 @@ minetest = {
 			return bounded
 		end
 		job_search_scans = job_search_scans + 1
+		if job_search_error then error(job_search_error) end
 		return search_sites
 	end,
 	get_item_group = function(name, group)
@@ -1471,8 +1473,10 @@ staticdata_def.get_staticdata(standing)
 assert(standing.state == "stand", "other states are mcl_mobs' own to reset")
 
 local travelling = {
+	object = {set_velocity = function() end},
 	_villages_bed_route = {status = "travelling", callback = function() end},
 	_villages_fish_target = {x = 1, y = 0, z = 1},
+	_villages_job_search_diagnostics = {route_id = 12, job_id = 8, state = "yielded"},
 	_id = "zoe",
 }
 assert(staticdata_def.get_staticdata(travelling) == "saved")
@@ -1481,8 +1485,14 @@ assert(not saved_fields._villages_bed_route,
 	"a route (and the live callback it holds) must not be written to staticdata")
 assert(not saved_fields._villages_fish_target,
 	"a trip target must not be written to staticdata")
+assert(not saved_fields._villages_job_search_diagnostics
+	and travelling._villages_job_search_diagnostics.job_id == 8,
+	"workstation diagnostics stay live but are omitted from staticdata")
 assert(travelling._villages_bed_route and travelling._villages_fish_target,
 	"the live villager must keep its trip state across a save")
+staticdata_def.on_activate(travelling, "", 0)
+assert(not travelling._villages_job_search_diagnostics,
+	"workstation diagnostics are discarded on activation")
 
 -- Review of #162: polling, superseded detours and holding a waiting villager.
 do
@@ -1729,10 +1739,72 @@ do
 	local seeker = new_entity()
 	timeofday = 0.3
 	assert(planner_def.gopath(seeker, {x = 20, y = 0, z = 0}, nil, true))
+	do
+	local search_route = seeker._villages_job_search_route
+	local first_search_read = navigation_api.job_search_diagnostics(seeker, search_route)
+	local second_search_read = navigation_api.job_search_diagnostics(seeker, search_route)
+	assert(first_search_read.route_id == search_route.id and first_search_read.live
+		and first_search_read.job_id and first_search_read.job_state == "waiting")
+	assert(first_search_read.resumes == second_search_read.resumes
+		and search_route.status == "planning", "diagnostic inspection leaves the queued search untouched")
 	settle()
 	assert(seeker._villages_job_search_route.status == "travelling" and seeker.state == "gowp")
+	local finished_search = navigation_api.job_search_diagnostics(seeker, search_route)
+	assert(finished_search.route_id == search_route.id and finished_search.job_state == "completed"
+		and not finished_search.live and finished_search.examined == #search_sites
+		and finished_search.nodes_searched > 0, "the route keeps its completed search account")
+	local orphan = navigation_api.job_search_diagnostics(new_entity(), {status = "planning", id = 9001})
+	assert(orphan.state == "no matching telemetry" and not orphan.live,
+		"a planning route without matching history does not inherit another search")
+	end
 	timeofday = 0.8
 	search_sites = {}
+
+	-- The work-to-home transition cancels this exact pending job and retains its identity as
+	-- canceled, without attaching it to a later route.
+	search_sites = {{x = 20, y = 0, z = 0}}
+	do
+	local canceled_seeker = new_entity()
+	timeofday = 0.3
+	assert(planner_def.gopath(canceled_seeker, {x = 20, y = 0, z = 0}, nil, true))
+	local canceled_route = canceled_seeker._villages_job_search_route
+	timeofday = 0.8
+	planner_def.do_custom(canceled_seeker, 0.1)
+	local canceled_search = navigation_api.job_search_diagnostics(canceled_seeker, canceled_route)
+	assert(canceled_search.route_id == canceled_route.id and canceled_search.job_state == "canceled"
+		and not canceled_search.live, "stage cleanup cancels the route's own queue job")
+	end
+	search_sites = {}
+
+	-- Queue errors are retained against the failed route after it becomes retry.
+	do
+		job_search_error = "test workstation scan error"
+		local broken = new_entity()
+		timeofday = 0.3
+		assert(planner_def.gopath(broken, {x = 20, y = 0, z = 0}, nil, true))
+		local failed_route = broken._villages_job_search_route
+		settle()
+		local failed_search = navigation_api.job_search_diagnostics(broken, failed_route)
+		assert(broken._villages_job_search_route.status == "retry"
+			and failed_search.job_state == "failed" and failed_search.error:find("test workstation scan error", 1, true))
+		job_search_error = nil
+	end
+
+	-- A bed trip supersedes a queued workstation scan by its own route ID.
+	do
+		search_sites = {{x = 20, y = 0, z = 0}}
+		local replaced = new_entity(true)
+		timeofday = 0.3
+		assert(planner_def.gopath(replaced, {x = 20, y = 0, z = 0}, nil, true))
+		local old_search_route = replaced._villages_job_search_route
+		assert(planner_def.gopath(replaced, replaced._bed, nil, true))
+		local superseded = navigation_api.job_search_diagnostics(replaced, old_search_route)
+		assert(superseded.job_state == "superseded" and not superseded.live)
+		replaced._villages_bed_route = nil
+		replaced._villages_follow = nil
+		search_sites = {}
+	end
+	timeofday = 0.8
 
 	-- A walk the follower gave up on (#164) is planned again from where the
 	-- villager stands, twice at most, and then backs off with the reason.

@@ -109,7 +109,19 @@ place_pond(40, 41, 0, 0, 0)
 place_pond(85, 116, 0, 0, 0)
 place_pond(90, 92, 5, 7, 0)
 
-dofile("diagnostic.lua")({})
+local search_diagnostic = {
+	job_search_diagnostics = function(_, route)
+		if route.id ~= 48 then
+			return {route_id = route.id, state = "no matching telemetry", job_state = "no matching queue job",
+				live = false, pending = 5, completed_last_minute = 2}
+		end
+		return {route_id = route.id, job_id = 19, job_state = "yielded", live = true,
+			submitted_at = 70, last_progress_at = 95, last_resume_at = 90, resumes = 4,
+			examined = 3, total = 8, current_candidate = {x = 3, y = 0, z = 0},
+			nodes_searched = 64, pending = 5, completed_last_minute = 2}
+	end,
+}
+dofile("diagnostic.lua")({}, nil, search_diagnostic)
 local lookup = minetest.registered_items["doc_identifier:identifier_solid"].on_use
 local player = {
 	is_player = function() return true end,
@@ -323,6 +335,19 @@ lookup("stack", player, {type = "object", ref = unemployed_with(nil)})
 assert(shown.form:find("Promotion gates: unemployed yes, adult yes, claimed bed NO, work hours", 1, true), shown.form)
 assert(shown.form:find("Free workstation reachable: not checked yet", 1, true), shown.form)
 assert(shown.form:find("Promotion check: not reached since load, not scheduled", 1, true), shown.form)
+lookup("stack", player, {type = "object", ref = unemployed_with(nil, {
+	_villages_job_search_route = {status = "planning", id = 48},
+})})
+assert(shown.form:find("Job-search queue: route 48; submitted 30s ago (server game time); queue job 19: yielded (live)", 1, true), shown.form)
+assert(shown.form:find("resumes 4; last resume 10s ago; last progress 5s ago", 1, true), shown.form)
+assert(shown.form:find("workstation candidates 3/8 examined; current (3.0, 0.0, 0.0); planner 64 nodes searched", 1, true), shown.form)
+assert(shown.form:find("route queue pending 5; completed in last 60 game seconds 2", 1, true), shown.form)
+lookup("stack", player, {type = "object", ref = unemployed_with(nil, {
+	_villages_job_search_route = {status = "planning", id = 99},
+})})
+assert(shown.form:find("route 99; submitted unknown (server game time)", 1, true), shown.form)
+assert(shown.form:find("no matching queue job (not live)", 1, true), shown.form)
+assert(shown.form:find("last progress not yet; workstation candidates unknown; planner unknown", 1, true), shown.form)
 lookup("stack", player, {type = "object", ref = unemployed_with(nil, {
 	_villages_promotion_reached = 0, _villages_fisherman_check = 0, _villages_promotion_pending = true,
 })})

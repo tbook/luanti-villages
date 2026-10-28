@@ -49,6 +49,7 @@ rejected("jump stage with a newline", "--jump 'work\nlv_x=1:tavern'", "--jump wa
 rejected("far with a newline", "--spot 1,2,3:4,5,6 --far '5\n6'", "--far wants")
 rejected("radius letters", "--radius big", "--radius wants")
 rejected("lag without jump", "--lag 5", "need --jump")
+rejected("claim fixture without jump", "--claim-search-candidate", "need --jump")
 rejected("far still needs spot or jump", "--far 20", "--far needs --spot or --jump")
 rejected("missing build file", good .. " --build no/such/file.lua", "does not exist")
 
@@ -57,6 +58,19 @@ local ok = run(good .. " --goto -1.5,2,3.25 --far 20 --build tests/lv_trips_args
 check("good arguments reach the world lookup", ok:find("no world NoSuchWorld", 1, true))
 local jump = run("--jump work:tavern --far 60 --lag 4000 --scatter 8")
 check("jump arguments reach the world lookup", jump:find("no world NoSuchWorld", 1, true))
+local claim = run("--jump work:church --claim-search-candidate")
+check("claim fixture argument reaches the world lookup", claim:find("no world NoSuchWorld", 1, true))
+
+local claim_fixture = dofile("tools/lv_trips/mod/lv_trips/search_claim_fixture.lua")
+local waiting = {route_id = 4, state = "waiting"}
+local yielded = {route_id = 5, state = "yielded"}
+check("waiting search counts as pending", claim_fixture.is_pending(waiting, {id = 4, status = "planning"}))
+check("yielded search counts as pending", claim_fixture.is_pending(yielded, {id = 5, status = "planning"}))
+check("other route identity is excluded", not claim_fixture.is_pending(waiting, {id = 3, status = "planning"}))
+check("finished route is excluded", not claim_fixture.is_pending(waiting, {id = 4, status = "ready"}))
+check("terminal job is excluded", not claim_fixture.is_pending({route_id = 4, state = "done"}, {id = 4, status = "planning"}))
+check("one pending search is insufficient", not claim_fixture.has_competitors(1))
+check("two pending searches permit fixture", claim_fixture.has_competitors(2))
 
 local choose = dofile("tools/lv_trips/mod/lv_trips/stages.lua")
 local stages = {{name = "home"}, {name = "work"}, {name = "night"}}
