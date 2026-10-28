@@ -119,6 +119,38 @@ function M.smooth(rectangles, ground_y, options, env)
 	env = env or options.env or {}
 	if type(env) ~= "table" then return false, "env must be a table" end
 	local engine = env.engine or core
+	local boxes = options.structure_boxes
+	if boxes ~= nil then
+		if type(boxes) ~= "table" or type(options.is_protected) ~= "function" then
+			return false, "structure boxes and protection predicate are required"
+		end
+		local n = 0
+		for k, box in pairs(boxes) do
+			if not integer(k) or k < 1 or type(box) ~= "table" or type(box.min) ~= "table" or type(box.max) ~= "table" then
+				return false, "invalid structure boxes"
+			end
+			for _, axis in ipairs({"x", "y", "z"}) do
+				if not integer(box.min[axis]) or not integer(box.max[axis]) or box.min[axis] > box.max[axis] then
+					return false, "invalid structure boxes"
+				end
+			end
+			n = n + 1
+		end
+		if n ~= #boxes then return false, "invalid structure boxes" end
+	end
+	local function in_structure(x, z)
+		for _, box in ipairs(boxes or {}) do
+			if x >= box.min.x and x <= box.max.x and z >= box.min.z and z <= box.max.z then return true end
+		end
+		return false
+	end
+	local function in_structure_node(x, y, z)
+		for _, box in ipairs(boxes or {}) do
+			if x >= box.min.x and x <= box.max.x and y >= box.min.y and y <= box.max.y
+					and z >= box.min.z and z <= box.max.z then return true end
+		end
+		return false
+	end
 	local volume, reason = M.volume(rectangles, ground_y, options)
 	if not volume then return false, reason end
 	local radius = options.radius == nil and smoothing.boundary_config.radius or options.radius
@@ -153,7 +185,11 @@ function M.smooth(rectangles, ground_y, options, env)
 	local clear = env.clear_trees or function(zone, protected)
 		return fragments.clear_trees(zone, nil, engine, protected)
 	end
-	local tree_stats, clear_reason = operation(clear, zones, rectangles)
+	-- Unowned logs cannot be reliably distinguished from trees. In the safe
+	-- contract leave cleanup to the caller and treat their columns as obstacles.
+	local tree_stats, clear_reason
+	if boxes then tree_stats = {removed = 0}
+	else tree_stats, clear_reason = operation(clear, zones, rectangles) end
 	if not tree_stats then return false, clear_reason end
 	written = envelope_add(written, tree_stats.written)
 
@@ -162,10 +198,15 @@ function M.smooth(rectangles, ground_y, options, env)
 	local heights = env.heights or terrain.heights
 	local lookup_fn, lookup_reason = operation(heights, area, material, engine, true)
 	if not lookup_fn then return false, "boundary height scan failed after tree cleanup: " .. tostring(lookup_reason) end
-	local scan = env.scan or function(scan_area)
-		return fragments.scan_structures(scan_area, fragments.structure_test(engine), engine, true)
+	local scan = env.scan or function(scan_area, ignore_at, conservative)
+		local structure = fragments.structure_test(engine)
+		return fragments.scan_structures(scan_area, function(name)
+			local def = engine.registered_nodes[name]
+			local groups = def and def.groups or {}
+			return structure(name) or (conservative and ((groups.tree or 0) > 0 or (groups.leaves or 0) > 0))
+		end, engine, true, ignore_at)
 	end
-	local structures, scan_reason = operation(scan, area)
+	local structures, scan_reason = operation(scan, area, boxes and in_structure_node or nil, boxes ~= nil)
 	if not structures then return false, "boundary structure scan failed after tree cleanup: " .. tostring(scan_reason) end
 
 	local columns, shoreline = {}, {}
@@ -190,13 +231,20 @@ function M.smooth(rectangles, ground_y, options, env)
 		if row and row[x] ~= nil then return row[x] end
 		row = row or {}
 		excluded_columns[z] = row
-		local blocked = within(rectangles, x, z)
+		local blocked = within(rectangles, x, z) or in_structure(x, z)
 		for dz = -1, 1 do for dx = -1, 1 do
 			if shoreline[z + dz] and shoreline[z + dz][x + dx] then blocked = true end
 		end end
 		if not blocked then
-			blocked = structures.find(x - structure_margin, z - structure_margin,
-				x + structure_margin, z + structure_margin) ~= nil
+			for dz = -structure_margin, structure_margin do for dx = -structure_margin, structure_margin do
+				local nx, nz = x + dx, z + dz
+				if structures.find(nx, nz, nx, nz) then blocked = true end
+			end end
+		end
+		if boxes and not blocked then
+			for y = volume.minp.y, volume.maxp.y do
+				if options.is_protected({x = x, y = y, z = z}) then blocked = true break end
+			end
 		end
 		row[x] = blocked
 		return blocked

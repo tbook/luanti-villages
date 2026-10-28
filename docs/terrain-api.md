@@ -106,6 +106,17 @@ ground, structures and overhangs are left alone. Interior ground stays a hard
 planning constraint at `ground_y`, and no interior node is written. This
 operation does not run the hole-filling stage.
 
+`terrain.boundary_structure_protection == 1` advertises support for
+`options.structure_boxes`, a dense array of inclusive world-space `{min, max}`
+building boxes, and `options.is_protected(pos)`, a node-protection predicate.
+When supplied together, boundary smoothing skips tree cleanup and treats tree
+and leaf columns as obstacles, since an unrecorded log structure cannot be
+distinguished safely from a tree. Grading protects whole columns if any node in
+the write volume is protected. Known building columns do not cause an extra
+structure buffer, while other structures retain their buffer. Callers that
+require these protections must check the capability before invoking the writer
+and provide complete boxes.
+
 The function returns `true, stats` or `false, reason`. A false result after
 cleanup or column writing can follow partial terrain changes; it does not roll
 them back. `stats.changed`, `cut`, and `filled` count graded columns;
