@@ -279,7 +279,7 @@ assert(detour._villages_bell == nil, "a walk of its own that goes nowhere is sti
 -- Sellers share bell discovery but own movement while searching, walking and
 -- holding a stall. Dispatch also runs during trade, and cleanup precedes the
 -- inner wrapper that starts the tavern route.
-local market_calls, market_leaves, inner_started = {}, {}, false
+local market_calls, market_leaves, renew_only_calls, inner_started = {}, {}, {}, false
 local market_result = "walking"
 local integration_def = {
 	on_activate = function() end,
@@ -291,6 +291,7 @@ local integration_def = {
 		return saved
 	end,
 	do_custom = function(self)
+		if self.planning_hold then return false end
 		if minetest.get_timeofday() * 24000 >= 15000 and self.state ~= "gowp" then
 			inner_started = true
 			self.state = "gowp"
@@ -307,10 +308,32 @@ bell.install(integration_def, {
 		self._villages_market_session = nil
 		self._villages_market_attempted = true
 	end,
+	renew_only = function(self, session)
+		renew_only_calls[#renew_only_calls + 1] = {self = self, session = session}
+	end,
 }, navigation_api)
 local seller = villager(10, 0)
 seller.state = "gowp"
-integration_def.do_custom(seller, 0.25)
+integration_def.do_custom(seller, 0.1)
+seller._villages_market_session = {live = true}
+seller.planning_hold = true
+local routes_before_hold, regular_ticks_before_hold = #gopaths, #market_calls
+assert(integration_def.do_custom(seller, 0.25) == false,
+	"the wrapped role's planning hold remains false")
+assert(#renew_only_calls == 1 and renew_only_calls[1].self == seller
+	and renew_only_calls[1].session == seller._villages_bell,
+	"a market seller renews its existing session during the underlying planning hold")
+assert(#market_calls == regular_ticks_before_hold and #gopaths == routes_before_hold,
+	"planning hold maintenance does not run the market tick or start a route")
+seller._villages_market_session = nil
+local renewals_before_unrelated_hold = #renew_only_calls
+assert(integration_def.do_custom(seller, 0.25) == false
+	and #renew_only_calls == renewals_before_unrelated_hold,
+	"an unrelated false role hold without a market session has no market action")
+seller.planning_hold = nil
+local walk_result = integration_def.do_custom(seller, 0.1)
+assert(walk_result == nil,
+	"handling a market walk preserves the nested nil so the engine can advance check_gowp")
 assert(market_calls[1] and market_calls[1].session == seller._villages_bell,
 	"seller controller receives the same discovered bell session")
 assert(seller._villages_wander_anchor == nil and seller.state == "gowp",
@@ -319,7 +342,7 @@ market_result = "holding"
 seller._trading_players = {player = true}
 seller.state = "stand"
 integration_def.do_custom(seller, 0.5)
-assert(#market_calls == 2 and market_calls[2].dtime == 0.5 and seller._villages_wander_anchor == nil,
+assert(#market_calls == 3 and market_calls[3].dtime == 0.5 and seller._villages_wander_anchor == nil,
 	"seller lease is ticked during trading without browser movement")
 market_result = "browse"
 local trade_calls, paused_since = #gopaths, seller._villages_bell.since

@@ -1,6 +1,13 @@
 local root = debug.getinfo(1, "S").source:sub(2):match("(.*/)tests/") or "./"
 local logs, day = {}, 12
 local registered = {}
+ItemStack = function(name)
+	local resolved = name == "mesecons:redstone" and "mesecons:wire_00000000_off" or name
+	return {
+		is_empty = function() return false end,
+		get_name = function() return resolved end,
+	}
+end
 
 minetest = {
 	get_modpath = function() return root end,
@@ -22,9 +29,10 @@ local expected = {
 	butcher = {"mcl_mobitems:cooked_porkchop", "mcl_mobitems:cooked_chicken"},
 	weapon_smith = {"mcl_tools:axe_iron", "mcl_tools:sword_iron"},
 	tool_smith = {"mcl_tools:pick_stone", "mcl_tools:shovel_stone"},
-	cleric = {"mesecons:redstone", "mcl_core:lapis"},
+	cleric = {"mesecons:wire_00000000_off", "mcl_core:lapis"},
 	mason = {"mcl_core:brick", "mcl_core:stonebrick"},
 }
+registered["mesecons:redstone"] = {}
 
 for profession, pair in pairs(expected) do
 	for _, item in ipairs(pair) do registered[item] = {} end
@@ -33,6 +41,15 @@ for profession, pair in pairs(expected) do
 	assert(got and got[1] == pair[1] and got[2] == pair[2], profession .. " goods match the supported VoxeLibre item names")
 	assert(market.eligible(villager), profession .. " adult is eligible without trade initialization")
 end
+local cleric_goods = market.goods_for({_profession = "cleric", _id = "cleric-alias"}, {})
+assert(cleric_goods[1] == "mesecons:wire_00000000_off",
+	"item aliases are stored using the canonical ItemStack name")
+local itemstack_constructor = ItemStack
+ItemStack = nil
+local fallback_goods = market.goods_for({_profession = "farmer", _id = "farmer-no-itemstack"}, {})
+assert(fallback_goods[1] == "mcl_farming:bread",
+	"registered goods retain their name when ItemStack is unavailable")
+ItemStack = itemstack_constructor
 
 local farmer = {_profession = "farmer", _id = "f"}
 registered["mcl_core:apple"] = nil
@@ -106,6 +123,7 @@ local function controller_fixture()
 	function site.release() site.releases = site.releases + 1; return true end
 	function site.valid() site.valid_calls = site.valid_calls + 1; return true end
 	local reservation = {layout = {
+		tables = {{x = 3, y = 0, z = 5}, {x = 3, y = 0, z = 6}},
 		seller = {x = 4, y = 1, z = 5},
 		outward = {x = 1, z = 0},
 	}}
@@ -178,8 +196,13 @@ do
 	assert(controller.tick(seller, bell, 0) == "holding", "seller holds while bounded search is pending")
 	assert(controller.tick(seller, bell, 0) == "walking", "seller begins normal goto after reservation")
 	assert(site.searches == 1 and site.owner == tostring(seller._id), "search is created once for the string prop owner")
+	local route, elapsed = seller._villages_goto_route, seller._villages_market_session.walk_elapsed
+	assert(controller.renew_only(seller, bell) and site.renewals == 1,
+		"maintenance-only renewal keeps a planning seller's reservation alive")
+	assert(seller._villages_goto_route == route and seller._villages_market_session.walk_elapsed == elapsed,
+		"maintenance-only renewal neither replaces nor advances the market route")
 	assert(controller.tick(seller, bell, 1) == "walking", "seller continues a planning route")
-	assert(site.renewals == 1, "reservation renews while the seller travels")
+	assert(site.renewals == 2, "reservation renews while the seller travels")
 	seller._villages_goto_route.status = "arrived"
 	seller.arrival_callback(seller)
 	assert(controller.tick(seller, bell, 0) == "holding", "arrival requires position and layout revalidation")
@@ -189,12 +212,17 @@ do
 	assert(controller.tick(seller, bell, 0) == "holding" and site.valid_calls == 1,
 		"an opened seller stays selling without revalidating or restocking")
 	assert(props.renewal_deadline == 1600, "seller renewals extend the prop deadline on real time")
+	local selling_route = seller._villages_goto_route
+	assert(controller.renew_only(seller, bell) and props.renewals == 2,
+		"maintenance-only renewal also keeps an arrived seller's prop lease alive")
+	assert(seller._villages_goto_route == selling_route,
+		"maintenance-only renewal does not change a seller's route while the role holds")
 	seller._trading_players = {player = true}
-	assert(controller.tick(seller, bell, 20, true) == "holding" and props.renewals == 2,
+	assert(controller.tick(seller, bell, 20, true) == "holding" and props.renewals == 3,
 		"a long player trade continues renewing an active stall lease")
 	seller._trading_players = nil
 	controller.leave(seller, "test")
-	assert(site.releases == 1 and site.renewals == 4, "leave releases the reservation after renewing it while selling")
+	assert(site.releases == 1 and site.renewals == 6, "leave releases the reservation after renewing it while selling")
 	assert(seller.order == nil, "leaving a market hold restores the previous order")
 end
 
@@ -241,6 +269,51 @@ do
 		"a skipped packing deadline forces immediate full cleanup")
 	assert(site.releases == 1 and seller._villages_market_session == nil,
 		"forced cleanup releases all session claims")
+end
+
+do
+	local controller, site, _, seller, bell, cancelled = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session = seller._villages_market_session
+	seller._trading_players = {player = true}
+	assert(controller.renew_only(seller, bell, 3) and session.walk_elapsed == 0,
+		"a trading hold renews a planning reservation without counting its walk deadline")
+	assert(seller._villages_goto_route == nil and session.route_paused
+		and cancelled[#cancelled] == session.id,
+		"maintenance during a false role hold cancels only the active market route under trade")
+	seller._trading_players = nil
+	assert(controller.tick(seller, bell, 0) == "walking" and seller._villages_goto_route
+		and seller._villages_goto_route.market_token == session.id and not session.route_paused,
+		"the normal market tick replans the reserved stall route after trade")
+end
+
+do
+	local controller, _, _, seller, bell, cancelled = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	local session, route = seller._villages_market_session, seller._villages_goto_route
+	assert(not controller.renew_only(seller, bell, 3) and seller._villages_market_session == nil
+		and cancelled[#cancelled] == session.id,
+		"a planning hold still enforces the walk deadline and cancels only its market route")
+	assert(route.market_token == session.id,
+		"walk deadline cleanup leaves the route ownership token attributable to the seller")
+end
+
+do
+	local controller, _, _, seller, bell, _, _, set_ticks, props, set_real = controller_fixture()
+	controller.tick(seller, bell, 0)
+	controller.tick(seller, bell, 0)
+	seller._villages_goto_route.status = "arrived"
+	controller.tick(seller, bell, 0)
+	set_ticks(14750)
+	assert(controller.renew_only(seller, bell, 0) and props.frame_removals == 1,
+		"an arrived seller begins packing during a role hold")
+	set_real(1001.01)
+	local kept = controller.renew_only(seller, bell, 0)
+	assert(not kept and props.cleanups == 1 and seller._villages_market_session == nil,
+		"packing finishes and releases the stall during a continued role hold: kept=" .. tostring(kept)
+			.. " cleanups=" .. tostring(props.cleanups) .. " session=" .. tostring(seller._villages_market_session))
 end
 
 do

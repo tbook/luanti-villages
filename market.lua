@@ -20,6 +20,19 @@ local goods = {
 	mason = {"mcl_core:brick", "mcl_core:stonebrick"},
 }
 
+local function registered_good(name)
+	if not core.registered_items[name] then return nil end
+	-- Resolve item aliases to their actual ItemStack names. VoxeLibre's
+	-- mesecons:redstone alias, for example, becomes wire_00000000_off when
+	-- stored in an item frame.
+	if ItemStack then
+		local stack = ItemStack(name)
+		if stack and not stack:is_empty() then return stack:get_name() end
+		return nil
+	end
+	return name
+end
+
 local M = {}
 
 function M.profession(villager)
@@ -42,8 +55,8 @@ function M.goods_for(villager, attempt)
 		log_fallback("unsupported profession " .. tostring(profession or "unemployed"), attempt)
 		return nil, "unsupported_profession"
 	end
-	local first = core.registered_items[pair[1]] and pair[1]
-	local second = core.registered_items[pair[2]] and pair[2]
+	local first = registered_good(pair[1])
+	local second = registered_good(pair[2])
 	if first and second then return {first, second} end
 	if first then return {first, first} end
 	if second then return {second, second} end
@@ -190,6 +203,78 @@ function M.new(options)
 		if session.holding_order and self.order == "stand" then self.order = session.previous_order end
 		self._villages_market_session = nil
 		self._villages_market_attempted = true
+		return true
+	end
+
+	function api.renew_only(self, bell_session, dtime)
+		-- The wrapped role can hold do_custom while the shared route queue plans.
+		-- Keep an existing seller's leases alive without starting or advancing its
+		-- market walk while that role still owns the tick.
+		local session = self._villages_market_session
+		if not session then return false end
+		if bell_session ~= session.bell or get_stage(self) ~= "bell"
+			or not M.eligible(self, session)
+			or (session.profession and M.profession(self) ~= session.profession)
+			or is_thunder() then
+			api.leave(self, "market session no longer valid")
+			return false
+		end
+		local bell_ok = bell_valid(session)
+		if bell_ok == false then
+			api.leave(self, "bell removed")
+			return false
+		end
+		if session.reservation and not site.renew(session.reservation) then
+			fallback(self, session, "stall reservation expired")
+			return false
+		end
+		if session.arrived then
+			local pos = self.object and self.object:get_pos()
+			local target = standing_position(session.layout.seller)
+			local dx, dy, dz = pos and pos.x - target.x, pos and pos.y - target.y, pos and pos.z - target.z
+			if not pos or dx * dx + dy * dy + dz * dz > 1 then
+				api.leave(self, "seller displaced")
+				return false
+			end
+			if not props.renew(session.stall.token, self.object, session, real_now() + 600) then
+				api.leave(self, "stall lease expired")
+				return false
+			end
+			local ticks = get_ticks()
+			if ticks >= MARKET_END then
+				cleanup_stall(self, session)
+				api.leave(self, "market closed")
+				return false
+			elseif ticks >= session.pack_at and not session.packing_at then
+				session.packing_at = real_now()
+				props.remove_frames(session.stall)
+				core.log("action", "[living_villages] market seller began packing")
+			elseif session.packing_at and real_now() - session.packing_at >= PACK_DELAY then
+				cleanup_stall(self, session)
+				api.leave(self, "packed")
+				return false
+			end
+		else
+			local route = self._villages_goto_route
+			if route and route.market_token == session.id then
+				if is_trading(self) then
+					-- A false return from the wrapped role bypasses tick(existing_only).
+					-- Stop this seller's active walk while it is being traded with, then
+					-- let the normal market tick replan from the same reservation later.
+					if route.status == "planning" or route.status == "travelling" then
+						if navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
+						session.route_paused = true
+					end
+				elseif (route.status == "planning" or route.status == "travelling")
+					and not unrelated_route(self) then
+					session.walk_elapsed = session.walk_elapsed + (dtime or 0)
+					if session.walk_elapsed > (session.bell.limit or 40) then
+						fallback(self, session, "walk to stall took too long")
+						return false
+					end
+				end
+			end
+		end
 		return true
 	end
 
