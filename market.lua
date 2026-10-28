@@ -20,6 +20,19 @@ local goods = {
 	mason = {"mcl_core:brick", "mcl_core:stonebrick"},
 }
 
+local function registered_good(name)
+	if not core.registered_items[name] then return nil end
+	-- Resolve item aliases to their actual ItemStack names. VoxeLibre's
+	-- mesecons:redstone alias, for example, becomes wire_00000000_off when
+	-- stored in an item frame.
+	if ItemStack then
+		local stack = ItemStack(name)
+		if stack and not stack:is_empty() then return stack:get_name() end
+		return nil
+	end
+	return name
+end
+
 local M = {}
 
 function M.profession(villager)
@@ -42,8 +55,8 @@ function M.goods_for(villager, attempt)
 		log_fallback("unsupported profession " .. tostring(profession or "unemployed"), attempt)
 		return nil, "unsupported_profession"
 	end
-	local first = core.registered_items[pair[1]] and pair[1]
-	local second = core.registered_items[pair[2]] and pair[2]
+	local first = registered_good(pair[1])
+	local second = registered_good(pair[2])
 	if first and second then return {first, second} end
 	if first then return {first, first} end
 	if second then return {second, second} end

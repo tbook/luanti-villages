@@ -329,6 +329,16 @@ local next_setup = assert(second_api.setup(other, "villager-b", 18, {"test:bread
 	fixture_reservation(other, "villager-b", second_site)))
 assert(next_setup.token ~= success.token and next_setup.token == "market-" .. tostring(before + 2),
 	"persistent counter makes tokens unique across module sessions")
+local canonical_layout = layout(10)
+local canonical_stall = assert(second_api.setup(canonical_layout, "villager-canonical", 18,
+	{"mesecons:wire_00000000_off", "mcl_core:lapis"},
+	fixture_reservation(canonical_layout, "villager-canonical", second_site)))
+for index, pos in ipairs(canonical_layout.frames) do
+	assert(metadata[key(pos)].lists.main[1]:get_name() == (index == 1
+		and "mesecons:wire_00000000_off" or "mcl_core:lapis"),
+		"canonical market goods survive frame inventory setup")
+end
+assert(second_api.cleanup(canonical_stall), "canonical goods survive frame cleanup")
 
 -- Failure after construction and after a display update clears generated stock before destructors.
 reset()

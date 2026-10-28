@@ -1,6 +1,13 @@
 local root = debug.getinfo(1, "S").source:sub(2):match("(.*/)tests/") or "./"
 local logs, day = {}, 12
 local registered = {}
+ItemStack = function(name)
+	local resolved = name == "mesecons:redstone" and "mesecons:wire_00000000_off" or name
+	return {
+		is_empty = function() return false end,
+		get_name = function() return resolved end,
+	}
+end
 
 minetest = {
 	get_modpath = function() return root end,
@@ -22,9 +29,10 @@ local expected = {
 	butcher = {"mcl_mobitems:cooked_porkchop", "mcl_mobitems:cooked_chicken"},
 	weapon_smith = {"mcl_tools:axe_iron", "mcl_tools:sword_iron"},
 	tool_smith = {"mcl_tools:pick_stone", "mcl_tools:shovel_stone"},
-	cleric = {"mesecons:redstone", "mcl_core:lapis"},
+	cleric = {"mesecons:wire_00000000_off", "mcl_core:lapis"},
 	mason = {"mcl_core:brick", "mcl_core:stonebrick"},
 }
+registered["mesecons:redstone"] = {}
 
 for profession, pair in pairs(expected) do
 	for _, item in ipairs(pair) do registered[item] = {} end
@@ -33,6 +41,15 @@ for profession, pair in pairs(expected) do
 	assert(got and got[1] == pair[1] and got[2] == pair[2], profession .. " goods match the supported VoxeLibre item names")
 	assert(market.eligible(villager), profession .. " adult is eligible without trade initialization")
 end
+local cleric_goods = market.goods_for({_profession = "cleric", _id = "cleric-alias"}, {})
+assert(cleric_goods[1] == "mesecons:wire_00000000_off",
+	"item aliases are stored using the canonical ItemStack name")
+local itemstack_constructor = ItemStack
+ItemStack = nil
+local fallback_goods = market.goods_for({_profession = "farmer", _id = "farmer-no-itemstack"}, {})
+assert(fallback_goods[1] == "mcl_farming:bread",
+	"registered goods retain their name when ItemStack is unavailable")
+ItemStack = itemstack_constructor
 
 local farmer = {_profession = "farmer", _id = "f"}
 registered["mcl_core:apple"] = nil
