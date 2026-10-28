@@ -193,6 +193,78 @@ function M.new(options)
 		return true
 	end
 
+	function api.renew_only(self, bell_session, dtime)
+		-- The wrapped role can hold do_custom while the shared route queue plans.
+		-- Keep an existing seller's leases alive without starting or advancing its
+		-- market walk while that role still owns the tick.
+		local session = self._villages_market_session
+		if not session then return false end
+		if bell_session ~= session.bell or get_stage(self) ~= "bell"
+			or not M.eligible(self, session)
+			or (session.profession and M.profession(self) ~= session.profession)
+			or is_thunder() then
+			api.leave(self, "market session no longer valid")
+			return false
+		end
+		local bell_ok = bell_valid(session)
+		if bell_ok == false then
+			api.leave(self, "bell removed")
+			return false
+		end
+		if session.reservation and not site.renew(session.reservation) then
+			fallback(self, session, "stall reservation expired")
+			return false
+		end
+		if session.arrived then
+			local pos = self.object and self.object:get_pos()
+			local target = standing_position(session.layout.seller)
+			local dx, dy, dz = pos and pos.x - target.x, pos and pos.y - target.y, pos and pos.z - target.z
+			if not pos or dx * dx + dy * dy + dz * dz > 1 then
+				api.leave(self, "seller displaced")
+				return false
+			end
+			if not props.renew(session.stall.token, self.object, session, real_now() + 600) then
+				api.leave(self, "stall lease expired")
+				return false
+			end
+			local ticks = get_ticks()
+			if ticks >= MARKET_END then
+				cleanup_stall(self, session)
+				api.leave(self, "market closed")
+				return false
+			elseif ticks >= session.pack_at and not session.packing_at then
+				session.packing_at = real_now()
+				props.remove_frames(session.stall)
+				core.log("action", "[living_villages] market seller began packing")
+			elseif session.packing_at and real_now() - session.packing_at >= PACK_DELAY then
+				cleanup_stall(self, session)
+				api.leave(self, "packed")
+				return false
+			end
+		else
+			local route = self._villages_goto_route
+			if route and route.market_token == session.id then
+				if is_trading(self) then
+					-- A false return from the wrapped role bypasses tick(existing_only).
+					-- Stop this seller's active walk while it is being traded with, then
+					-- let the normal market tick replan from the same reservation later.
+					if route.status == "planning" or route.status == "travelling" then
+						if navigation.cancel_goto then navigation.cancel_goto(self, session.id) end
+						session.route_paused = true
+					end
+				elseif (route.status == "planning" or route.status == "travelling")
+					and not unrelated_route(self) then
+					session.walk_elapsed = session.walk_elapsed + (dtime or 0)
+					if session.walk_elapsed > (session.bell.limit or 40) then
+						fallback(self, session, "walk to stall took too long")
+						return false
+					end
+				end
+			end
+		end
+		return true
+	end
+
 	function api.tick(self, bell_session, dtime, existing_only)
 		-- Integration calls this before bell.lua's trading early return. Trading is
 		-- passed through here so it can pause the distance-based walk deadline.

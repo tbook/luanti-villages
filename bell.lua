@@ -370,7 +370,12 @@ local function install(def, market_controller, navigation_api)
 		-- ends (the tavern's) is not mistaken for the gathering's and stopped.
 		if self._villages_bell and not gathering(self) then leave(self) end
 		local result = original_custom(self, dtime)
-		if result == false then return result end
+		if result == false then
+			if gathering(self) and self._villages_market_session and market and market.renew_only then
+				market.renew_only(self, self._villages_bell, dtime)
+			end
+			return result
+		end
 		if not gathering(self) then return result end
 		local pos = self.object:get_pos()
 		-- Someone is trading with it: vanilla has stopped it, and the time
