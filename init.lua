@@ -635,6 +635,7 @@ do
 	local terrain_settlements = rawget(_G, "settlements")
 	local terrain_mcl_vars = rawget(_G, "mcl_vars")
 	api.terrain = {
+		boundary_structure_protection = 1,
 		volume = function(plan, schematic_table, options)
 			local env = type(options) == "table" and options.env
 			local engine = type(env) == "table" and env.engine or core
@@ -654,8 +655,12 @@ do
 			local engine = env.engine
 			local structure_test = fragments.structure_test(engine)
 			env.load_node = env.load_node or (terrain_mcl_vars and function(pos) return terrain_mcl_vars.get_node(pos) end)
-			env.scan = env.scan or function(area)
-				return fragments.scan_structures(area, structure_test, engine, true)
+			env.scan = env.scan or function(area, ignore_at, conservative)
+				return fragments.scan_structures(area, function(name)
+					local def = engine.registered_nodes[name]
+					local groups = def and def.groups or {}
+					return structure_test(name) or (conservative and ((groups.tree or 0) > 0 or (groups.leaves or 0) > 0))
+				end, engine, true, ignore_at)
 			end
 			env.clear_trees = env.clear_trees or function(zone, protected)
 				return fragments.clear_trees(zone, nil, engine, protected)

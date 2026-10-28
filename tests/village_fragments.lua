@@ -165,6 +165,9 @@ local fname, fx, fy, fz = scan.find(8, 8, 12, 12)
 assert(fname and fx and fy and fz, "find reports a hit in the rectangle")
 assert(scan.find(11, 10, 11, 10) == "mcl_chests:chest", "single column rectangle")
 assert(scan.find(12, 10, 20, 20) == nil, "outside the rectangle")
+local filtered = fragments.scan_structures(box(-20, 0, -20, 20, 10, 20), test, e, true,
+	function(x, y, z) return x == 10 and z == 10 and y == 4 end)
+assert(filtered.at(10, 10) == "mcl_portals:portal_frame", "filter retains foreign nodes below a known building node")
 
 -- A single tree: removed whole, even where it sticks out of the zone.
 map = {}

@@ -73,6 +73,27 @@ local function setup()
 	return {world = world, reads = reads, writes = writes, cleanup = cleanup, engine = engine, env = env, inside = inside}
 end
 
+local edge = setup()
+local cleanup_called = false
+edge.env.clear_trees = function() cleanup_called = true; return {removed = 0} end
+edge.env.scan = function(_, ignore_at, conservative)
+	assert(conservative, "safe contract scans trees as ambiguous structures")
+	return {find = function(x0, z0, x1, z1)
+		if x0 <= 9 and x1 >= 9 and z0 <= 2 and z1 >= 2 and not ignore_at(9, 10, 2) then return "building" end
+		if x0 <= 14 and x1 >= 14 and z0 <= 3 and z1 >= 3 then return "foreign" end
+	end}
+end
+local edge_ok = boundary.smooth(town, 0, {env = edge.env,
+	structure_boxes = {{min={x=9,y=8,z=2}, max={x=9,y=13,z=2}}},
+	is_protected = function(p) return p.x == 11 and p.y == 30 and p.z == 2 end})
+assert(edge_ok and not cleanup_called, "safe contract does not remove ambiguous trees or logs")
+assert(edge.engine.get_node({x=10,y=8,z=2}).name ~= "mcl_core:dirt_with_grass",
+	"town building beside edge does not block exterior grading")
+assert(edge.engine.get_node({x=11,y=8,z=2}).name == "mcl_core:dirt_with_grass",
+	"a protected node anywhere in write envelope blocks the column")
+assert(edge.engine.get_node({x=13,y=8,z=3}).name == "mcl_core:dirt_with_grass",
+	"foreign structure margin remains protected")
+
 local scene = setup()
 -- The city can contain roofs and overlapping, irregular footprints. Boundary
 -- cleanup receives the union; terrain writing must preserve every interior node

@@ -70,7 +70,7 @@ end
 -- rectangle. A column with unloaded nodes and no structure counts as a structure
 -- named "unloaded" when `strict` is set, because the planner can't call it clear;
 -- otherwise unloaded nodes count as no structure.
-function M.scan_structures(area, test, engine, strict)
+function M.scan_structures(area, test, engine, strict, ignore_at)
 	engine = engine or core
 	test = test or M.structure_test(engine)
 	local vm = engine.get_voxel_manip()
@@ -94,7 +94,7 @@ function M.scan_structures(area, test, engine, strict)
 				local id = data[va:index(x, y, z)]
 				if id == engine.CONTENT_IGNORE then
 					unloaded = unloaded or y
-				elseif is_structure(id) then
+				elseif is_structure(id) and not (ignore_at and ignore_at(x, y, z)) then
 					columns[z] = columns[z] or {}
 					columns[z][x] = {name = engine.get_name_from_content_id(id), y = y}
 					count = count + 1
