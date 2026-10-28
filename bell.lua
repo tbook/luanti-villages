@@ -391,7 +391,10 @@ local function install(def, market_controller, navigation_api)
 		end
 		if pos then
 			local handled = join(self, pos, dtime)
-			if handled ~= nil then return handled and result or false end
+			if handled ~= nil then
+				if handled then return result end
+				return false
+			end
 		end
 		-- Vanilla's player scan turns jumping off near a player, which would
 		-- leave a villager someone is watching unable to climb a step on its

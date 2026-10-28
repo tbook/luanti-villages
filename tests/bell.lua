@@ -331,6 +331,9 @@ assert(integration_def.do_custom(seller, 0.25) == false
 	and #renew_only_calls == renewals_before_unrelated_hold,
 	"an unrelated false role hold without a market session has no market action")
 seller.planning_hold = nil
+local walk_result = integration_def.do_custom(seller, 0.1)
+assert(walk_result == nil,
+	"handling a market walk preserves the nested nil so the engine can advance check_gowp")
 assert(market_calls[1] and market_calls[1].session == seller._villages_bell,
 	"seller controller receives the same discovered bell session")
 assert(seller._villages_wander_anchor == nil and seller.state == "gowp",
@@ -339,7 +342,7 @@ market_result = "holding"
 seller._trading_players = {player = true}
 seller.state = "stand"
 integration_def.do_custom(seller, 0.5)
-assert(#market_calls == 2 and market_calls[2].dtime == 0.5 and seller._villages_wander_anchor == nil,
+assert(#market_calls == 3 and market_calls[3].dtime == 0.5 and seller._villages_wander_anchor == nil,
 	"seller lease is ticked during trading without browser movement")
 market_result = "browse"
 local trade_calls, paused_since = #gopaths, seller._villages_bell.since
