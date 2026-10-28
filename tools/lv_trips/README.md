@@ -119,7 +119,7 @@ other villagers carry on as they like, so a run can start with a route cancelled
 ## A stage change under every villager (`--jump`)
 
 ```sh
-tools/lv_trips/run.sh WORLD X,Y,Z LABEL --jump work:tavern [--far SECONDS] [--lag MS] [--settle S] [--watch S] [--scatter S]
+tools/lv_trips/run.sh WORLD X,Y,Z LABEL --jump work:tavern [--far SECONDS] [--lag MS] [--settle S] [--watch S] [--scatter S] [--claim-search-candidate]
 ```
 
 `--jump FROM:TO` (stage names, `sleep` is just after midnight; takes `--radius` but not `--stages` or `--rounds`) holds the FROM hour for `--settle`
@@ -127,7 +127,10 @@ seconds (default 40) so the village is in its natural state, then sets the clock
 `/time` does and watches every villager for `--watch` seconds (default 90). `--far SECONDS` keeps
 vanilla's freezing until SECONDS after the jump, `--lag MS` busy-waits once 5 s after it (a long server
 step), `--scatter S` first puts each villager beside another's bed and lets it start a trip for S seconds,
-so the jump lands mid-trip. The log gets a line per villager per second,
+so the jump lands mid-trip. `--claim-search-candidate` is a controlled race fixture: once two or more
+unemployed villagers have pending workstation searches, it assigns one free current candidate to a
+different unemployed villager in the disposable clone. It is disabled by default and logs the exact
+station, claimant, and searcher. The log gets a line per villager per second,
 `[lv_trips] jump t=... id=... pos=... state=... route=... follow=... wp=... left=... door=...`
 (`door` lists the wooden doors in and beside the villager's cell with their param2), and the result
 file one `jump` record per villager: `planning_max_s` (longest wait in route status `planning`),

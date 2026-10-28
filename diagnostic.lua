@@ -192,6 +192,38 @@ local function planner_trail(route)
 	return table.concat(positions, " -> ")
 end
 
+local navigation_api
+
+local function workstation_search_status(villager, route)
+	if not route or route.status ~= "planning" then return nil end
+	local info = navigation_api and navigation_api.job_search_diagnostics(villager, route)
+	if not info then return "unavailable" end
+	local now = core.get_gametime()
+	local function ago(at)
+		return at and string.format("%ds ago", math.max(now - at, 0)) or "not yet"
+	end
+	local submitted = info.submitted_at and (string.format("%ds ago", math.max(now - info.submitted_at, 0))) or "unknown"
+	local candidates = info.examined ~= nil and string.format("%d/%d examined", info.examined, info.total or 0)
+		or "unknown"
+	if info.current_candidate then
+		candidates = candidates .. "; current " .. pos_string(info.current_candidate)
+	end
+	local progress = info.state == "no matching telemetry" and "unknown"
+		or string.format("%d nodes searched", info.nodes_searched or 0)
+	local lines = {
+		string.format("route %s; submitted %s (server game time)", tostring(info.route_id), submitted),
+		string.format("queue job %s: %s%s", tostring(info.job_id or "none"), info.job_state,
+			info.live and " (live)" or " (not live)"),
+		string.format("resumes %d; last resume %s; last progress %s", info.resumes or 0,
+			ago(info.last_resume_at), ago(info.last_progress_at)),
+		"workstation candidates " .. candidates .. "; planner " .. progress,
+		string.format("route queue pending %d; completed in last 60 game seconds %d",
+			info.pending or 0, info.completed_last_minute or 0),
+	}
+	if info.error then table.insert(lines, "queue error: " .. info.error) end
+	return table.concat(lines, "; ")
+end
+
 -- Set by install: flock.lua's one-line account of a shepherd's flock and grazing (#215).
 local flock_status
 
@@ -563,6 +595,7 @@ local function show(player, villager)
 		"Jobsite planner: " .. planner_status(villager._villages_job_route),
 		"Jobsite planner trail: " .. planner_trail(villager._villages_job_route),
 		"Job search route: " .. route_status(villager._villages_job_search_route),
+		"Job-search queue: " .. (workstation_search_status(villager, villager._villages_job_search_route) or "not planning"),
 		"Job-search planner: " .. planner_status(villager._villages_job_search_route),
 		"Job-search planner trail: " .. planner_trail(villager._villages_job_search_route),
 		"",
@@ -639,8 +672,9 @@ local function permitted(player)
 		or core.check_player_privs(name, {debug = true})
 end
 
-local function install(_, flock)
+local function install(_, flock, nav_api)
 	flock_status = flock and flock.status
+	navigation_api = nav_api
 	local items = core.registered_items or {}
 	for _, name in ipairs({"doc_identifier:identifier_solid", "doc_identifier:identifier_liquid"}) do
 		local item = items[name]

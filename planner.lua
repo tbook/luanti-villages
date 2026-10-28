@@ -118,7 +118,10 @@ function planner.find_path(start, can_stand, goal, options)
 			local current_key = entry.key
 			closed[current_key] = true
 			visited = visited + 1
-			if options.checkpoint and visited % CHECKPOINT_EVERY == 0 then options.checkpoint() end
+			if visited % CHECKPOINT_EVERY == 0 then
+				if options.progress then options.progress(visited) end
+				if options.checkpoint then options.checkpoint() end
+			end
 			local distance = options.distance and options.distance(current.pos)
 			if distance and (not closest_distance or distance < closest_distance
 				or (distance == closest_distance and current.g < closest_cost)) then

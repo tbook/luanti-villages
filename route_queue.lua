@@ -22,6 +22,12 @@ local pending = {}
 local running, slice_end
 local stats = {steps = 0, busy_steps = 0, max_step_ms = 0, jobs = 0, max_wait = 0, max_pending = 0}
 queue.stats = stats
+local next_job_id = 0
+local completed = {}
+
+local function game_time()
+	return core.get_gametime and core.get_gametime() or 0
+end
 
 -- One setting for the step budget, read each step so it can change live.
 local function budget()
@@ -37,16 +43,76 @@ function queue.pending()
 	return #pending
 end
 
+-- Read-only snapshots for the privileged lookup tool. Times are server game
+-- seconds: they stop while the game is paused and persist with the world.
+function queue.inspect(job)
+	if not job then return nil end
+	local live = job == running
+	if not live then
+		for _, queued in ipairs(pending) do
+			if queued == job then live = true; break end
+		end
+	end
+	if job.state == "completed" or job.state == "failed" or job.state == "canceled" then live = false end
+	return {
+		id = job.id, state = job.state, live = live, resumes = job.resumes,
+		submitted_at = job.submitted_at, last_resume_at = job.last_resume_at,
+		finished_at = job.finished_at, error = job.error,
+	}
+end
+
+function queue.inspect_id(id)
+	if running and running.id == id then return queue.inspect(running) end
+	for _, job in ipairs(pending) do
+		if job.id == id then return queue.inspect(job) end
+	end
+end
+
+function queue.cancel(id)
+	local job
+	if running and running.id == id then job = running end
+	if not job then
+		for _, queued in ipairs(pending) do
+			if queued.id == id then job = queued; break end
+		end
+	end
+	if not job or job.state == "completed" or job.state == "failed" or job.state == "canceled" then return false end
+	-- Keep the queue slot in place: cancellation only marks the exact job
+	-- invalid and the normal round-robin step discards it when its turn comes.
+	job.state, job.finished_at = "canceled", game_time()
+	if job.on_state then job.on_state(job.state, job) end
+	return true
+end
+
+local function state(job, value)
+	job.state = value
+	if job.on_state then job.on_state(value, job) end
+end
+
+function queue.diagnostics()
+	local now, recent = game_time(), 0
+	local second = math.floor(now)
+	for offset = 0, 59 do
+		local bucket = completed[(second - offset) % 60]
+		if bucket and second - offset == bucket.second then recent = recent + bucket.count end
+	end
+	return {pending = #pending, completed_last_minute = recent}
+end
+
 -- Runs `fn()` in a later step, then `done(...)` with what it returned. `opts`:
 -- `valid()` is asked before every turn, and a job whose answer is false is
 -- dropped without calling anything (its villager moved on or was removed);
 -- `on_error(message)` is called if `fn` raises.
 function queue.submit(fn, done, opts)
 	opts = opts or {}
+	next_job_id = next_job_id + 1
 	local job = {
 		co = coroutine.create(fn), done = done, valid = opts.valid, on_error = opts.on_error,
-		queued_at = queue.clock(),
+		on_state = opts.on_state,
+		id = next_job_id, state = "waiting", resumes = 0,
+		submitted_at = game_time(), queued_at = queue.clock(),
 	}
+	if job.on_state then job.on_state(job.state, job) end
 	table.insert(pending, job)
 	if #pending > stats.max_pending then stats.max_pending = #pending end
 	return job
@@ -64,23 +130,41 @@ function queue.step(budget_seconds)
 	-- Turns go round the queue until the budget is spent.
 	while #pending > 0 and queue.clock() < deadline do
 		local job = table.remove(pending, 1)
-		if job.valid and not job.valid() then
-			-- dropped
+		if job.state == "canceled" or (job.valid and not job.valid()) then
+			job.finished_at = job.finished_at or game_time()
+			state(job, "canceled")
+			job.co, job.done, job.valid, job.on_error, job.on_state = nil, nil, nil, nil, nil
 		else
 			ran = true
+			job.resumes = job.resumes + 1
+			job.last_resume_at = game_time()
+			state(job, "running")
 			running, slice_end = job, math.min(deadline, queue.clock() + SLICE_SECONDS)
 			-- Packed with its length: a failed search returns nil, nil, reason, so the table has
 			-- holes and #result may stop before the reason and the report.
 			local result = pack(coroutine.resume(job.co))
 			running = nil
 			if not result[1] then
+				job.finished_at, job.error = game_time(), tostring(result[2])
+				state(job, "failed")
 				core.log("warning", "[living_villages] route job failed: " .. tostring(result[2]))
-				if job.on_error then job.on_error(result[2]) end
+				local on_error = job.on_error
+				job.co, job.done, job.valid, job.on_error, job.on_state = nil, nil, nil, nil, nil
+				if on_error then on_error(result[2]) end
 			elseif coroutine.status(job.co) == "dead" then
+				job.finished_at = game_time()
+				state(job, "completed")
+				local second = math.floor(job.finished_at)
+				local bucket = completed[second % 60]
+				if not bucket or bucket.second ~= second then bucket = {second = second, count = 0}; completed[second % 60] = bucket end
+				bucket.count = bucket.count + 1
 				stats.jobs = stats.jobs + 1
 				stats.max_wait = math.max(stats.max_wait, queue.clock() - job.queued_at)
-				job.done(unpack(result, 2, result.n))
+				local done = job.done
+				job.co, job.done, job.valid, job.on_error, job.on_state = nil, nil, nil, nil, nil
+				if done then done(unpack(result, 2, result.n)) end
 			else
+				state(job, "yielded")
 				table.insert(pending, job)
 			end
 		end

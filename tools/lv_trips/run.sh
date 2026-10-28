@@ -7,7 +7,7 @@
 #                         [--stages home,work,...] [--radius R] [--speed S]
 #                         [--mod-dir PATH] [--spot SX,SY,SZ:BX,BY,BZ]
 #                         [--goto GX,GY,GZ] [--build FILE.lua] [--far SECONDS]
-#                         [--jump FROM:TO [--settle S] [--watch S] [--lag MS] [--scatter SECONDS]]
+#                         [--jump FROM:TO [--settle S] [--watch S] [--lag MS] [--scatter SECONDS] [--claim-search-candidate]]
 #
 # WORLD is a directory name under the user's worlds directory, X,Y,Z a point in
 # the village (a villager's position will do) and LABEL names the run and its
@@ -51,6 +51,7 @@ watch=
 lag=
 scatter=0
 scatter_wait=6
+claim_search_candidate=0
 mode_given=
 mod_dir=$repo_root
 # Strict numbers for values that reach the server conf: digits and one dot, nothing else
@@ -103,6 +104,7 @@ while [ $# -gt 0 ]; do
 		--watch) is_count "$2" || { echo "--watch wants SECONDS (a number), not '$2'" >&2; exit 2; }; watch=$2; shift 2 ;;
 		--lag) is_count "$2" || { echo "--lag wants MILLISECONDS (a number), not '$2'" >&2; exit 2; }; lag=$2; shift 2 ;;
 		--scatter) is_count "$2" || { echo "--scatter wants SECONDS (a number), not '$2'" >&2; exit 2; }; scatter=1; scatter_wait=$2; shift 2 ;;
+		--claim-search-candidate) claim_search_candidate=1; shift ;;
 		--mod-dir) mod_dir=$2; shift 2 ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
@@ -118,7 +120,7 @@ if [ -n "$jump" ]; then
 	if [ -n "$stages" ] || [ -n "$rounds_given" ]; then echo "--jump takes its stages from FROM:TO; drop --stages and --rounds" >&2; exit 2; fi
 	mode=jump
 	settle=${settle:-40}; watch=${watch:-90}; lag=${lag:-0}
-elif [ -n "$settle$watch$lag" ] || [ "$scatter" != 0 ]; then
+elif [ -n "$settle$watch$lag" ] || [ "$scatter" != 0 ] || [ "$claim_search_candidate" != 0 ]; then
 	echo "--settle, --watch, --lag and --scatter need --jump" >&2; exit 2
 fi
 if [ -n "$spot" ]; then
@@ -180,6 +182,7 @@ lv_trips_watch = $watch
 lv_trips_lag = $lag
 lv_trips_scatter = $scatter
 lv_trips_scatter_wait = $scatter_wait
+lv_trips_claim_search_candidate = $claim_search_candidate
 EOT
 
 ports=${TMPDIR:-/tmp}/lv_ports
