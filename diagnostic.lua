@@ -439,28 +439,82 @@ local function describe_fish_offset(anchor, offset, label)
 	return label .. " (" .. table.concat(parts, "; ") .. ")"
 end
 
--- The nearest surface-water tile to pos within fisherman.lua's own search
--- box, broken down candidate by candidate, so a persistent "no reachable
--- water found nearby" can be diagnosed instead of guessed at.
+local function fish_has_open_approach(pos)
+	for _, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
+		for _, dy in ipairs({0, 1}) do
+			local candidate = {x = pos.x + offset[1], y = pos.y + dy, z = pos.z + offset[2]}
+			if cells.is_open(candidate, {thin = true})
+				and cells.is_open({x = candidate.x, y = candidate.y + 1, z = candidate.z})
+				and cells.has_floor(candidate) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- The nearest qualifying fishing anchor within fisherman.lua's own search
+-- box, broken down candidate by candidate, so this cannot name a tile that
+-- the daily pond check rejects.
 local function nearest_fish_candidate(pos)
 	if not pos or not core.find_nodes_in_area then return "unavailable" end
 	local minp = {x = pos.x - FISH_SEARCH_RADIUS, y = pos.y - FISH_BELOW_BAND, z = pos.z - FISH_SEARCH_RADIUS}
 	local maxp = {x = pos.x + FISH_SEARCH_RADIUS, y = pos.y + FISH_ABOVE_BAND, z = pos.z + FISH_SEARCH_RADIUS}
-	local best, best_distance, total = nil, nil, 0
+	local candidates = {}
+	local pond_verdicts, pond_states = {}, {}
 	for _, site in ipairs(core.find_nodes_in_area(minp, maxp, {"group:water"})) do
-		if common.is_surface_water(site) then
-			total = total + 1
-			local d = distance(pos, site)
-			if not best_distance or d < best_distance then best, best_distance = site, d end
+		if common.is_surface_water(site) and fish_has_open_approach(site) then
+			candidates[#candidates + 1] = site
 		end
 	end
-	if not best then return "no surface water found in range (0 candidates)" end
+	table.sort(candidates, function(a, b) return distance(pos, a) < distance(pos, b) end)
+	local remaining = common.fishing_pond_search_cap
+	for _, site in ipairs(candidates) do
+		local key = site.x .. ":" .. site.y .. ":" .. site.z
+		if pond_verdicts[key] == nil then
+			local state = pond_states[key]
+			local previous_head = state and state.head or 1
+			local tiles, qualifies, complete, next_state = common.measure_fishing_pond(site, minp, maxp, state, remaining)
+			remaining = remaining - ((next_state.head or previous_head) - previous_head)
+			if complete then
+				for tile_key in pairs(tiles) do pond_verdicts[tile_key] = qualifies end
+			else
+				for _, tile in ipairs(next_state.added) do
+					pond_states[tile.x .. ":" .. tile.y .. ":" .. tile.z] = next_state
+				end
+			end
+		end
+		if remaining <= 0 then break end
+	end
+	local best, best_index
+	for i, site in ipairs(candidates) do
+		local key = site.x .. ":" .. site.y .. ":" .. site.z
+		if pond_verdicts[key] then
+			best, best_index = site, i
+			break
+		end
+	end
+	if not best then
+		for _, site in ipairs(candidates) do
+			local key = site.x .. ":" .. site.y .. ":" .. site.z
+			if pond_verdicts[key] == nil then return "bounded pond search incomplete; qualifying status unknown" end
+		end
+		return "no qualifying, approachable fishing pond found in range"
+	end
 	local lines = {}
 	for i, offset in ipairs(WATER_NEIGHBOR_OFFSETS) do
 		table.insert(lines, describe_fish_offset(best, offset, FISH_OFFSET_LABELS[i]))
 	end
-	return string.format("%s [%d surface-water tile%s in range] %s",
-		pos_string(best), total, total == 1 and "" or "s", table.concat(lines, " | "))
+	local closer_incomplete = false
+	for i = 1, best_index - 1 do
+		local site = candidates[i]
+		if pond_verdicts[site.x .. ":" .. site.y .. ":" .. site.z] == nil then
+			closer_incomplete = true
+			break
+		end
+	end
+	return string.format("%s [qualifying pond anchor%s] %s",
+		pos_string(best), closer_incomplete and "; closer pond search incomplete" or "", table.concat(lines, " | "))
 end
 
 -- What navigation.lua's last fisherman-promotion check found (#259): a free,

@@ -20,6 +20,9 @@ local farm_replant_nodes = {
 	["mcl_farming:carrot"] = "mcl_farming:carrot_1",
 	["mcl_farming:beetroot"] = "mcl_farming:beetroot_0",
 }
+local FISHING_POND_BATCH_CAP = 64
+local FISHING_POND_TOTAL_CAP = 128
+local FISHING_POND_SEARCH_CAP = 512
 
 -- Used when a villager who has already traded loses a jobsite: it may seek
 -- only a replacement for its existing profession.
@@ -218,6 +221,7 @@ end
 
 local M
 M = {
+	fishing_pond_search_cap = FISHING_POND_SEARCH_CAP,
 	stop_walk = stop_walk,
 	end_seat_walk = end_seat_walk,
 	schedule_stage = stage_at,
@@ -333,6 +337,82 @@ M = {
 		if not def or def.liquidtype ~= "source" then return false end
 		local above = core.get_node_or_nil({x = pos.x, y = pos.y + 1, z = pos.z})
 		return above ~= nil and above.name == "air"
+	end,
+	-- Pond connectivity includes water beneath lily pads, ice, and overhangs;
+	-- those tiles count toward the pond but are not valid places to cast.
+	is_pond_water = function(pos)
+		local node = core.get_node_or_nil(pos)
+		local def = node and core.registered_nodes[node.name]
+		if not def or def.liquidtype ~= "source" then return false end
+		local above = core.get_node_or_nil({x = pos.x, y = pos.y + 1, z = pos.z})
+		local above_def = above and core.registered_nodes[above.name]
+		return above_def ~= nil and (not above_def.liquidtype or above_def.liquidtype == "none")
+	end,
+	-- Daily fishing needs one contiguous 2x3 (or 3x2) rectangle. Return the
+	-- reached tiles as well as the verdict so the caller can cache a complete
+	-- pond. A capped search without a rectangle is unknown, not a rejection:
+	-- the rectangle may be just beyond the frontier.
+	measure_fishing_pond = function(start, minp, maxp, state, budget)
+		local function key(p) return p.x .. ":" .. p.y .. ":" .. p.z end
+		local fresh = state == nil
+		state = state or {
+			tiles = {[key(start)] = start}, seen = {[key(start)] = true},
+			queue = {start}, head = 1, count = 1,
+		}
+		local tiles, seen = state.tiles, state.seen
+		state.added = fresh and {start} or {}
+		if state.exhausted then return tiles, nil, false, state end
+		local complete = true
+		local function has_block_through(tile)
+			local function rectangle(x, z, width, depth)
+				for dx = 0, width - 1 do
+					for dz = 0, depth - 1 do
+						if not tiles[(x + dx) .. ":" .. tile.y .. ":" .. (z + dz)] then return false end
+					end
+				end
+				return true
+			end
+			for dx = -1, 0 do
+				for dz = -2, 0 do
+					if rectangle(tile.x + dx, tile.z + dz, 2, 3) then return true end
+				end
+			end
+			for dx = -2, 0 do
+				for dz = -1, 0 do
+					if rectangle(tile.x + dx, tile.z + dz, 3, 2) then return true end
+				end
+			end
+			return false
+		end
+		local steps = 0
+		while state.queue[state.head] do
+			if steps >= FISHING_POND_BATCH_CAP or steps >= (budget or math.huge)
+				or state.count >= FISHING_POND_TOTAL_CAP then
+				complete = false
+				if state.count >= FISHING_POND_TOTAL_CAP then state.exhausted = true end
+				break
+			end
+			local pos = state.queue[state.head]
+			state.head = state.head + 1
+			steps = steps + 1
+			for _, offset in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
+				local neighbor = {x = pos.x + offset[1], y = pos.y, z = pos.z + offset[2]}
+				local nkey = key(neighbor)
+				if not seen[nkey] and neighbor.x >= minp.x and neighbor.x <= maxp.x
+					and neighbor.z >= minp.z and neighbor.z <= maxp.z then
+					seen[nkey] = true
+					if M.is_pond_water(neighbor) then
+						tiles[nkey] = neighbor
+						state.count = state.count + 1
+						state.queue[#state.queue + 1] = neighbor
+						state.added[#state.added + 1] = neighbor
+						if has_block_through(neighbor) then return tiles, true, true, state end
+					end
+				end
+			end
+		end
+		if complete then return tiles, false, true, state end
+		return tiles, nil, false, state
 	end,
 	workstation_profession = function(name)
 		return workstation_professions[name]

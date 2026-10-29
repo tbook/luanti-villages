@@ -6,6 +6,7 @@ local timeofday = 0.4
 -- their 16-node search radii never see each other.
 local water_nodes = {}
 local water_sites = {}
+local support_nodes = {}
 
 local function key(pos)
 	return string.format("%d,%d,%d", pos.x, pos.y, pos.z)
@@ -40,9 +41,12 @@ minetest = {
 	end,
 	registered_nodes = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
+		["mcl_core:stone"] = {walkable = true},
 		["air"] = {liquidtype = "none"},
 	},
 	get_node_or_nil = function(pos)
+		if support_nodes[pos_key3(pos)] then return {name = "mcl_core:stone"} end
+		if pos.x == 69 and pos.y == -1 and pos.z == 0 then return {name = "mcl_core:stone"} end
 		if pos.x == 1 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_bottom"} end
 		if pos.x == 2 and pos.y == 0 and pos.z == 0 then return {name = "mcl_beds:bed_red_top"} end
 		if pos.x == 4 and pos.y == 0 and pos.z == 0 then return {name = "mcl_composters:composter"} end
@@ -297,6 +301,7 @@ assert(shown.form:find("Water near bed: largest pond near bed: 9 tiles, 3x3 span
 -- *why* every candidate near a fisherman was rejected.
 local isolated_water = {x = 60, y = 0, z = 0}
 place_pond(60, 60, 0, 0, 0)
+place_pond(70, 71, 0, 2, 0)
 local unsupported_fisherman = {
 	get_luaentity = function()
 		return {
@@ -310,8 +315,35 @@ local unsupported_fisherman = {
 	end,
 }
 lookup("stack", player, {type = "object", ref = unsupported_fisherman})
-assert(shown.form:find("Nearest fish candidate: (60.0, 0.0, 0.0) [", 1, true), shown.form)
-assert(shown.form:find("not supported (air)", 1, true), shown.form)
+assert(shown.form:find("Nearest fish candidate: (70.0, 0.0, 0.0) [qualifying pond anchor]", 1, true), shown.form)
+
+-- A bounded pond search reports unknown when its one-wide component exceeds
+-- the proof budget, rather than calling it a definite rejection.
+local function place_water(pos)
+	water_nodes[pos_key3(pos)] = true
+	table.insert(water_sites, pos)
+end
+for x = -30, -1 do place_water({x = x, y = 0, z = 0}) end
+place_water({x = -1, y = 0, z = 1})
+for x = -1, -30, -1 do place_water({x = x, y = 0, z = 2}) end
+place_water({x = -30, y = 0, z = 3})
+for x = -30, -1 do place_water({x = x, y = 0, z = 4}) end
+place_water({x = -1, y = 0, z = 5})
+for x = -1, -30, -1 do place_water({x = x, y = 0, z = 6}) end
+place_water({x = -30, y = 0, z = 7})
+for x = -30, -1 do place_water({x = x, y = 0, z = 8}) end
+support_nodes[pos_key3({x = -30, y = -1, z = -1})] = true
+local capped_fisherman = {
+	get_luaentity = function()
+		return {
+			name = "mobs_mc:villager", _id = "villager-13", _profession = "fisherman",
+			_villages_fisherman = true,
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, get_properties = function() return nil end},
+		}
+	end,
+}
+lookup("stack", player, {type = "object", ref = capped_fisherman})
+assert(shown.form:find("Nearest fish candidate: bounded pond search incomplete; qualifying status unknown", 1, true), shown.form)
 
 -- "Free workstation reachable" reports the promotion check's recorded answer
 -- for an unemployed villager only (#259).
