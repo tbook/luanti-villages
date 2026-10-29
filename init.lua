@@ -582,7 +582,7 @@ core.register_on_mods_loaded(function()
 	-- The shepherd's flock (#215) steers VoxeLibre's own sheep and, while the shepherd
 	-- grazes it, answers get_activity for it.
 	local flock = dofile(core.get_modpath("living_villages") .. "/flock.lua")
-	flock.install(def, core.registered_entities["mobs_mc:sheep"], bell)
+	flock.install(def, core.registered_entities["mobs_mc:sheep"], bell, navigation_api)
 	common.activity_override = flock.activity_override
 	dofile(core.get_modpath("living_villages") .. "/well.lua").install(def)
 	-- After the well and bell, which it only reads; before wander.lua, whose legs it stops.

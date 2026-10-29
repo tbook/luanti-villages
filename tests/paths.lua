@@ -110,3 +110,18 @@ nodes["0,5,0"] = GRASS
 trip_def.on_step(walker, 0.1)
 check(paths.serialize()[1][2] == 3, "trip step weighs 3")
 print("paths trips: ok")
+
+paths.reset()
+paths.WEAR_UP = 1
+local herder_def = {on_step = function() end}
+paths.install(herder_def)
+local herder = {pos = {x = 0, y = 5.5, z = 0}, _profession = "shepherd", _villages_herding = true}
+herder.object = {get_pos = function() return herder.pos end}
+nodes["0,5,0"] = GRASS
+herder_def.on_step(herder, 0.1)
+check(paths.size() == 0, "an active shepherd does not wear a pasture path")
+check(paths.stats.shepherd_herding_skips == 1, "the probe counter records ignored herd steps")
+herder._villages_herding = nil
+herder_def.on_step(herder, 0.1)
+check(paths.stats.shepherd_conversions == 1, "the shepherd can wear a path outside the herd")
+print("paths shepherds: ok")

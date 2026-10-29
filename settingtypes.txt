@@ -58,15 +58,14 @@ living_villages_loomless_house_chance (Share of small houses without a loom) flo
 # in bed. 0 turns shepherds' flocks off, sheep already marked are then let go, and
 # shepherds no longer take their grazing walks about the bell in the work stage.
 living_villages_flock_size (Sheep per shepherd) int 5 0 5
-# How far beyond the village's farthest building a shepherd leads its flock in the work
-# stage (#249). Out in the field it walks to a spot 15 to this many nodes past the farthest
-# door or bed (measured from the bell, scanned in up to 4 passes over what is loaded, 45-60 from the bell when no building is seen; a player's house counts), stands 20-30 s,
-# then walks about 10 nodes on, and so on, at the normal walking pace. A value under 20 counts
-# as 20. Always within 90 of its loom (not bounded by its bed: far_trips.lua keeps vanilla from
-# sending it home); where that leaves no room it grazes as far as it allows, or among the
-# buildings. Villagers no player is within 48 nodes of stand still, so a shepherd far out waits
-# for a player to walk out. 0 keeps every stop in the village (within 20 of the bell).
-# Before #249 this was the distance from the bell: an old value now means a margin.
+# How far from the bell (or loom, if there is no bell) a shepherd searches for a green pasture
+# in the work stage (#253). It searches closest tiles first and picks the nearest open grass spot
+# found within a 30 second / 256 candidate budget, with no nearby paths, paving,
+# farmland or building blocks, then leads its flock to more pasture spots about 10 nodes apart,
+# standing 20-30 s at each. Search starts 15 nodes out and stops at this margin, always within 90
+# of its loom. Where no pasture is found within that bounded search it uses the usual grazing
+# stops. A value of 0 keeps every
+# stop in the village; a villager with no player within 48 nodes still freezes in the field.
 living_villages_flock_range (Shepherd grazing range) int 30 0 60
 # On the morning stage some idle villagers walk to the village well and stand
 # about it for a while (#11). Atmosphere only.

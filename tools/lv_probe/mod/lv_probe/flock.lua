@@ -214,6 +214,10 @@ function flock.run(area, emit, done)
 	-- A stranded shepherd is 60-75 out: keep looking at it there.
 	if PHASES[1][6] then radius = radius + 100 end
 	local common = core.get_modpath("living_villages") and dofile(core.get_modpath("living_villages") .. "/common.lua")
+	local path_stats = core.registered_entities[VILLAGER] and core.registered_entities[VILLAGER]._villages_path_stats
+	local path_start = path_stats and {conversions = path_stats.conversions,
+		shepherd_conversions = path_stats.shepherd_conversions, shepherd_steps = path_stats.shepherd_steps,
+		shepherd_herding_skips = path_stats.shepherd_herding_skips}
 	local extra = tonumber(core.settings:get("lv_probe_flock_extra")) or 0
 	local added = extra > 0 and add_shepherds(area, extra) or {}
 	core.log("action", "[lv_flock] synthetic shepherds added: " .. #added)
@@ -275,7 +279,17 @@ function flock.run(area, emit, done)
 				total[kind] = {calls = c.n, ms_per_call = c.n > 0 and round1(c.s / c.n * 1e4) / 10 or 0,
 					total_ms = round1(c.s * 1000)}
 			end
-			emit({type = "flock", samples = samples, frozen = frozen, cost = total, synthetic = #added, peak = peak, hazards = hazards})
+			local pathwear
+			if path_stats and path_start then
+				pathwear = {
+					conversions = path_stats.conversions - path_start.conversions,
+					shepherd_conversions = path_stats.shepherd_conversions - path_start.shepherd_conversions,
+					shepherd_steps = path_stats.shepherd_steps - path_start.shepherd_steps,
+					herding_steps_skipped = path_stats.shepherd_herding_skips - path_start.shepherd_herding_skips,
+				}
+			end
+			emit({type = "flock", samples = samples, frozen = frozen, cost = total, synthetic = #added,
+				peak = peak, hazards = hazards, pathwear = pathwear})
 			player_pos = nil
 			return done()
 		end

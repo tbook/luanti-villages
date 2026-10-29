@@ -19,6 +19,7 @@ local function setting_number(name, default)
 end
 
 local M = {}
+M.stats = {conversions = 0, shepherd_conversions = 0, shepherd_steps = 0, shepherd_herding_skips = 0}
 
 -- Defaults are first guesses to be tuned on real villages. The decay period
 -- is one game week at the default time_speed (a game day is 1200 s).
@@ -43,6 +44,7 @@ local last_cell = setmetatable({}, {__mode = "k"})
 function M.reset()
 	count, stamp, is_path, dirty = {}, {}, {}, false
 	last_cell = setmetatable({}, {__mode = "k"})
+	for name in pairs(M.stats) do M.stats[name] = 0 end
 end
 
 local function current(hash, now)
@@ -197,11 +199,16 @@ function M.install(def, storage)
 		timers_started = true
 		start_timers(storage)
 	end
+	def._villages_path_stats = M.stats
 	local original_step = def.on_step
 	def.on_step = function(self, dtime, moveresult)
 		local result = original_step(self, dtime, moveresult)
 		local pos = self.object:get_pos()
-		if pos then
+		if pos and self._profession == "shepherd" then
+			M.stats.shepherd_steps = M.stats.shepherd_steps + 1
+			if self._villages_herding then M.stats.shepherd_herding_skips = M.stats.shepherd_herding_skips + 1 end
+		end
+		if pos and not self._villages_herding then
 			local cell = ground_cell(pos)
 			local hash = core.hash_node_position(cell)
 			-- Standing still, or pacing within one block, counts once.
@@ -210,6 +217,10 @@ function M.install(def, storage)
 				local node = core.get_node_or_nil(cell)
 				if node and M.walk(hash, node.name, core.get_gametime(), on_trip(self) and M.TRIP_WEIGHT or 1) == "path" then
 					core.swap_node(cell, {name = PATH})
+					M.stats.conversions = M.stats.conversions + 1
+					if self._profession == "shepherd" then
+						M.stats.shepherd_conversions = M.stats.shepherd_conversions + 1
+					end
 				end
 			end
 		end
