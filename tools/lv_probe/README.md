@@ -209,4 +209,8 @@ flock's sorted distances), `frozen` (how far each shepherd and sheep moved while
 (`hurt` and `wet`: sheep-seconds seen below full health or in liquid. A sheep never heals, so one hurt sheep adds a
 second for every second left of the run; `hurt_sheep` and `wet_sheep` count each sheep once, and `events` (first 40)
 gives when, where (`pos`, and `from`, its place at the previous sample) and, for hurt, the hit points and mcl_mobs' `old_y`,
-the height its fall damage is measured from, #248).
+the height its fall damage is measured from, #248), and `pathwear` (#253): shepherd steps, shepherd
+path conversions, all path conversions, and steps skipped while the shepherd is actively herding.
+During work, a shepherd searches outward from the bell (or loom) for loaded, open green pasture.
+Tile and candidate work is capped, and it chooses the nearest suitable stop found within that budget;
+if no pasture is found within the bounded search it uses the usual stops.
