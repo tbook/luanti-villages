@@ -46,6 +46,8 @@ minetest = {
 	get_gametime = function() return now end,
 	registered_nodes = {
 		["mcl_core:water_source"] = {liquidtype = "source"},
+		["mcl_flowers:waterlily"] = {walkable = true},
+		["mcl_core:ice"] = {walkable = true},
 		["air"] = {liquidtype = "none"},
 		["mcl_core:stone"] = {walkable = true},
 		["mcl_core:sand"] = {walkable = true},
@@ -403,6 +405,59 @@ do
 		}
 		def.do_custom(fisherman, 0.1)
 		assert(fisherman._villages_fish_target and gopath_called, "a 3x2 pond must qualify for daily fishing")
+		water_sites = {}
+	end
+
+	-- A pond remains continuous beneath lily pads, ice, and an overhang.
+	do
+		for x = 10, 11 do
+			for z = 0, 2 do
+				place({x = x, y = 0, z = z + 20}, "mcl_core:water_source")
+				if z == 0 then place({x = x, y = 1, z = z + 20}, "mcl_flowers:waterlily")
+				elseif z == 1 then place({x = x, y = 1, z = z + 20}, "mcl_core:ice")
+				elseif x == 10 then place({x = x, y = 1, z = z + 20}, "mcl_core:stone") end
+			end
+		end
+		water_sites = {{x = 10, y = 0, z = 20}, {x = 11, y = 0, z = 22}}
+		local goal
+		local fisherman = {
+			_id = "f7a5", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
+			gopath = function(self, target) goal = target; self.state = "gowp"; return true end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(goal and goal.x == 11 and goal.z == 22,
+			"covered tiles count toward the pond but the fisherman must choose its exposed anchor")
+		water_sites = {}
+		place({x = 20, y = 0, z = 20}, "mcl_core:water_source")
+		place({x = 20, y = 1, z = 20}, "mcl_core:water_source")
+		assert(not dofile("common.lua").is_pond_water({x = 20, y = 0, z = 20}),
+			"a submerged source must not be counted as a surface pond tile")
+	end
+
+	-- A capped search from a long one-wide arm must not cache the unseen lake
+	-- end as rejected before another seed can find its 2x3 block.
+	do
+		for x = -32, 0 do place({x = x, y = 0, z = 0}, "mcl_core:water_source") end
+		for z = 0, 34 do place({x = 0, y = 0, z = z}, "mcl_core:water_source") end
+		for x = 0, 1 do
+			for z = 32, 34 do place({x = x, y = 0, z = z}, "mcl_core:water_source") end
+		end
+		water_sites = {{x = -32, y = 0, z = 0}, {x = 0, y = 0, z = 32}}
+		local pond_common = dofile("common.lua")
+		local minp, maxp = {x = -52, y = -6, z = -16}, {x = 12, y = 2, z = 48}
+		local _, first_verdict, complete, state = pond_common.measure_fishing_pond(water_sites[1], minp, maxp)
+		assert(not complete and first_verdict == nil, "the long arm must exhaust the first bounded batch")
+		local _, later_verdict, later_complete = pond_common.measure_fishing_pond(water_sites[2], minp, maxp, state)
+		assert(later_complete and later_verdict, "resuming from the later seed must prove the lake's 2x3 block")
+		local fisherman = {
+			_id = "f7a6", _villages_fisherman = true, _profession = "fisherman", state = "stand",
+			object = {get_pos = function() return {x = -20, y = 0, z = 16} end, set_velocity = function() end},
+			gopath = function(self) self.state = "gowp"; return true end,
+		}
+		def.do_custom(fisherman, 0.1)
+		assert(fisherman._villages_fish_target and fisherman._villages_fish_target.x == -32,
+			"a later seed that proves the pond must restore the nearest earlier anchor")
 		water_sites = {}
 	end
 
@@ -868,6 +923,7 @@ do
 			place({x = x, y = 0, z = z}, "mcl_core:water_source")
 		end
 	end
+	place({x = 6, y = 1, z = 0}, "mcl_flowers:waterlily")
 	local fisherman = {
 		_id = "f14", _villages_fisherman = true, _profession = "fisherman", state = "stand",
 		object = {get_pos = function() return {x = 0, y = 0, z = 0} end, set_velocity = function() end},
@@ -923,6 +979,8 @@ do
 	assert(fisherman._villages_fish_session.phase == "wait")
 	assert(fisherman._villages_fish_bobber, "the cast/wait transition must spawn a bobber")
 	assert(#spawned_bobbers == 1)
+	assert(spawned_bobbers[1].pos.x == water.x and spawned_bobbers[1].pos.z == water.z,
+		"the bobber must stay on its exposed anchor when the extra reach would land under a lily pad")
 	-- #227: the sprite (16 px, centred, float rows 2-13 of the png) rests on
 	-- the surface of the source at water.y (top at +0.5): centre above it, the
 	-- stem's foot (6 px down) under it, the head clear of it by a little.
