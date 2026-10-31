@@ -471,6 +471,25 @@ do
 	setmetatable(sitter, {__index = seeker_def})
 	seeker_def.do_custom(sitter, 0.1)
 	assert(sitter._villages_church and sitter._villages_church.role == "member", "member when none is free")
+	-- A seated member cleric whose pulpit comes free mid-service stands up and
+	-- looks for it rather than staying in the pew.
+	metas[key(pulpit)] = {villager = "other"}
+	local pewed = villager("pewed", at({x = 1, y = 2, z = 6}), "cleric")
+	pewed._jobsite = nil
+	setmetatable(pewed, {__index = seeker_def})
+	seeker_def.do_custom(pewed, 0.1)
+	local held = pewed._villages_seat
+	assert(held and held.kind == "pulpit", "reserves a pew")
+	pewed.object:set_pos(at(held.approach))
+	for _, path in ipairs(gopaths) do
+		if path.self == pewed then path.callback(pewed) end
+	end
+	assert(pewed._villages_seated, "seated")
+	metas[key(pulpit)] = {}
+	now = now + 20
+	seeker_def.do_custom(pewed, 0.1)
+	assert(not pewed._villages_seat and not pewed._villages_seated, "releases the seat")
+	assert(not pewed._villages_church or pewed._villages_church.role ~= "member", "no longer a member")
 	day, minetest.find_node_near, metas[key(pulpit)] = saved_day, was_find, was_claim
 end
 

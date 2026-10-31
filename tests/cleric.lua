@@ -196,12 +196,22 @@ time = 8000 / 24000
 assert(cleric.seeking(seeker), "a free pulpit keeps it from sitting with the pews")
 local claims = {}
 for k, name in pairs(nodes) do
-	if name == "living_villages:pulpit" then
+	if name == "living_villages:pulpit" and k ~= key(late_pulpit) then
 		metas[k] = metas[k] or {}
 		claims[k] = metas[k].villager
 		metas[k].villager = "someone"
 	end
 end
+-- The only free pulpit is one it could not path to: skipped, so not "seeking".
+local seeker_gopath = def.gopath
+def.gopath = function() return false end
+now = now + 20
+def.do_custom(seeker, 0.1)
+def.gopath = seeker_gopath
+assert(not cleric.seeking(seeker), "an unreachable pulpit does not keep it standing")
+now = now + 61
+assert(cleric.seeking(seeker), "reachable again once the skip expires")
+metas[key(late_pulpit)] = {villager = "someone"}
 assert(not cleric.seeking(seeker), "none free: it may sit")
 for k, owner in pairs(claims) do metas[k].villager = owner end
 nodes[key(late_pulpit)], metas[key(late_pulpit)] = nil, nil
