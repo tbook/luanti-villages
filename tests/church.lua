@@ -18,6 +18,8 @@ vector = {
 	equals = function(a, b) return a.x == b.x and a.y == b.y and a.z == b.z end,
 	distance = function(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2) end,
 	round = function(a) return {x = math.floor(a.x + 0.5), y = math.floor(a.y + 0.5), z = math.floor(a.z + 0.5)} end,
+	add = function(a, n) return {x = a.x + n, y = a.y + n, z = a.z + n} end,
+	subtract = function(a, n) return {x = a.x - n, y = a.y - n, z = a.z - n} end,
 	zero = function() return {x = 0, y = 0, z = 0} end,
 	new = function(a) return {x = a.x, y = a.y, z = a.z} end,
 }
@@ -423,6 +425,54 @@ stray._jobsite = nil
 now = now + 6
 def.do_custom(stray, 0.1)
 assert(stray._villages_church and stray._villages_church.role == "member", "a member of the congregation")
+
+-- A cleric with no pulpit yet keeps seeking one through the service, and
+-- conducts on arriving late, rather than sitting down as a member (#326). Built
+-- as init.lua does: cleric.lua installed before church.lua.
+do
+	local cleric_lua = dofile("cleric.lua")
+	local seeker_def = {
+		on_activate = def.on_activate, get_staticdata = def.get_staticdata,
+		do_custom = function() end, gopath = def.gopath,
+		set_animation = def.set_animation, turn_in_direction = def.turn_in_direction,
+		set_velocity = def.set_velocity,
+	}
+	cleric_lua.install(seeker_def)
+	church.install(seeker_def, seat, cleric_lua)
+	local was_claim = metas[key(pulpit)]
+	metas[key(pulpit)] = {}
+	local was_find = minetest.find_node_near
+	minetest.find_node_near = function(p, radius, names)
+		for _, site in ipairs(minetest.find_nodes_in_area(
+			{x = p.x - radius, y = p.y - radius, z = p.z - radius},
+			{x = p.x + radius, y = p.y + radius, z = p.z + radius}, names)) do return site end
+	end
+	local saved_day = day
+	day = 4
+	time = 8000 / 24000
+	local late = villager("late", at({x = 1, y = 2, z = 6}), "cleric")
+	late._jobsite = nil
+	setmetatable(late, {__index = seeker_def})
+	now = now + 20
+	local before = #gopaths
+	seeker_def.do_custom(late, 0.1)
+	assert(#gopaths == before + 1 and vector.equals(gopaths[#gopaths].target, pulpit), "seeks the pulpit")
+	assert(not late._villages_church and not late._villages_seat, "does not join the pews")
+	late.object:set_pos(at({x = 7, y = 3, z = 8}))
+	gopaths[#gopaths].callback(late)
+	assert(late._villages_church == nil and cleric_lua.claimed_pulpit(late), "claims it on arrival")
+	late.state = "stand"
+	seeker_def.do_custom(late, 0.1)
+	assert(late._villages_church and late._villages_church.role == "cleric", "conducts the service")
+	-- With no free pulpit it sits with the congregation, as before.
+	metas[key(pulpit)] = {villager = "other"}
+	local sitter = villager("sitter", at({x = 1, y = 2, z = 6}), "cleric")
+	sitter._jobsite = nil
+	setmetatable(sitter, {__index = seeker_def})
+	seeker_def.do_custom(sitter, 0.1)
+	assert(sitter._villages_church and sitter._villages_church.role == "member", "member when none is free")
+	day, minetest.find_node_near, metas[key(pulpit)] = saved_day, was_find, was_claim
+end
 
 -- Nobody stands on the pews: a chair is solid enough to stand on, but the cell
 -- above one is never a place.

@@ -77,6 +77,26 @@ end
 -- saved with it.
 local unreachable = {}
 
+-- A pulpit this villager would still walk to: free, and not one it could not
+-- reach lately.
+local function reachable_free_pulpit(self, pos)
+	local now = core.get_gametime()
+	local skipped = unreachable[self._id] or {}
+	for _, candidate in ipairs(free_pulpits(pos)) do
+		local site = candidate.site
+		local key = core.hash_node_position and core.hash_node_position(site) or pos_string(site)
+		if (skipped[key] or 0) <= now then return site end
+	end
+end
+
+-- Whether the villager is still looking for a pulpit it can have, so that the
+-- service does not seat it with the congregation (church.lua).
+local function seeking(self)
+	if not wants_pulpit(self) then return false end
+	local pos = self.object and self.object:get_pos()
+	return pos ~= nil and reachable_free_pulpit(self, pos) ~= nil
+end
+
 local function seek_pulpit(self)
 	local now = core.get_gametime()
 	if now < (self._villages_pulpit_check or 0) then return end
@@ -105,6 +125,10 @@ local function seek_pulpit(self)
 	end
 end
 
+-- Holiday stages a pulpitless cleric keeps looking through, so one that is
+-- late conducts on arrival (#326).
+local SEEK_STAGES = {free = true, pulpit = true, service = true}
+
 local function install(def)
 	if not core.registered_nodes[PULPIT] then
 		core.log("warning", "[living_villages] " .. PULPIT .. " is unavailable; no pulpit clerics")
@@ -118,7 +142,7 @@ local function install(def)
 		-- already under way; one trip at a time.
 		if result == false or self.following or self.state == "gowp"
 			or self._villages_keeper or self._villages_keeper_target then return result end
-		if wants_pulpit(self) and (common.is_work_time(self) or common.schedule_stage(nil, self) == "free") then
+		if wants_pulpit(self) and (common.is_work_time(self) or SEEK_STAGES[common.schedule_stage(nil, self)]) then
 			seek_pulpit(self)
 		end
 		return result
@@ -129,6 +153,7 @@ return {
 	install = install,
 	-- Exposed for tests and diagnostics.
 	employ = employ,
+	seeking = seeking,
 	claimed_pulpit = claimed_pulpit,
 	status = function(self)
 		if self._profession ~= PROFESSION then return "not a cleric" end

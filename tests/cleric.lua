@@ -173,6 +173,40 @@ def.do_custom(frank, 0.1)
 assert(#attempted == 4 and attempted[4] == sealed.x, "a nil gopath stops the search without skipping")
 def.gopath = base_gopath
 
+-- On a holiday a pulpitless cleric keeps seeking through the Pulpit and Service
+-- stages, so a late one still gets a pulpit; it stops once the service is over (#326).
+local late_pulpit = {x = 70, y = 0, z = 0}
+nodes[key(late_pulpit)] = "living_villages:pulpit"
+metas[key(late_pulpit)] = {}
+local saved_day, saved_time = day, time
+day = 4
+local function polls(id, tod)
+	time = tod / 24000
+	local self = villager(id, {x = 75, y = 0, z = 0}, "cleric")
+	local before = #gopaths
+	now = now + 20
+	def.do_custom(self, 0.1)
+	return #gopaths - before, self
+end
+assert(polls("pulpit-stage", 6000) == 1, "seeks in the pulpit stage")
+assert(polls("service-stage", 8000) == 1, "seeks during the service")
+assert(polls("bell-stage", 11000) == 0, "stops after the service")
+local seeker = villager("seeker", {x = 75, y = 0, z = 0}, "cleric")
+time = 8000 / 24000
+assert(cleric.seeking(seeker), "a free pulpit keeps it from sitting with the pews")
+local claims = {}
+for k, name in pairs(nodes) do
+	if name == "living_villages:pulpit" then
+		metas[k] = metas[k] or {}
+		claims[k] = metas[k].villager
+		metas[k].villager = "someone"
+	end
+end
+assert(not cleric.seeking(seeker), "none free: it may sit")
+for k, owner in pairs(claims) do metas[k].villager = owner end
+nodes[key(late_pulpit)], metas[key(late_pulpit)] = nil, nil
+day, time = saved_day, saved_time
+
 -- Vanilla's verdicts are untouched: a cleric whose pulpit is gone is
 -- whatever vanilla made of it, and the claim is not kept.
 nodes[key(pulpit)] = nil

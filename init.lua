@@ -575,7 +575,7 @@ core.register_on_mods_loaded(function()
 	dofile(core.get_modpath("living_villages") .. "/tavern.lua")(def, meal, seat)
 	dofile(core.get_modpath("living_villages") .. "/player_meals.lua").install(meal, seat)
 	-- After the tavern, so its seated-guest check sees a pew first.
-	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat)
+	dofile(core.get_modpath("living_villages") .. "/church.lua").install(def, seat, cleric)
 	local bell = dofile(core.get_modpath("living_villages") .. "/bell.lua")
 	local market_controller = market.new({site = market_site, props = market_props, navigation = navigation_api})
 	bell.install(def, market_controller, navigation_api)

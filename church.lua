@@ -8,6 +8,7 @@
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
+local seeking_cleric -- the installed cleric.lua, whose skipped pulpits are the ones that count
 local follower = dofile(core.get_modpath("living_villages") .. "/follower.lua")
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local PULPIT = "living_villages:pulpit"
@@ -230,13 +231,18 @@ end
 
 -- Which part a villager plays this tick: "cleric" at its claimed pulpit during
 -- the Pulpit and Service stages, "member" of the congregation otherwise during
--- the service. A cleric with no pulpit of its own sits with the rest.
+-- the service. A cleric with no pulpit of its own, and none to be had, sits with the rest.
 local function role_now(self)
 	if self.child or not self._id or self.following then return end
 	local stage = common.schedule_stage(nil, self)
 	local pulpit = (stage == "pulpit" or stage == "service") and cleric.claimed_pulpit(self)
 	if pulpit then return "cleric", pulpit end
-	if stage == "church" or stage == "service" then return "member" end
+	if stage == "church" or stage == "service" then
+		-- A cleric still able to find a pulpit keeps seeking it (cleric.lua),
+		-- and does not sit down.
+		if stage == "service" and (seeking_cleric or cleric).seeking(self) then return end
+		return "member"
+	end
 end
 
 local function church_seat(self)
@@ -570,7 +576,8 @@ local function trading(self)
 	return self._trading_players and next(self._trading_players) ~= nil
 end
 
-local function install(def, shared_seat)
+local function install(def, shared_seat, installed_cleric)
+	seeking_cleric = installed_cleric
 	seat = shared_seat or dofile(core.get_modpath("living_villages") .. "/seat.lua")
 	local original_activate = def.on_activate
 	local original_custom = def.do_custom
