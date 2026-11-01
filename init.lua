@@ -585,6 +585,8 @@ core.register_on_mods_loaded(function()
 	flock.install(def, core.registered_entities["mobs_mc:sheep"], bell, navigation_api)
 	common.activity_override = flock.activity_override
 	dofile(core.get_modpath("living_villages") .. "/well.lua").install(def)
+	-- The morning at the bell (#329), the well's visit at the bell; one of the two a morning.
+	dofile(core.get_modpath("living_villages") .. "/bell_hangout.lua").install(def, bell)
 	-- After the well and bell, which it only reads; before wander.lua, whose legs it stops.
 	dofile(core.get_modpath("living_villages") .. "/conversation.lua").install(def)
 	-- Outermost, so it sees "walk" after everything else has had its say.

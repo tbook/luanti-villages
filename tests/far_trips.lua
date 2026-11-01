@@ -90,6 +90,8 @@ check("child", run(villager(60, {child = true})), "go_home")
 -- Putter stage and the free morning: vanilla's rule stands.
 ticks = 6800
 check("putter", run(villager(60)), "go_home")
+-- The morning at the bell (#329) once it has found one.
+check("putter, morning bell", run(villager(60, {_villages_bell_hangout = {}})), "none")
 ticks = 9600
 
 -- Home and sleep stages, and a thunderstorm, send everyone home as ever.

@@ -387,6 +387,8 @@ local function join(self, pos)
 	end
 	if not state then
 		if not wants(self) or now() < (self._villages_well_checked or 0) then return end
+		-- Went to the bell this morning instead (bell_hangout.lua, #329).
+		if common.morning_claimed_by_other(self, "well") then return end
 		-- A trip of someone else's, begun this tick or before.
 		if self.state == "gowp" or busy(self) then return end
 		local well = nearest_well(self, self._bed or vector.round(pos))
@@ -396,6 +398,7 @@ local function join(self, pos)
 		end
 		state = {well = well, since = now(), limit = walk_limit(self, well.center)}
 		self._villages_well = state
+		common.claim_morning(self, "well")
 		core.log("action", string.format("[living_villages] villager %s sets off for the well at (%d,%d,%d) (day %s)",
 			tostring(self._id), well.water.x, well.water.y, well.water.z, tostring(self._villages_well_day)))
 	end

@@ -112,9 +112,11 @@ local function idle(self)
 		local route = self[field]
 		if route and (route.status == "planning" or route.status == "travelling") then return false, field end
 	end
-	-- Heading for the well or bell, not yet about it.
-	local well, bell = self._villages_well, self._villages_bell
-	if (well and not well.arrived) or (bell and not bell.arrived) then return false, "not arrived" end
+	-- Heading for the well or bell (the morning's bell too, #329), not yet about it.
+	local well, bell, hangout = self._villages_well, self._villages_bell, self._villages_bell_hangout
+	if (well and not well.arrived) or (bell and not bell.arrived) or (hangout and not hangout.arrived) then
+		return false, "not arrived"
+	end
 	return true
 end
 

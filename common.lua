@@ -425,5 +425,16 @@ M = {
 			or (core.get_item_group(name, "cauldron") > 0 and "leatherworker")
 	end,
 	workstation_search_nodes = function() return workstation_search_node_names end,
+	-- The morning visit to the well (well.lua) or the bell (bell_hangout.lua), #329:
+	-- one of the two a day. The claim is saved with the villager, so a reload does
+	-- not let it go to the other.
+	morning_claimed_by_other = function(self, place)
+		local claim = self._villages_morning
+		local day = core.get_day_count and core.get_day_count() or 0
+		return claim ~= nil and claim.day == day and claim.place ~= place
+	end,
+	claim_morning = function(self, place)
+		self._villages_morning = {day = core.get_day_count and core.get_day_count() or 0, place = place}
+	end,
 }
 return M

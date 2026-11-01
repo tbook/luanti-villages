@@ -364,6 +364,10 @@ for name, extra in pairs({
 }) do
 	assert(not goes(villager(ORIGIN - 6, ORIGIN + 3, extra)), name .. " does not go to the well")
 end
+-- The morning at the bell (#329) instead: not the well too.
+setup()
+assert(not goes(villager(ORIGIN - 6, ORIGIN + 3, {_villages_morning = {day = day, place = "bell"}})), "not at the well after the bell this morning")
+setup()
 -- A trade stops it, and the time does not count against its walk.
 local trader = villager(ORIGIN - 6, ORIGIN + 3)
 assert(goes(trader))

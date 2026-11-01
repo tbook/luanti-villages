@@ -238,6 +238,7 @@ blocked("following", function(v) v.following = {} end)
 blocked("trading", function(v) v._trading_players = {p = true} end)
 blocked("on the way to the well", function(v) v._villages_well = {} end)
 blocked("on the way to the bell", function(v) v._villages_bell = {} end)
+blocked("on the way to the morning bell", function(v) v._villages_bell_hangout = {} end)
 blocked("work stage", function() time = 9000 / 24000 end)
 time = 6000 / 24000
 blocked("tavern stage (guests belong to tavern.lua)", function() time = 16000 / 24000 end)
