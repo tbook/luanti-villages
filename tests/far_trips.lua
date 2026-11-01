@@ -118,6 +118,12 @@ ticks = 11000
 check("bell, no bell", run(villager(60)), "go_home")
 check("bell", run(villager(60, {_villages_bell = {}})), "none")
 check("bell stage ignores a church target", run(villager(60, {_villages_church = {}})), "go_home")
+-- The social stage (#327) keeps villagers about the church, which is out of the bed's reach.
+ticks = 10300
+check("social, no church kept", run(villager(60)), "go_home")
+check("social, kept about the church", run(villager(60, {_villages_social = {}})), "none")
+ticks = 11000
+check("bell stage drops the social hold", run(villager(60, {_villages_social = {}})), "go_home")
 holiday = false
 ticks = 9600
 

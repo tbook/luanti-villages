@@ -4,7 +4,9 @@
 -- full. The cleric who claimed the pulpit (cleric.lua) stands beside it facing
 -- the congregation during the Pulpit and Service stages. With no church within
 -- reach, or none a villager can walk to, the villager putters as on any
--- morning. At the end of the stage seats are released and the bell gathering (bell.lua) follows.
+-- morning. At the end of the service seats are released. The social stage
+-- (#327) that follows keeps villagers about the church in anchored wander legs
+-- until the bell gathering (bell.lua) begins.
 local core = minetest
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 local cleric = dofile(core.get_modpath("living_villages") .. "/cleric.lua")
@@ -50,7 +52,10 @@ local BACK_REACH = 8
 -- How far above a standing place to look for the roof: well past the stock
 -- nave's 11, for a taller church. Open ground scans all of it, a read a node.
 local ROOF_REACH = 32
-local FIELDS = {"_villages_church", "_villages_church_skipped", "_villages_church_checked"}
+-- The social stage (#327) keeps villagers within this many nodes of the pulpit.
+local SOCIAL_RADIUS = 12
+local FIELDS = {"_villages_church", "_villages_church_skipped", "_villages_church_checked",
+	"_villages_social", "_villages_wander_anchor"}
 
 local standing = {}
 local seat
@@ -571,6 +576,38 @@ local function join(self, pos)
 	if not walk(self, church, place, pos) then return leave(self) end
 end
 
+-- The social stage (#327), after the service: the villager stays about the
+-- church in anchored wander legs (wander.lua) within SOCIAL_RADIUS of the pulpit,
+-- rather than walking off. The pulpit is the one it attended, else the one
+-- kept from an earlier tick, else the cleric's own, else the nearest from its bed.
+local function socializing(self)
+	return not self.child and self._id and not self.following
+		and common.schedule_stage(nil, self) == "social"
+end
+
+local function social(self, pos, attended)
+	local held = self._villages_social
+	local pulpit = attended or (held and held.pulpit) or cleric.claimed_pulpit(self)
+	if not pulpit then
+		if now() < (self._villages_church_checked or 0) then return end
+		pulpit = nearest_pulpit(self, self._bed or vector.round(pos))
+		if not pulpit then
+			self._villages_church_checked = now() + SEARCH_SECONDS
+			return
+		end
+	end
+	self._villages_social = {pulpit = pulpit}
+	self._villages_wander_anchor = {pos = pulpit, radius = SOCIAL_RADIUS}
+end
+
+-- Out of the social stage: drop the anchor, but only one this module set.
+local function unsocial(self)
+	if self._villages_social then
+		self._villages_social = nil
+		self._villages_wander_anchor = nil
+	end
+end
+
 -- Someone has the villager's trade window open.
 local function trading(self)
 	return self._trading_players and next(self._trading_players) ~= nil
@@ -600,6 +637,8 @@ local function install(def, shared_seat, installed_cleric)
 
 	def.do_custom = function(self, dtime)
 		local role, pulpit = role_now(self)
+		-- The church this villager attended, for the social stage after a seated leave.
+		local attended = self._villages_church and self._villages_church.pulpit
 		-- Seated in a pew, like at dinner (tavern.lua): skip the vanilla
 		-- do_custom, whose activity poll would walk the member off, and hold
 		-- the pose each tick.
@@ -628,8 +667,10 @@ local function install(def, shared_seat, installed_cleric)
 		elseif role then
 			local pos = self.object:get_pos()
 			if pos then join(self, pos) end
-		elseif self._villages_church then
-			leave(self)
+		else
+			if self._villages_church then leave(self) end
+			local pos = self.object:get_pos()
+			if pos and socializing(self) then social(self, pos, attended) else unsocial(self) end
 		end
 		-- Vanilla's player scan (villager.lua stand_still) turns jumping off
 		-- while a player is within four nodes, which would leave a villager

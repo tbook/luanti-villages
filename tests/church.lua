@@ -708,4 +708,56 @@ local keeper_of = villager("saved", at({x = 1, y = 2, z = 6}))
 keeper_of._villages_church = {pulpit = pulpit}
 local saved = def.get_staticdata(keeper_of)
 assert(saved._villages_church == nil and keeper_of._villages_church, "not saved, kept")
+-- The social stage (#327), from 10:15: the service is over. Pews and places are
+-- let go, and the villagers, the cleric too, stay about the church in an anchored
+-- wander (wander.lua) rather than walking off. The bell follows at 10:30.
+day = 4
+for k2 in pairs(pews) do seat.reservations[k2] = nil end
+time = 8000 / 24000
+local sitter = member("social_sitter")
+def.do_custom(sitter, 0.1)
+local held = sitter._villages_seat
+assert(held and held.kind == "pulpit", "a pew before the social stage")
+time = 10300 / 24000
+def.do_custom(sitter, 0.1)
+local hold = seat.reservations[key(held.chair)]
+assert(not sitter._villages_seat and not sitter._villages_church, "the pew and the service end at 10:15")
+assert(not hold or hold.id ~= "social_sitter", "the chair is released")
+assert(sitter.state ~= "gowp" and sitter.order == nil, "stands, not walking to its pew")
+assert(sitter._villages_social and vector.equals(sitter._villages_social.pulpit, pulpit), "kept about this church")
+local anchor = sitter._villages_wander_anchor
+assert(anchor and vector.equals(anchor.pos, pulpit) and anchor.radius == 12, "anchored within 12 of the pulpit")
+-- Still social on the next tick: no pew, and the anchor stays.
+def.do_custom(sitter, 0.1)
+assert(not sitter._villages_seat and not sitter._villages_church, "takes no pew in the social stage")
+assert(sitter._villages_wander_anchor and vector.equals(sitter._villages_wander_anchor.pos, pulpit), "anchor kept")
+-- Saved games do not keep the anchor, which would bind a villager after the stage.
+local saved = def.get_staticdata(sitter)
+assert(saved._villages_wander_anchor == nil and saved._villages_social == nil, "not saved")
+assert(sitter._villages_wander_anchor, "but kept in memory")
+
+-- The cleric's own pulpit is what it keeps about, once its service ends.
+time = 8000 / 24000
+local social_cleric = cleric_named("social_cleric", at({x = 4, y = 2, z = 9}))
+def.do_custom(social_cleric, 0.1)
+assert(social_cleric._villages_church and social_cleric._villages_church.role == "cleric", "conducts the service")
+time = 10300 / 24000
+def.do_custom(social_cleric, 0.1)
+assert(not social_cleric._villages_church and social_cleric.state ~= "gowp", "the cleric leaves the dais and its route")
+anchor = social_cleric._villages_wander_anchor
+assert(anchor and vector.equals(anchor.pos, pulpit) and anchor.radius == 12, "the cleric stays about its pulpit")
+
+-- A villager who never found a church keeps nothing: it wanders as on any free hour.
+local lost_social = villager("lost_social", {x = 300, y = 1.51, z = 300})
+lost_social._bed = {x = 300, y = 2, z = 300}
+def.do_custom(lost_social, 0.1)
+assert(lost_social._villages_wander_anchor == nil and lost_social._villages_social == nil, "no church, no anchor")
+
+-- At the bell the anchor goes: the bell gathering or the afternoon takes over.
+time = 10500 / 24000
+def.do_custom(sitter, 0.1)
+assert(sitter._villages_wander_anchor == nil and sitter._villages_social == nil, "the social stage ends with the anchor")
+def.do_custom(social_cleric, 0.1)
+assert(social_cleric._villages_wander_anchor == nil and social_cleric._villages_social == nil, "the cleric's too")
+time = 8000 / 24000
 print("ok")

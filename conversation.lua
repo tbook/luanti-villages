@@ -1,6 +1,6 @@
 -- Villagers converse (#242): two or three idle adults standing within a few nodes
 -- of each other, as they do at the well (#11) and about the bell (#127), in
--- the putter and bell stages, now and then stop and face one another for
+-- the putter, social (#327) and bell stages, now and then stop and face one another for
 -- 8-25 s, then go on. Atmosphere only: they talk where they stand and walk to
 -- nowhere, there is no animation for it (the model has stand, walk and sleep),
 -- and nothing is saved or placed.
@@ -21,7 +21,7 @@ local core = minetest
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 
-local STAGES = {putter = true, bell = true}
+local STAGES = {putter = true, social = true, bell = true}
 local SCAN_MIN, SCAN_MAX = 4, 8
 local CHANCE = 0.1
 local RADIUS = 5

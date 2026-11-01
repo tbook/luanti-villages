@@ -256,6 +256,15 @@ do
 	time, day = 6000 / 24000, 1
 end
 
+-- The social stage after the service (#327) pairs villagers up too, about the church.
+do
+	clear()
+	local a, b = villager(0, 0), villager(2, 1)
+	time, day = 10300 / 24000, 4
+	assert(run_until_talking({a, b}), "villagers talk in the social stage")
+	time, day = 6000 / 24000, 1
+end
+
 -- Another system takes a member: it leaves at once, and a pair ends.
 local function taken(label, change, expect_leave_all)
 	clear()

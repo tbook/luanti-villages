@@ -110,7 +110,8 @@ for _, case in ipairs({
 	{5499, "sleep", "sleep", "sleep"}, {5500, "putter", "pulpit", "sleep"},
 	{6999, "putter", "pulpit", "sleep"}, {7000, "church", "service", "putter"},
 	{7999, "church", "service", "putter"}, {8000, "church", "service", "free"},
-	{10499, "church", "service", "free"}, {10500, "bell", "bell", "free"},
+	{10249, "church", "service", "free"}, {10250, "social", "social", "free"},
+	{10499, "social", "social", "free"}, {10500, "bell", "bell", "free"},
 	{12999, "bell", "bell", "free"}, {13000, "bell", "bell", "free"},
 	{14499, "bell", "bell", "free"}, {14500, "bell", "bell", "staff"},
 	{14999, "bell", "bell", "staff"}, {15000, "tavern", "tavern", "staff"},
@@ -130,6 +131,9 @@ villager._villages_skip_tavern = 4
 assert(common.schedule_stage(at(16000), villager) == "home")
 villager._villages_skip_tavern = nil
 assert(common.get_activity(at(8000)) == "church")
+-- The social quarter hour is vanilla's idle hours: no order, so no walk to the bell.
+assert(common.as_villager(villager, common.get_activity, at(10300)) == "chill")
+assert(common.as_villager(cleric, common.get_activity, at(10300)) == "chill")
 assert(common.get_activity(at(6000)) == "putter")
 assert(common.get_activity(at(20000)) == "sleep")
 assert(common.get_activity(at(18000)) == "sleep")

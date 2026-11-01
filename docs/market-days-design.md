@@ -30,12 +30,14 @@ Ordinary days remain as they are. Holiday hours become:
 | Role | Hours | Activity |
 |---|---|---|
 | Ordinary adult | 05:30–07:00 | Putter |
-| Ordinary adult | 07:00–10:30 | Church |
+| Ordinary adult | 07:00–10:15 | Church |
+| Ordinary adult | 10:15–10:30 | Social: stay about the church (#327) |
 | Ordinary adult | 10:30–15:00 | Market |
 | Ordinary adult | 15:00–17:30 | Tavern |
 | Ordinary adult | 17:30–18:30 | Home |
 | Ordinary adult | 18:30–05:30 | Sleep |
-| Cleric | Before 10:30 | Existing pulpit/service schedule |
+| Cleric | Before 10:15 | Existing pulpit/service schedule |
+| Cleric | 10:15–10:30 | Social, as the ordinary adults |
 | Cleric | From 10:30 | Same market, tavern, home and sleep hours as ordinary adults |
 | Keeper | 07:00–08:00 | Putter |
 | Keeper | 08:00–14:30 | Free |

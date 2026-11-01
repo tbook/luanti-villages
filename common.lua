@@ -75,11 +75,13 @@ local KEEPER_SCHEDULE = {
 -- Holidays (#124) fall on every full moon and new moon, every 4 days. The
 -- holiday tables apply instead of the two above and share their wrap at
 -- midnight. "church" is the villagers' service and "pulpit" and "service" the
--- cleric's; "bell" runs from the service until tavern time, for the holiday
--- gathering (and market days, #281).
+-- cleric's; "social" (#327) is the quarter hour after the service, when they
+-- stay about the church; "bell" runs from then until tavern time, for the
+-- holiday gathering (and market days, #281).
 local HOLIDAY_SCHEDULE = {
 	{start = 5500, stage = "putter"},
 	{start = 7000, stage = "church"},
+	{start = 10250, stage = "social"},
 	{start = 10500, stage = "bell"},
 	{start = 15000, stage = "tavern"},
 	{start = 17500, stage = "home"},
@@ -88,6 +90,7 @@ local HOLIDAY_SCHEDULE = {
 local HOLIDAY_CLERIC_SCHEDULE = {
 	{start = 5500, stage = "pulpit"},
 	{start = 7000, stage = "service"},
+	{start = 10250, stage = "social"},
 	{start = 10500, stage = "bell"},
 	{start = 15000, stage = "tavern"},
 	{start = 17500, stage = "home"},
@@ -167,6 +170,9 @@ local vanilla_activity = {
 	church = "church",
 	pulpit = "pulpit",
 	service = "service",
+	-- Vanilla's own idle hours: no order, so it leaves the villager to aimless wander
+	-- (wander.lua), kept about the church by church.lua. Not "gathering", which walks to the town bell.
+	social = "chill",
 	bell = "bell",
 }
 

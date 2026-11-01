@@ -53,6 +53,8 @@ local function has_errand(self)
 	if stage == "church" or stage == "pulpit" or stage == "service" then
 		return self._villages_church ~= nil
 	end
+	-- Kept about the church after the service (church.lua, #327).
+	if stage == "social" then return self._villages_social ~= nil end
 	return false
 end
 

@@ -219,9 +219,11 @@ and a cleric who has claimed the pulpit should live in the village. At 7:00:
 Expected result: villagers walk in and sit in the chairs, each facing the
 pulpit, no two in one chair. Once the twelve pews are taken the rest stand at
 the back of the church facing the pulpit, and sit if a chair frees. The cleric
-stands on the dais behind the pulpit, facing the pews. At 10:30 everyone gets
+stands on the dais behind the pulpit, facing the pews. At 10:15 everyone gets
 up and leaves the seats. With no church in the village, or one sealed off from
-the villagers, they putter as on any morning.
+the villagers, they putter as on any morning. From 10:15 to 10:30 (the social
+stage, #327) they stand about the church, in short legs that stay within about
+12 nodes of its pulpit, and do not walk off home.
 
 ## 18. Bell gathering on a holiday
 
