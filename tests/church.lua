@@ -760,4 +760,37 @@ assert(sitter._villages_wander_anchor == nil and sitter._villages_social == nil,
 def.do_custom(social_cleric, 0.1)
 assert(social_cleric._villages_wander_anchor == nil and social_cleric._villages_social == nil, "the cleric's too")
 time = 8000 / 24000
+-- Mid-walk when the social stage begins (#327): a villager on its way to a pew
+-- is stopped, its pew let go, and the anchor set. The cleric on its way to the
+-- dais is stopped the same way.
+day = 4
+for k2 in pairs(pews) do seat.reservations[k2] = nil end
+time = 8000 / 24000
+local walker_m = member("social_walker")
+def.do_custom(walker_m, 0.1)
+local reserved = walker_m._villages_seat
+assert(reserved and reserved.kind == "pulpit", "reserves a pew on its way")
+assert(walker_m.state == "gowp", "walking to the pew")
+time = 10300 / 24000
+def.do_custom(walker_m, 0.1)
+assert(walker_m.state == "stand", "the walk to the pew is stopped")
+assert(walker_m._target == nil and walker_m.waypoints == nil and walker_m._villages_follow == nil, "the walk is cleared")
+assert(not walker_m._villages_seat and not walker_m._villages_church, "the pew is released")
+local kept = seat.reservations[key(reserved.chair)]
+assert(not kept or kept.id ~= "social_walker", "the chair is no longer reserved")
+local walker_anchor = walker_m._villages_wander_anchor
+assert(walker_anchor and vector.equals(walker_anchor.pos, pulpit) and walker_anchor.radius == 12, "anchored at the pulpit")
+
+time = 8000 / 24000
+local walking_cleric = cleric_named("social_walking_cleric", at({x = 1, y = 2, z = 6}))
+def.do_custom(walking_cleric, 0.1)
+assert(walking_cleric.state == "gowp" and walking_cleric._villages_church, "walking to the dais")
+time = 10300 / 24000
+def.do_custom(walking_cleric, 0.1)
+assert(walking_cleric.state == "stand", "the cleric's walk is stopped")
+assert(not walking_cleric._villages_church, "the cleric's visit ends")
+local cleric_anchor = walking_cleric._villages_wander_anchor
+assert(cleric_anchor and vector.equals(cleric_anchor.pos, pulpit) and cleric_anchor.radius == 12, "the cleric is anchored at its pulpit")
+time = 8000 / 24000
+
 print("ok")
