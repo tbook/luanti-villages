@@ -241,7 +241,7 @@ blocked("on the way to the bell", function(v) v._villages_bell = {} end)
 blocked("on the way to the morning bell", function(v) v._villages_bell_hangout = {} end)
 blocked("work stage", function() time = 9000 / 24000 end)
 time = 6000 / 24000
-blocked("tavern stage (guests belong to tavern.lua)", function() time = 16000 / 24000 end)
+blocked("tavern stage without a tavern", function() time = 16000 / 24000 end)
 time = 6000 / 24000
 blocked("night", function() time = 22000 / 24000 end)
 time = 6000 / 24000
@@ -264,6 +264,98 @@ do
 	time, day = 10300 / 24000, 4
 	assert(run_until_talking({a, b}), "villagers talk in the social stage")
 	time, day = 6000 / 24000, 1
+end
+
+-- Market days (#281) run in the bell stage: idle villagers pair up there, while a seller at
+-- its stall, a seller mid-trade and a villager walking to a stall are engaged.
+do
+	clear()
+	local a, b = villager(0, 0), villager(2, 1)
+	time, day = 12000 / 24000, 4
+	assert(run_until_talking({a, b}), "idle villagers talk in the market (bell) stage")
+	time, day = 6000 / 24000, 1
+end
+local function market_blocked(label, change)
+	clear()
+	local a, b = villager(0, 0), villager(2, 0)
+	change(a)
+	time, day = 12000 / 24000, 4
+	assert(not run_until_talking({a, b}), label .. ": no conversation in the market stage")
+	time, day = 6000 / 24000, 1
+end
+market_blocked("seller at its stall", function(v) v._villages_market_session = {} end)
+market_blocked("seller mid-trade", function(v) v._trading_players = {p = true} end)
+market_blocked("walking to a stall", function(v) v._villages_goto_route = {status = "travelling", market_token = "x"} end)
+
+-- Tavern guests (tavern.lua) in the Tavern stage: those standing inside the tavern talk; those
+-- still on the way in, seated, eating, serving or keeping the tavern do not.
+local TAVERN = 16000 / 24000
+local function guest(v)
+	v.order = "stand"
+	v._villages_tavern_target, v._villages_tavern_arrived = {x = 0, y = 0, z = 0}, true
+	return v
+end
+do
+	clear()
+	local a, b = guest(villager(0, 0)), guest(villager(2, 0))
+	time = TAVERN
+	assert(run_until_talking({a, b}), "guests standing inside the tavern talk in the tavern stage")
+	time = 6000 / 24000
+end
+local function tavern_blocked(label, change)
+	clear()
+	local a, b = guest(villager(0, 0)), guest(villager(2, 0))
+	change(a)
+	time = TAVERN
+	assert(not run_until_talking({a, b}), label .. ": no conversation")
+	time = 6000 / 24000
+end
+tavern_blocked("on the way in", function(v) v._villages_tavern_arrived = nil end)
+tavern_blocked("walking to the tavern", function(v) v.state = "gowp" end)
+tavern_blocked("going to a chair", function(v) v._villages_seat = {} end)
+tavern_blocked("seated", function(v) v._villages_seat, v._villages_seated = {}, true end)
+tavern_blocked("eating", function(v) v._villages_meal = {} end)
+tavern_blocked("waiting to be served", function(v) v._villages_seated_at = 1 end)
+tavern_blocked("keeper", function(v) v._villages_keeper = true end)
+tavern_blocked("keeper seeking its jukebox", function(v) v._villages_keeper_target = {} end)
+-- A guest that takes a chair mid-talk ends it and keeps the order the tavern set.
+do
+	clear()
+	local a, b = guest(villager(0, 0)), guest(villager(2, 0))
+	time = TAVERN
+	assert(run_until_talking({a, b}))
+	tick(a); tick(b)
+	a._villages_seat = {}
+	tick(a)
+	assert(not a._villages_talk and a.order == "stand", "a guest that takes a chair leaves, with its order as it was")
+	tick(b)
+	assert(not b._villages_talk, "its partner is left alone, so it ends")
+	time = 6000 / 24000
+end
+
+-- The church service stays out of it; the social stage after it does not.
+do
+	clear()
+	local a, b = villager(0, 0), villager(2, 0)
+	time, day = 8000 / 24000, 4
+	assert(not run_until_talking({a, b}), "villagers in the church service do not talk")
+	time, day = 6000 / 24000, 1
+end
+
+-- The roll is CHANCE (0.2): a roll under it starts a talk, one over it does not.
+do
+	assert(conversation.CHANCE == 0.2, "the chance is 0.2")
+	local real_random = math.random
+	local function started_with(roll)
+		clear()
+		local a, b = villager(0, 0), villager(2, 0)
+		math.random = function(m, n) if m then return real_random(m, n) end return roll end
+		local talking_now = run_until_talking({a, b})
+		math.random = real_random
+		return talking_now
+	end
+	assert(started_with(0.15), "a roll under 0.2 starts a talk")
+	assert(not started_with(0.25), "a roll over 0.2 does not")
 end
 
 -- Another system takes a member: it leaves at once, and a pair ends.

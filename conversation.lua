@@ -1,6 +1,6 @@
 -- Villagers converse (#242): two or three idle adults standing within a few nodes
 -- of each other, as they do at the well (#11) and about the bell (#127), in
--- the putter, social (#327) and bell stages, now and then stop and face one another for
+-- the putter, social (#327), bell and tavern stages, now and then stop and face one another for
 -- 8-25 s, then go on. Atmosphere only: they talk where they stand and walk to
 -- nowhere, there is no animation for it (the model has stand, walk and sleep),
 -- and nothing is saved or placed.
@@ -8,8 +8,10 @@
 -- A villager that is standing, free of every other system's errand, rolls
 -- CHANCE every few seconds; on a win it looks for idle neighbours within
 -- RADIUS who can see it (line of sight) and, with one or two, starts a group
--- (at most MAX_GROUP). Tavern guests are never free (tavern.lua owns them for
--- the whole stage), so there is no tavern chatter. A member
+-- (at most MAX_GROUP). A tavern guest is free only standing inside once arrived,
+-- in the Tavern stage (tavern.lua owns it: seated, eating and serving guests are not
+-- free). Market sellers at their stalls or trading are not free (their session and
+-- trade fields are in BUSY). A member
 -- holds like the church's (church.lua): order "stand" every tick (vanilla
 -- clears it every few seconds), no do_states (which would turn it at random and
 -- start it walking), and its yaw toward the others' mean position. The moment
@@ -21,9 +23,10 @@ local core = minetest
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 local common = dofile(core.get_modpath("living_villages") .. "/common.lua")
 
-local STAGES = {putter = true, social = true, bell = true}
+-- Market days (#281) run inside the bell stage, so there is no market stage here.
+local STAGES = {putter = true, social = true, bell = true, tavern = true}
 local SCAN_MIN, SCAN_MAX = 4, 8
-local CHANCE = 0.1
+local CHANCE = 0.2
 local RADIUS = 5
 local MAX_DY = 1.5
 local EYE = 1.5
@@ -40,8 +43,9 @@ local FIELDS = {"_villages_talk", "_villages_talk_next", "_villages_talk_scan"}
 -- hold that is not a route or a field below (e.g. a shepherd's herd, #243) must be added.
 -- (_villages_door_entry is not one: navigation.lua leaves it set after a walk that ended at a door, and it
 -- blocked every roll of such a villager for good, #242. A walk in progress is state "gowp" anyway.)
+-- _villages_tavern_target is not one: a guest standing inside the tavern in its stage may talk (idle).
 local BUSY = {
-	"_villages_church", "_villages_seat", "_villages_seated_at", "_villages_meal", "_villages_tavern_target",
+	"_villages_church", "_villages_seat", "_villages_seated_at", "_villages_meal",
 	"_villages_fish_session", "_villages_fish_target", "_villages_farm_target", "_villages_keeper_target",
 	"_villages_follow", "_villages_keeper", "_villages_sleeping", "_villages_market_session",
 }
@@ -103,7 +107,16 @@ local function idle(self)
 		return false, "walking"
 	end
 	if trading(self) then return false, "trading" end
-	if not STAGES[common.schedule_stage(nil, self)] then return false, "stage" end
+	local stage = common.schedule_stage(nil, self)
+	if not STAGES[stage] then return false, "stage" end
+	-- A tavern guest (tavern.lua) is free only inside, in the Tavern stage, once arrived: not on
+	-- its way in, and not in the tavern stage without a tavern. Seated, eating and serving guests
+	-- are excluded by the fields below.
+	if self._villages_tavern_target then
+		if stage ~= "tavern" or not self._villages_tavern_arrived then return false, "tavern" end
+	elseif stage == "tavern" then
+		return false, "tavern"
+	end
 	if not ORDERS[self.order or ""] then return false, "order:" .. tostring(self.order) end
 	for _, field in ipairs(BUSY) do
 		if self[field] then return false, field end
