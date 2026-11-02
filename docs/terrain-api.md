@@ -109,9 +109,11 @@ operation does not run the hole-filling stage.
 `terrain.boundary_structure_protection == 1` advertises support for
 `options.structure_boxes`, a dense array of inclusive world-space `{min, max}`
 building boxes, and `options.is_protected(pos)`, a node-protection predicate.
-When supplied together, boundary smoothing skips tree cleanup and treats tree
-and leaf columns as obstacles, since an unrecorded log structure cannot be
-distinguished safely from a tree. Grading protects whole columns if any node in
+When supplied together, boundary smoothing still clears trees, but protects the
+rectangles, every column under a box (at all heights) and every column where
+`options.is_protected` is true at some height in the boundary volume (#334), so
+building logs are never removed. Tree
+and leaf nodes that remain are treated as obstacles. Grading protects whole columns if any node in
 the write volume is protected. Known building columns do not cause an extra
 structure buffer, while other structures retain their buffer. Callers that
 require these protections must check the capability before invoking the writer

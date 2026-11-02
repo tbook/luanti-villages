@@ -74,8 +74,11 @@ local function setup()
 end
 
 local edge = setup()
-local cleanup_called = false
-edge.env.clear_trees = function() cleanup_called = true; return {removed = 0} end
+local cleanup_called, edge_protected = false, nil
+edge.env.clear_trees = function(_, protected)
+	cleanup_called, edge_protected = true, protected
+	return {removed = 0}
+end
 edge.env.scan = function(_, ignore_at, conservative)
 	assert(conservative, "safe contract scans trees as ambiguous structures")
 	return {find = function(x0, z0, x1, z1)
@@ -86,7 +89,10 @@ end
 local edge_ok = boundary.smooth(town, 0, {env = edge.env,
 	structure_boxes = {{min={x=9,y=8,z=2}, max={x=9,y=13,z=2}}},
 	is_protected = function(p) return p.x == 11 and p.y == 30 and p.z == 2 end})
-assert(edge_ok and not cleanup_called, "safe contract does not remove ambiguous trees or logs")
+assert(edge_ok and cleanup_called, "structure boxes do not skip tree clearing (#334)")
+assert(type(edge_protected) == "function" and edge_protected(2, 2) and edge_protected(9, 2)
+	and edge_protected(-1, 2) == false and edge_protected(11, 2) and not edge_protected(20, 9),
+	"clearing protects the rectangles, the structure box footprint and options.is_protected columns")
 assert(edge.engine.get_node({x=10,y=8,z=2}).name ~= "mcl_core:dirt_with_grass",
 	"town building beside edge does not block exterior grading")
 assert(edge.engine.get_node({x=11,y=8,z=2}).name == "mcl_core:dirt_with_grass",
@@ -206,5 +212,116 @@ assert(noop_ok and noop_stats.changed == 0 and #noop.cleanup == 0 and #noop.writ
 local capped = setup()
 local capped_ok, capped_stats = boundary.smooth(town, 0, {cap = 3, env = capped.env})
 assert(capped_ok and capped_stats.max_movement <= 3, "explicit movement cap is honored")
+
+-- With structure boxes the real fragments.clear_trees runs (no injected stub, #334). A
+-- building's logs are trunks like any tree, so they must survive, while trees outside
+-- the boxes go. The VoxelManip here is a sparse stand-in for the engine's.
+VoxelArea = {new = function(_, e)
+	local a = {MinEdge = e.MinEdge, MaxEdge = e.MaxEdge}
+	local dx, dy = e.MaxEdge.x - e.MinEdge.x + 1, e.MaxEdge.y - e.MinEdge.y + 1
+	function a:index(x, y, z)
+		return (z - e.MinEdge.z) * dx * dy + (y - e.MinEdge.y) * dx + (x - e.MinEdge.x) + 1
+	end
+	return a
+end}
+local AIR, TREE, LEAVES, STONE, IGNORE = 0, 1, 2, 3, 4
+local content = {[0] = "air", "mcl_core:tree", "mcl_core:leaves", "mcl_core:stone", "ignore"}
+local function voxel_manip(nodes)
+	local vm, area = {}, nil
+	function vm:read_from_map(a, b) area = {a, b}; return a, b end
+	function vm:get_data()
+		local a, b = area[1], area[2]
+		local va, data = VoxelArea:new({MinEdge = a, MaxEdge = b}), {}
+		for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
+			data[va:index(x, y, z)] = nodes[key(x, y, z)] or AIR
+		end end end
+		return data
+	end
+	function vm:set_data(data)
+		local a, b = area[1], area[2]
+		local va = VoxelArea:new({MinEdge = a, MaxEdge = b})
+		for z = a.z, b.z do for y = a.y, b.y do for x = a.x, b.x do
+			local id = data[va:index(x, y, z)]
+			nodes[key(x, y, z)] = id ~= AIR and id or nil
+		end end end
+	end
+	function vm:write_to_map() end
+	return vm
+end
+-- A 6-high trunk on stone with a 5x5 canopy at y 6..7.
+local function sapling(nodes, x, z)
+	nodes[key(x, 0, z)] = STONE
+	for y = 1, 6 do nodes[key(x, y, z)] = TREE end
+	for dx = -2, 2 do for dz = -2, 2 do for y = 6, 7 do
+		if not nodes[key(x + dx, y, z + dz)] then nodes[key(x + dx, y, z + dz)] = LEAVES end
+	end end end
+end
+local function canopy_count(nodes)
+	local n = 0
+	for _, id in pairs(nodes) do if id == TREE or id == LEAVES then n = n + 1 end end
+	return n
+end
+local function real_clear(nodes)
+	local s = setup()
+	local engine = s.engine
+	engine.CONTENT_IGNORE = IGNORE
+	engine.get_name_from_content_id = function(id) return content[id] end
+	engine.registered_nodes["mcl_core:stone"] = {is_ground_content = true}
+	engine.registered_nodes["mcl_core:tree"] = {is_ground_content = false, groups = {tree = 1}}
+	engine.registered_nodes["mcl_core:leaves"] = {groups = {leaves = 1}}
+	engine.get_voxel_manip = function() return voxel_manip(nodes) end
+	s.env.clear_trees = nil
+	s.env.scan = function() return {find = function() end} end
+	return s
+end
+
+-- One town rectangle {0..2} x {0..2} and radius 6: the zone is x -6..8, z -6..8, y +-48.
+-- Ground is stone at y = 0. Each ID below is a trunk on stone with a canopy at y 6..7.
+--   A: outside the boxes and the zone's middle; must be cleared.
+--   D: its trunk column is protected only by options.is_protected; the trunk must stay,
+--      its other leaves must go.
+--   B: its canopy touches the building column; must be cleared.
+--   building: a column of logs at x = 9, z = 0 (the structure box); must stay.
+--   C: beyond the zone (x >= 10), reachable only by a fill that runs into the building;
+--      must stay, which is what the protected building column buys.
+local real_nodes = {}
+local town_small = {rect(0, 0, 2, 2)}
+sapling(real_nodes, -3, 0)  -- A
+sapling(real_nodes, -3, 5)  -- D
+sapling(real_nodes, 6, 0)   -- B
+sapling(real_nodes, 12, 0)  -- C
+local building_x = 9
+for y = 1, 6 do real_nodes[key(building_x, y, 0)] = TREE end
+real_nodes[key(building_x, 0, 0)] = STONE
+local canopy_before = canopy_count(real_nodes)
+
+local real = real_clear(real_nodes)
+local real_ok, real_stats = boundary.smooth(town_small, 0, {env = real.env, radius = 6,
+	structure_boxes = {{min = {x = building_x, y = 1, z = 0}, max = {x = building_x, y = 6, z = 0}}},
+	is_protected = function(p) return p.x == -3 and p.y == 3 and p.z == 5 end})
+assert(real_ok, "boundary smooth with boxes and the real clear: " .. tostring(real_stats))
+local function any_canopy(x0, x1, z0, z1)
+	for x = x0, x1 do for z = z0, z1 do for y = 1, 7 do
+		local id = real_nodes[key(x, y, z)]
+		if id == TREE or id == LEAVES then return key(x, y, z) end
+	end end end
+	return nil
+end
+assert(any_canopy(-5, -1, -2, 2) == nil, "tree A outside the boxes is cleared, left at " .. tostring(any_canopy(-5, -1, -2, 2)))
+assert(any_canopy(4, 8, -2, 2) == nil, "tree B touching the box is cleared")
+for y = 1, 6 do
+	assert(real_nodes[key(-3, y, 5)] == TREE, "protected trunk of tree D stays at y=" .. y)
+	assert(real_nodes[key(building_x, y, 0)] == TREE, "building log inside the box stays at y=" .. y)
+	assert(real_nodes[key(12, y, 0)] == TREE, "tree C beyond the building stays at y=" .. y)
+end
+assert(real_nodes[key(-5, 6, 5)] == nil and real_nodes[key(-1, 6, 3)] == nil,
+	"the rest of tree D's canopy goes")
+assert(real_nodes[key(10, 6, 0)] == LEAVES, "tree C's canopy beside the building stays")
+assert(real_nodes[key(building_x, 0, 0)] == STONE, "ground under the building stays")
+local canopy_after = canopy_count(real_nodes)
+assert(real_stats.tree_removed == canopy_before - canopy_after and real_stats.tree_removed > 0,
+	"tree_removed reports the real count: " .. tostring(real_stats.tree_removed) .. " vs " .. (canopy_before - canopy_after))
+assert(real_stats.written and real_stats.written.minp.x <= -3 and real_stats.written.maxp.x >= -1,
+	"the tree clearing's writes are in the boundary's envelope")
 
 print("village_boundary_writer: ok")

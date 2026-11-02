@@ -476,4 +476,15 @@ stats = fragments.clear_trees({box(-1, 0, -1, 1, 10, 1)}, tight, engine())
 assert(at(4, 5, 0) == nil and at(5, 5, 0) == nil, "vines with param2 6 and 7 go")
 param2 = {}
 
+-- `protected` may be a predicate (x, z) instead of a rectangle list (#334): the trunk column
+-- it is true for keeps its nodes, and the rest of the tree in the zone goes.
+map = {}
+tree(0, 0)
+tree(30, 0)
+local leaves_before = count("mcl_core:leaves")
+stats = fragments.clear_trees({box(-1, 0, -1, 1, 6, 1)}, nil, engine(), function(x, z) return x == 0 and z == 0 end)
+for y = 1, 5 do assert(at(0, y, 0) == "mcl_core:tree", "predicate-protected trunk stays at y=" .. y) end
+assert(at(30, 3, 0) == "mcl_core:tree" and count("mcl_core:tree") == 5 + 5, "the far tree stands")
+assert(count("mcl_core:leaves") < leaves_before and stats.removed > 0, "the canopy outside the column goes")
+
 print("village_fragments: ok")

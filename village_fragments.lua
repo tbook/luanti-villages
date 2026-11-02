@@ -147,6 +147,9 @@ end
 -- snow layers removed. A layer above the VoxelManip region (the top of the zone plus
 -- the cap height) is not seen. The stats also carry `floating`, `orphans` and `cocoa`
 -- (see the follow-up pass below).
+-- `protected` is either a list of rectangles {x0, z0, x1, z1, margin} or a function (x, z)
+-- that is true for a column. No node in a protected column is removed or written, by any
+-- pass, and a fill does not run into one.
 -- Known limit: like trees, stalks and their vines are removed near ruined portals and
 -- outposts too, where the smoothing leaves the ground alone; clear_trees does not know
 -- the structures.
@@ -314,6 +317,7 @@ function M.clear_trees(zone, config, engine, protected)
 		return false
 	end
 	local function is_protected(x, z)
+		if type(protected) == "function" then return protected(x, z) end
 		for _, rect in ipairs(protected or {}) do
 			local margin = rect.margin or 0
 			if x >= rect.x0 - margin and x <= rect.x1 + margin
