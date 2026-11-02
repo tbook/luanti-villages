@@ -192,15 +192,18 @@ function M.smooth(rectangles, ground_y, options, env)
 	local protected = rectangles
 	if boxes then
 		local protected_columns = {}
+		-- The whole answer is cached per column: the seed loop asks for every node.
 		protected = function(x, z)
-			if within(rectangles, x, z) or in_structure(x, z) then return true end
 			local row = protected_columns[z] or {}
 			protected_columns[z] = row
 			if row[x] == nil then
-				row[x] = false
-				for y = volume.minp.y, volume.maxp.y do
-					if options.is_protected({x = x, y = y, z = z}) then row[x] = true break end
+				local hit = within(rectangles, x, z) or in_structure(x, z)
+				if not hit then
+					for y = volume.minp.y, volume.maxp.y do
+						if options.is_protected({x = x, y = y, z = z}) then hit = true break end
+					end
 				end
+				row[x] = hit
 			end
 			return row[x]
 		end
