@@ -295,7 +295,7 @@ M.spread = spread -- for the tests
 --    changed, that still differ by more than 1, walls = those pairs that differ
 --    by `config.wall` or more with a footprint or yard column on at least one
 --    side (each pair once), wall_max = the tallest (#220)}
-function M.targets(pads, height_at, config, protected)
+function M.targets(pads, height_at, config, protected, preference)
 	config = config or M.config
 	local radius, reach = config.radius, config.radius + config.margin
 	local bx0, bz0, bx1, bz1
@@ -374,6 +374,23 @@ function M.targets(pads, height_at, config, protected)
 	local hard = {}
 	for i, k in pairs(kind) do hard[i] = k ~= "skirt" end
 	limit_slope(goal, low, high, free, hard, width, bz1 - bz0 + 1)
+	if preference then
+		local initial = {}
+		for i, value in pairs(goal) do initial[i] = value end
+		local function graded_at(x, z)
+			if x < bx0 or x > bx1 or z < bz0 or z > bz1 then return false end
+			local i = index(x, z)
+			return free[i] and initial[i] ~= was[i]
+		end
+		for z = bz0, bz1 do for x = bx0, bx1 do
+			local i = index(x, z)
+			if free[i] then
+				local wanted = preference(x, z, goal[i], was[i], graded_at)
+				if wanted then goal[i] = wanted else free[i] = false end
+			end
+		end end
+		limit_slope(goal, low, high, free, hard, width, bz1 - bz0 + 1)
+	end
 
 	for z = bz0, bz1 do
 		for x = bx0, bx1 do
