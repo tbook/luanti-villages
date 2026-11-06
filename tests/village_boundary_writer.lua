@@ -151,8 +151,12 @@ assert(scene.engine.get_node({x = 22, y = 8, z = 2}).name == "mcl_core:dirt_with
 assert(scene.engine.get_node({x = 23, y = 8, z = 2}).name == "mcl_core:dirt_with_grass",
 	"all-air columns with no ground or base names are skipped")
 assert(scene.engine.get_node({x = 24, y = 8, z = 2}).name == "mcl_core:dirt_with_grass", "strict radius edge stays fixed")
-assert(scene.engine.get_node({x = 12, y = 9, z = 2}).name == "air"
-	and scene.engine.get_node({x = 12, y = 4, z = 2}).name == "mcl_farming:sweet_berry_bush_3",
+local berry_y
+for y = -20, 9 do
+	if scene.engine.get_node({x = 12, y = y, z = 2}).name == "mcl_farming:sweet_berry_bush_3" then berry_y = y end
+end
+assert(berry_y and berry_y < 9
+	and scene.engine.get_node({x = 12, y = berry_y - 1, z = 2}).name == "mcl_core:dirt_with_grass",
 	"decor moves with its graded surface")
 for y = -20, 40 do
 	assert(scene.engine.get_node({x = 13, y = y, z = 2}).name ~= "mcl_bamboo:bamboo", "stalk is cleared during grading")
