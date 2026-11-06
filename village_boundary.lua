@@ -69,7 +69,29 @@ function M.plan(rectangles, ground_y, options)
 	-- The city is a hard target constraint, not protected terrain: protected
 	-- columns bypass the footprint rule in targets. Keep the solver's other
 	-- behavior intact and enforce the separate no-write rule in the mask below.
-	local targets = smoothing.targets(pads, height_at, config)
+	local function preference(x, z, graded, original, graded_at)
+		local nearby = graded ~= original
+		if not nearby then
+			for dz = -3, 3 do for dx = -3, 3 do
+				if math.abs(dx) + math.abs(dz) <= 3 and graded_at(x + dx, z + dz) then nearby = true end
+			end end
+		end
+		if not nearby or original == ground_y then return nil end
+		local d = math.huge
+		for _, rect in ipairs(rectangles) do
+			local dx = math.max(rect.x0 - x, 0, x - rect.x1)
+			local dz = math.max(rect.z0 - z, 0, z - rect.z1)
+			d = math.min(d, math.sqrt(dx * dx + dz * dz))
+		end
+		-- One continuous field across the whole town, with a gentle fade at
+		-- either end of the existing transition. Quantize to whole nodes.
+		local field = (math.sin(x * 0.17 + z * 0.11) + 1) / 2
+		local fade = math.min(1, d / 3, (radius - d) / 3)
+		local amount = math.floor(3 * field * math.max(0, fade) + 0.5)
+		if graded < ground_y then return math.min(ground_y, graded + amount) end
+		return math.max(ground_y, graded - amount)
+	end
+	local targets = smoothing.targets(pads, height_at, config, nil, preference)
 	local result = {
 		targets = targets,
 		at = targets.at, was = targets.was, kind = targets.kind,
