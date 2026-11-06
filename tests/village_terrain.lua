@@ -20,7 +20,7 @@ local registered = {
 	["mcl_core:cactus"] = {walkable = true},
 	["mcl_bamboo:bamboo"] = {walkable = true, groups = {plant = 1}},
 	["mcl_bamboo:bamboo_plank"] = {walkable = true, groups = {wood = 1}},
-	["mcl_farming:sweet_berry_bush_3"] = {walkable = false, groups = {plant = 1}},
+	["mcl_farming:sweet_berry_bush_3"] = {walkable = false, liquidtype = "source", groups = {plant = 1, sweet_berry = 1}},
 	["mcl_flowers:peony"] = {walkable = false, groups = {plant = 1}}, ["mcl_flowers:peony_top"] = {walkable = false},
 	["mcl_core:deadbush"] = {walkable = false}, ["mcl_core:reeds"] = {walkable = true},
 }
@@ -54,6 +54,7 @@ local function node(x, y, z)
 	if x == 9 and y >= 11 and y <= 13 then return "mcl_core:cactus" end
 	if x == 11 and y >= 11 and y <= 14 then return "mcl_bamboo:bamboo" end
 	if x == 1 and y == 11 then return "mcl_flowers:tallgrass" end
+	if x == 0 and z == 1 and y == 11 then return "mcl_farming:sweet_berry_bush_3" end
 	if x == 2 and y == 11 then return "mcl_core:snow" end
 	if x == 5 then
 		if y == 10 then return "mcl_core:dirt_with_grass" end
@@ -137,6 +138,10 @@ assert(terrain.area({{name = "mystery", pos = vec(0, 0, 0), rotat = "0"}}, schem
 -- Heights over the fake map.
 local surface = {["mcl_core:dirt_with_grass"] = true, ["mcl_core:sand"] = true}
 local lookup = assert(terrain.heights({minp = vec(0, 0, 0), maxp = vec(11, 20, 1)}, surface))
+local berry = lookup(0, 1)
+assert(berry.y == 10 and berry.ground_y == 10 and not berry.ground_liquid and berry.surface_y == 10,
+	"berry bush is decor, not a liquid column")
+assert(terrain.is_decor("mcl_farming:sweet_berry_bush_3", engine), "berry bush moves with the ground")
 assert(reads == 1, "one VoxelManip pass")
 local flat = lookup(0, 0)
 assert(flat.y == 10 and flat.name == "mcl_core:dirt_with_grass" and not flat.liquid, "flat ground")

@@ -335,7 +335,7 @@ local fake = {
 		struct = {walkable = true, is_ground_content = false, groups = {}},
 		["mcl_core:tree"] = {walkable = true, groups = {tree = 1}}, ["mcl_core:cactus"] = {walkable = true},
 		["mcl_bamboo:bamboo"] = {walkable = true, groups = {plant = 1}},
-		["mcl_farming:sweet_berry_bush_3"] = {walkable = false, groups = {plant = 1}},
+		["mcl_farming:sweet_berry_bush_3"] = {walkable = false, liquidtype = "source", groups = {plant = 1, sweet_berry = 1}},
 		["mcl_core:dirt"] = {walkable = true},
 		["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
 		["mcl_core:leaves"] = {walkable = true, groups = {leaves = 1}},

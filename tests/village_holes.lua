@@ -400,7 +400,7 @@ assert(swaps - before == 1, "only the surface is written for a raise of one")
 -- A berry bush at the bottom of a filled hole is re-seated on the new surface (#214); a
 -- stalk (bamboo, cactus) standing in the hole is replaced by the fill and cleared above it
 -- (#224), never left under or over the new surface; a plant is not put on sand.
-fake.registered_nodes["mcl_farming:sweet_berry_bush_3"] = {walkable = false, drawtype = "plantlike", groups = {plant = 1}}
+fake.registered_nodes["mcl_farming:sweet_berry_bush_3"] = {walkable = false, drawtype = "plantlike", liquidtype = "source", groups = {plant = 1, sweet_berry = 1}}
 fake.registered_nodes["mcl_bamboo:bamboo"] = {walkable = true, drawtype = "normal", groups = {plant = 1}}
 fake.registered_nodes["mcl_core:cactus"] = {walkable = true, drawtype = "normal"}
 fake.registered_nodes["mcl_core:sand"] = {walkable = true, drawtype = "normal"}

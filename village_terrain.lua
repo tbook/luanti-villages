@@ -110,11 +110,17 @@ end
 -- Decorations stand on the ground and are not ground: plants, flowers, a layer of
 -- snow. Groups first, then a few name words for plants that lack them.
 local DECOR_WORDS = {"grass", "fern", "flower", "bush", "sapling", "mushroom"}
+-- VoxeLibre uses a liquid source to slow movement through sweet berry bushes.
+function M.is_liquid(def)
+	return def and (def.liquidtype or "none") ~= "none"
+		and not (def.groups and (def.groups.sweet_berry or 0) > 0) or false
+end
+
 function M.is_decor(name, engine)
 	engine = engine or core
 	if name == "air" or name == "ignore" then return false end
 	local def = engine.registered_nodes[name]
-	if not def or def.walkable or (def.liquidtype or "none") ~= "none" then return false end
+	if not def or def.walkable or M.is_liquid(def) then return false end
 	if name == "mcl_core:snow" then return true end
 	if M.is_growth(name, def) then return false end
 	if def.groups and (def.groups.plant or def.groups.flower or def.groups.flora) then return true end
@@ -218,7 +224,7 @@ function M.heights(area, surface_materials, engine, partial)
 		if not t then
 			local name = engine.get_name_from_content_id(id)
 			local def = engine.registered_nodes[name]
-			local liquid = def and (def.liquidtype or "none") ~= "none" or false
+			local liquid = M.is_liquid(def)
 			t = {
 				def = def,
 				name = name,
