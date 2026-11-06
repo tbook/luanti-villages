@@ -35,6 +35,7 @@ local registered = {
 	["mcl_core:dirt_with_grass"] = {walkable = true},
 	["mcl_core:leaves"] = {walkable = true},
 	["mcl_core:water_source"] = {walkable = false, liquidtype = "source"},
+	["mcl_farming:sweet_berry_bush_3"] = {walkable = false, liquidtype = "source", groups = {plant = 1, sweet_berry = 1}},
 }
 
 -- A world from a height function h(x, z) (nil: no ground) and water(x, z).
@@ -190,6 +191,16 @@ for _, entry in ipairs(planned) do
 end
 local _, _, wet_report = plan(wet, 6)
 assert(wet_report.rejects.water and wet_report.rejects.water > 0, "water rejections are counted")
+
+-- Bushes use liquid physics but do not make a site wet (#336).
+local berries = world(function() return 10 end)
+local berries_get_node = berries.get_node
+berries.get_node = function(pos)
+	if pos.y == 11 then return {name = "mcl_farming:sweet_berry_bush_3"} end
+	return berries_get_node(pos)
+end
+local berry_plan = assert(plan(berries))
+assert(berry_plan[1].pos.x == 0 and berry_plan[1].pos.z == 0, "belltower can be placed among berry bushes")
 
 -- A pond that find_surface walks past (it finds the bed's grass) is still water.
 local deep = world(function() return 10 end, pond)

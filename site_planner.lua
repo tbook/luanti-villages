@@ -164,7 +164,7 @@ function M.plan(maxp, minp, pr, env, config)
 			local name = env.get_node({x = x, y = y, z = z}).name
 			local def = env.registered_nodes[name]
 			if def then
-				if (def.liquidtype or "none") ~= "none" then return y, name, true end
+				if terrain.is_liquid(def) then return y, name, true end
 				if def.walkable and not name:find("leaves", 1, true) and not name:find("tree", 1, true) then
 					return y, name, false
 				end
@@ -193,7 +193,7 @@ function M.plan(maxp, minp, pr, env, config)
 				local name = env.get_node({x = x, y = fy, z = z}).name
 				local def = env.registered_nodes[name]
 				if name == "air" then return "air" end
-				if def and (def.walkable or (def.liquidtype or "none") ~= "none") then return "solid" end
+				if def and (def.walkable or terrain.is_liquid(def)) then return "solid" end
 			end, s.y - config.water_scan) then
 				s = {reason = "overhang"}
 			end
